@@ -46,13 +46,13 @@ export function HomePage() {
                 Discover innovative technology solutions designed to optimize workflows, enhance productivity, and drive business growth.
             </p>
             <div className="flex gap-4">
-                <Button size="lg" className="bg-gray-500 hover:bg-gray-400 hover:text-white" asChild>
+                <Button size="lg" className="hover:bg-gray-400 hover:text-white" asChild>
                 <Link to="/shop">Services</Link>
                 </Button>
                 <Button
                 size="lg"
                 variant="outline"
-                className="border-gray-400 text-gray-500 bg-transparent hover:bg-gray-400 hover:text-white"
+                className="border-gray-400 text-gray-500 dark:text-white bg-transparent hover:bg-gray-400 hover:text-white"
                 asChild
                 >
                 <Link to="/gallery">About Us</Link>
