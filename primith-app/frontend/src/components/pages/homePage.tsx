@@ -18,7 +18,7 @@ export function HomePage() {
                 </span>
                 </Link>
                 <div className="flex items-center gap-6">
-                <Link to="/signin" className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors font-bold">
+                <Link to="/login" className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors font-bold">
                     Sign In
                 </Link>
                 <Link to="/gallery" className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors font-bold">
