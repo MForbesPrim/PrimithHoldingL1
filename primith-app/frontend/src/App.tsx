@@ -8,7 +8,7 @@ import { ContactPage } from "@/components/pages/contactUsPage"
 
 function App() {
   return (
-    <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
+    <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
       {/* Main app container */}
       <div className="flex h-screen w-screen">
 
