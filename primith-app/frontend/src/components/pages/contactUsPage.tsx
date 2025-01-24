@@ -5,9 +5,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Sparkle } from "lucide-react"
 import { Link } from "react-router-dom"
 import { useNavigate } from "react-router-dom"
+import ReCAPTCHA from "react-google-recaptcha"
 
 export function ContactPage() {
     const navigate = useNavigate()
+    const [captchaValue, setCaptchaValue] = useState<string | null>(null)
     const [firstName, setFirstName] = useState("")
     const [lastName, setLastName] = useState("")
     const [email, setEmail] = useState("")
@@ -16,8 +18,16 @@ export function ContactPage() {
     const [message, setMessage] = useState("")
 
     function handleSubmit(e: React.FormEvent) {
-        e.preventDefault() // Prevent form reload
-        navigate("/") // Navigate to home immediately
+        e.preventDefault()
+        if (!captchaValue) {
+            alert("Please complete the CAPTCHA")
+            return
+        }
+        navigate("/")
+    }
+
+    function handleCaptchaChange(value: string | null) {
+        setCaptchaValue(value)
     }
 
     return (
@@ -81,10 +91,16 @@ export function ContactPage() {
             onChange={(e) => setMessage(e.target.value)}
             className="dark:text-gray-100 bg-transparent hover:bg-muted min-h-[100px]"
             />
-
-            <Button type="submit" className="mt-2">
+        <div className="w-full flex justify-center">
+            <ReCAPTCHA
+                sitekey={import.meta.env.VITE_RECAPTCHA_SITE_KEY}
+                onChange={handleCaptchaChange}
+                className="mt-4"
+            />
+        </div>
+        <Button type="submit" className="mt-2" disabled={!captchaValue}>
             Send Message
-            </Button>
+        </Button>
         </form>
         </div>
     )
