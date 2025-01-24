@@ -3,8 +3,12 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Sparkle } from "lucide-react"
 import { ModeToggle } from "@/components/mode-toggle"
+import { UserButton } from "@clerk/clerk-react"
+import { useUser } from "@clerk/clerk-react"
 
 export function HomePage() {
+  const { isSignedIn } = useUser()
+
   return (
     <div className="min-h-screen dark:bg-black text-white">
         {/* Header */}
@@ -18,12 +22,15 @@ export function HomePage() {
                 </span>
                 </Link>
                 <div className="flex items-center gap-6">
+                {!isSignedIn && (
                 <Link to="/login" className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors font-bold">
                     Sign In
                 </Link>
+                )}
                 <Link to="/contact" className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors font-bold">
-                    Contact Us
+                Contact Us
                 </Link>
+                {isSignedIn && <UserButton afterSignOutUrl="/" />}
                 <ModeToggle/>
                 </div>
             </nav>
