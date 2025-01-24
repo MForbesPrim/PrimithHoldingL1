@@ -101,6 +101,12 @@ export function ContactPage() {
         <Button type="submit" className="mt-2" disabled={!captchaValue}>
             Send Message
         </Button>
+        <div className="text-center text-sm text-gray-600 dark:text-gray-400">
+            By submitting this form, you agree to our{" "}
+            <Link to="/privacy-policy" className="underline hover:text-gray-800 dark:hover:text-gray-200">
+                Privacy Policy
+            </Link>
+        </div>
         </form>
         </div>
     )

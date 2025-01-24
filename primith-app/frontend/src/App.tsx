@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { HomePage } from "@/components/pages/homePage"
 import { LoginPage } from "@/components/pages/loginPage"
 import { ContactPage } from "@/components/pages/contactUsPage"
+import { PrivacyPage } from "@/components/pages/privacyNotice"
 
 function App() {
   return (
@@ -31,6 +32,13 @@ function App() {
                 path="/contact"
                 element={
                   <ContactPage
+                  />
+                }
+              />
+              <Route
+                path="/privacy-policy"
+                element={
+                  <PrivacyPage
                   />
                 }
               />
