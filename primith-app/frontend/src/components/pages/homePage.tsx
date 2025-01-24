@@ -21,7 +21,7 @@ export function HomePage() {
                 <Link to="/login" className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors font-bold">
                     Sign In
                 </Link>
-                <Link to="/gallery" className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors font-bold">
+                <Link to="/contact" className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors font-bold">
                     Contact Us
                 </Link>
                 <ModeToggle/>
@@ -47,7 +47,7 @@ export function HomePage() {
             </p>
             <div className="flex gap-4">
                 <Button size="lg" className="bg-gray-500 hover:bg-gray-400 hover:text-white" asChild>
-                <Link to="/shop">Plans</Link>
+                <Link to="/shop">Services</Link>
                 </Button>
                 <Button
                 size="lg"
@@ -55,7 +55,7 @@ export function HomePage() {
                 className="border-gray-400 text-gray-500 bg-transparent hover:bg-gray-400 hover:text-white"
                 asChild
                 >
-                <Link to="/gallery">Services</Link>
+                <Link to="/gallery">About Us</Link>
                 </Button>
             </div>
             </div>

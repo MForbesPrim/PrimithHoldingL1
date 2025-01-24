@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 
 import { HomePage } from "@/components/pages/homePage"
 import { LoginPage } from "@/components/pages/loginPage"
+import { ContactPage } from "@/components/pages/contactUsPage"
 
 function App() {
   return (
@@ -23,6 +24,13 @@ function App() {
                 path="/login"
                 element={
                   <LoginPage
+                  />
+                }
+              />
+              <Route
+                path="/contact"
+                element={
+                  <ContactPage
                   />
                 }
               />
