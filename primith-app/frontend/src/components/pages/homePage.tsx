@@ -35,7 +35,7 @@ export function HomePage() {
             <div className="absolute inset-0 bg-gradient-to-b from-gray-200/10 to-gray-500/10" />
             <div className="container mx-auto px-4 relative">
             <Badge className="mb-4 text-gray-500" variant="outline">
-                Enterprise Solutions
+                Innovation Solutions
             </Badge>
                 <h1 className="text-5xl md:text-7xl font-bold tracking-tighter mb-4 bg-gradient-to-r from-gray-400 to-gray-900 text-transparent bg-clip-text leading-tight pb-2">
                     Empowering Businesses
