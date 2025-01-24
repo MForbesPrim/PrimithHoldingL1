@@ -1,9 +1,0 @@
-{
-    "routes": [
-      {
-        "route": "/*",
-        "redirect": "https://primith.com",
-        "statusCode": 301
-      }
-    ]
-  }
