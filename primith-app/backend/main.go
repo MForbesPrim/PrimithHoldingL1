@@ -115,7 +115,7 @@ func main() {
 	})
 
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Welcome to the Test Project API")
+		fmt.Fprintf(w, "Welcome to the Primith API")
 	}).Methods("GET")
 
 	r.HandleFunc("/api/contact", handleContact).Methods("POST")
