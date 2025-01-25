@@ -68,7 +68,7 @@ export function AppSidebar() {
                     <span className="font-regular text-xs">Settings</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem>
-                    <span className="font-regular text-xs">Billing</span>
+                    <span className="font-regular text-xs">Account</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem>
                     <span className="font-regular text-xs">Sign out</span>
