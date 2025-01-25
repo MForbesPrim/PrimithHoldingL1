@@ -44,7 +44,17 @@ func loadConfig() (Config, error) {
 	return config, json.NewDecoder(file).Decode(&config)
 }
 
-func sendEmail(request ContactRequest, apiKey string) error {
+func sendEmail(request ContactRequest) error {
+	apiKey := os.Getenv("SENDGRID_API_KEY")
+	if apiKey == "" {
+		// Fallback to config.json for local development
+		config, err := loadConfig()
+		if err != nil {
+			return err
+		}
+		apiKey = config.SendGrid.APIKey
+	}
+
 	from := mail.NewEmail("Primith Contact Form", "michael.forbes@primith.com")
 	to := mail.NewEmail("Michael Forbes", "michael.forbes@primith.com")
 	subject := "New Contact Form Submission"
@@ -83,20 +93,13 @@ Message:
 func handleContact(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	config, err := loadConfig()
-	if err != nil {
-		log.Printf("Config loading error: %v", err)
-		json.NewEncoder(w).Encode(Response{Success: false, Message: "Server configuration error"})
-		return
-	}
-
 	var req ContactRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		json.NewEncoder(w).Encode(Response{Success: false, Message: "Invalid request format"})
 		return
 	}
 
-	if err := sendEmail(req, config.SendGrid.APIKey); err != nil {
+	if err := sendEmail(req); err != nil {
 		log.Printf("Email sending error: %v", err)
 		json.NewEncoder(w).Encode(Response{Success: false, Message: "Failed to send email"})
 		return
