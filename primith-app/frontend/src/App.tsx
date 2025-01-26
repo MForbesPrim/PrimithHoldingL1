@@ -6,7 +6,7 @@ import { HomePage } from "@/components/pages/homePage"
 import { LoginPage } from "@/components/pages/loginPage"
 import { ContactPage } from "@/components/pages/contactUsPage"
 import { PrivacyPage } from "@/components/pages/privacyNotice"
-
+import { AuthRedirect } from "@/redirect"
 import { PortalHomePage } from "@/components/pages/portal/portalHomePage"
 function App() {
   const domain = window.location.hostname;
@@ -34,6 +34,7 @@ function App() {
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/contact" element={<ContactPage />} />
                   <Route path="/privacy-policy" element={<PrivacyPage />} />
+                  <Route path="/auth-redirect" element={<AuthRedirect />} />
                 </>
               )}
             </Routes>

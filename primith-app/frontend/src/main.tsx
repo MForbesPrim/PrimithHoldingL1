@@ -6,19 +6,11 @@ import { SidebarProvider } from "@/components/ui/sidebar"
 import { BrowserRouter } from "react-router-dom"
 import { ClerkProvider } from "@clerk/clerk-react"
 
-const domain = window.location.hostname;
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
-const isProduction = domain === 'primith.com';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ClerkProvider publishableKey={clerkPubKey}
-      signInFallbackRedirectUrl={isProduction ? 'https://portal.primith.com' : 'http://portal.localhost:5173'}
-      allowedRedirectOrigins={[
-        isProduction ? 
-          'https://portal.primith.com' : 
-          'http://portal.localhost:5173'
-      ]}>
+    <ClerkProvider publishableKey={clerkPubKey} signInFallbackRedirectUrl="/auth-redirect">
       <SidebarProvider>
         <BrowserRouter>
           <App />
