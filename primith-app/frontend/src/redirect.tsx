@@ -6,13 +6,12 @@ export function AuthRedirect() {
         console.log('Current domain:', domain);
         const isProduction = domain === 'primith.com' || domain === 'www.primith.com';
         console.log('isProduction:', isProduction);
+        console.log('Attempting redirect to:', isProduction ? 'https://portal.primith.com' : 'http://portal.localhost:5173');
         
-        // Delay redirect to see logs
-        setTimeout(() => {
-          window.location.href = isProduction ? 
+        window.location.replace(isProduction ? 
             'https://portal.primith.com' : 
-            'http://portal.localhost:5173';
-        }, 1000);
-      }, []);
+            'http://portal.localhost:5173');
+    }, []);
+    
     return <div>Redirecting to portal...</div>;
- }
+}
