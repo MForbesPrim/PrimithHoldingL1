@@ -34,7 +34,7 @@ export function LoginPage() {
             });
 
             if (verifyResponse.ok) {
-                console.log('Session verified, redirecting...');
+                console.log('Session verified, now redirecting...');
                 
                 // If there's a redirect URL, use it, otherwise go to default portal URL
                 if (redirectUrl) {
