@@ -2,15 +2,26 @@ import { Sparkle } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
+function Spinner() {
+  return (
+    <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+  )
+}
+
 export function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
   const [searchParams] = useSearchParams()
   const redirectUrl = searchParams.get('redirect')
 
   const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+    e.preventDefault()
+    setIsLoading(true)
     
     try {
         const response = await fetch(`${import.meta.env.VITE_API_URL}/login`, {
@@ -20,46 +31,49 @@ export function LoginPage() {
             },
             credentials: 'include', // Ensures cookies are sent with the request
             body: JSON.stringify({ username, password }),
-        });
+        })
 
         if (response.ok) {
-            console.log('Login successful, verifying session...');
+            console.log('Login successful, verifying session...')
             
             // Wait a brief moment for cookie to be set
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 100))
             
             // Verify cookie exists before redirect
             const verifyResponse = await fetch(`${import.meta.env.VITE_API_URL}/protected`, {
                 credentials: 'include',
-            });
+            })
 
             if (verifyResponse.ok) {
-                console.log('Session verified, now redirecting...');
+                console.log('Session verified, now redirecting...')
                 
                 // If there's a redirect URL, use it, otherwise go to default portal URL
                 if (redirectUrl) {
-                    window.location.href = decodeURIComponent(redirectUrl);
+                    window.location.href = decodeURIComponent(redirectUrl)
                 } else {
                     const portalUrl = import.meta.env.MODE === 'development' 
                         ? 'http://portal.localhost:5173/dashboard'
-                        : 'https://portal.primith.com/dashboard';
-                    window.location.href = portalUrl;
+                        : 'https://portal.primith.com/dashboard'
+                    window.location.href = portalUrl
                 }
             } else {
-                const errorData = await verifyResponse.json();
-                console.error('Session verification failed:', errorData);
-                setError('Session verification failed');
+                const errorData = await verifyResponse.json()
+                console.error('Session verification failed:', errorData)
+                setError('Session verification failed')
+                setIsLoading(false)
             }
         } else {
-            const data = await response.json();
-            console.error('Login failed:', data);
-            setError(data.message || 'Login failed');
+            const data = await response.json()
+            console.error('Login failed:', data)
+            setError(data.message || 'Login failed')
+            setIsLoading(false)
         }
     } catch (err) {
-        console.error('Login error:', err);
-        setError('An error occurred during login');
+        console.error('Login error:', err)
+        setError('An error occurred during login')
+        setIsLoading(false)
     }
-};
+  }
 
   return (
     <div className="flex flex-col items-center h-screen mt-40">
@@ -85,8 +99,12 @@ export function LoginPage() {
           className="mb-4 p-2 border rounded"
           required
         />
-        <button type="submit" className="p-2 bg-blue-500 text-white rounded">
-          Login
+        <button 
+          type="submit" 
+          disabled={isLoading}
+          className="p-2 bg-blue-500 text-white rounded flex items-center justify-center disabled:bg-blue-300"
+        >
+          {isLoading ? <Spinner /> : 'Login'}
         </button>
       </form>
     </div>
