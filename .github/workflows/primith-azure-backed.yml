@@ -1,34 +1,39 @@
 name: Deploy Backend to Azure
 
 on:
- push:
-   branches:
-     - master
-   paths:
-     - 'primith-app/backend/**'
+  push:
+    branches:
+      - master
+    paths:
+      - 'primith-app/backend/**'
 
-jobs:
- build_and_deploy:
-   runs-on: ubuntu-latest
-   steps:
-   - uses: actions/checkout@v3
-   
-   - name: Set up Go
-     uses: actions/setup-go@v2
-     with:
-       go-version: '1.21'
-       
-   - name: Build
-     run: go build -o main
-     working-directory: ./primith-app/backend
-       
-   - name: Deploy to Azure
-     uses: azure/webapps-deploy@v2
-     env:
-       SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-     with:
-       app-name: 'primith-srv'
-       publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-       package: ./primith-app/backend
-       app-settings: |
-         SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}
+  jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: '1.21'
+        
+    - name: Build
+      run: go build -o main
+      working-directory: ./primith-app/backend
+        
+    - name: Deploy to Azure
+      uses: azure/webapps-deploy@v2
+      env:
+        SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+        CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+        ENVIRONMENT: ${{ vars.ENVIRONMENT }}
+      with:
+        app-name: 'primith-srv'
+        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        package: ./primith-app/backend
+        app-settings: |
+          SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}
+          CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
+          ENVIRONMENT=${{ vars.ENVIRONMENT }}
