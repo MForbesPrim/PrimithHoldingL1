@@ -29,17 +29,21 @@ export function LoginPage() {
             headers: {
                 'Content-Type': 'application/json',
             },
-            credentials: 'include', // Ensures cookies are sent with the request
+            credentials: 'include',
             body: JSON.stringify({ username, password }),
         })
 
         if (response.ok) {
-            console.log('Login successful, verifying session...')
+            console.log('Login successful')
             
-            // Wait a brief moment for cookie to be set
+            // In development mode, redirect immediately
+            if (import.meta.env.MODE === 'development') {
+                window.location.href = 'http://portal.localhost:5173/dashboard'
+                return
+            }
+            
+            // In production, verify the session first
             await new Promise(resolve => setTimeout(resolve, 100))
-            
-            // Verify cookie exists before redirect
             const verifyResponse = await fetch(`${import.meta.env.VITE_API_URL}/protected`, {
                 credentials: 'include',
             })
@@ -47,14 +51,10 @@ export function LoginPage() {
             if (verifyResponse.ok) {
                 console.log('Session verified, now redirecting...')
                 
-                // If there's a redirect URL, use it, otherwise go to default portal URL
                 if (redirectUrl) {
                     window.location.href = decodeURIComponent(redirectUrl)
                 } else {
-                    const portalUrl = import.meta.env.MODE === 'development' 
-                        ? 'http://portal.localhost:5173/dashboard'
-                        : 'https://portal.primith.com/dashboard'
-                    window.location.href = portalUrl
+                    window.location.href = 'https://portal.primith.com/dashboard'
                 }
             } else {
                 const errorData = await verifyResponse.json()
@@ -73,7 +73,7 @@ export function LoginPage() {
         setError('An error occurred during login')
         setIsLoading(false)
     }
-  }
+}
 
   return (
     <div className="flex flex-col items-center h-screen mt-40">
