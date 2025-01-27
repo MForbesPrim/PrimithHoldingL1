@@ -61,7 +61,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   if (!isAuthenticated) {
     const baseUrl = import.meta.env.MODE === 'development'
       ? 'http://localhost:5173'
-      : 'https://primith.com'
+      : 'https://portal.primith.com'
     
     if (isPortal) {
       // Preserve the attempted URL to redirect back after login
