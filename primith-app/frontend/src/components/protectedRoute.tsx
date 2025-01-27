@@ -8,6 +8,7 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
   const isPortal = window.location.hostname.startsWith('portal.')
+  const isProduction = import.meta.env.MODE === 'production'
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -25,19 +26,10 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
           signal: abortController.signal
         });
 
-        console.log('Auth response status:', response.status);
-        
         if (response.ok) {
           const data = await response.json();
-          console.log('Auth successful:', data);
-          if (data.authenticated) { // Explicitly check the 'authenticated' field
-            setIsAuthenticated(true);
-          } else {
-            console.log('Authentication flag not set');
-            setIsAuthenticated(false);
-          }
+          setIsAuthenticated(data.success);
         } else {
-          console.log('Auth failed with status:', response.status);
           setIsAuthenticated(false);
         }
       } catch (error) {
@@ -59,19 +51,22 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   }
 
   if (!isAuthenticated) {
-    const baseUrl = import.meta.env.MODE === 'development'
-      ? 'http://localhost:5173'
-      : 'https://portal.primith.com'
+    const portalBaseUrl = isProduction 
+      ? 'https://portal.primith.com'
+      : 'http://portal.localhost:5173'
+    
+    const currentUrl = window.location.href
+    const loginUrl = `${portalBaseUrl}/login`
+    const redirectParam = `?redirect=${encodeURIComponent(currentUrl)}`
     
     if (isPortal) {
-      // Preserve the attempted URL to redirect back after login
-      const redirectUrl = `${baseUrl}/login?redirect=${encodeURIComponent(window.location.href)}`
-      window.location.href = redirectUrl
+      window.location.href = loginUrl + redirectParam
       return null
     }
+    
     return <Navigate to={{
       pathname: "/login",
-      search: `?redirect=${encodeURIComponent(window.location.href)}`
+      search: redirectParam
     }} replace />
   }
 
