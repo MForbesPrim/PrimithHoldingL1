@@ -1,15 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/clerk/clerk-sdk-go/v2"
-	"github.com/google/uuid"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
 	"github.com/sendgrid/sendgrid-go"
@@ -27,6 +29,14 @@ type Session struct {
 // In-memory session store (replace with database in production)
 var sessions = map[string]Session{}
 
+type RefreshToken struct {
+	Token     string
+	UserID    string
+	ExpiresAt time.Time
+}
+
+var refreshTokens = make(map[string]RefreshToken)
+
 type ContactRequest struct {
 	FirstName    string `json:"firstName"`
 	LastName     string `json:"lastName"`
@@ -37,9 +47,21 @@ type ContactRequest struct {
 	CaptchaToken string `json:"captchaToken"`
 }
 
+type contextKey string
+
+const claimsKey contextKey = "userClaims"
+
 type Response struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+}
+
+// Keep AuthResponse with regular string
+type AuthResponse struct {
+	Success      bool   `json:"success"`
+	Message      string `json:"message"`
+	Token        string `json:"token,omitempty"`
+	RefreshToken string `json:"refreshToken,omitempty"`
 }
 
 type Config struct {
@@ -57,6 +79,17 @@ type Config struct {
 type User struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+// JWT related constants
+const JWT_EXPIRY = 24 * time.Hour
+
+var JWT_SECRET_KEY = os.Getenv("JWT_SECRET")
+
+// Claims represents the JWT claims
+type Claims struct {
+	Username string `json:"username"`
+	jwt.RegisteredClaims
 }
 
 // In-memory user store (replace with database in production)
@@ -187,6 +220,26 @@ func handleContact(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(Response{Success: true, Message: "Message sent successfully"})
 }
 
+func validateToken(tokenString string) (*Claims, error) {
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(JWT_SECRET_KEY), nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if !token.Valid {
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	return claims, nil
+}
+
 func login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	log.Println("Received /login request")
@@ -194,7 +247,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	var user User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(Response{
+		json.NewEncoder(w).Encode(AuthResponse{
 			Success: false,
 			Message: "Invalid request format",
 		})
@@ -205,7 +258,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	storedUser, exists := users[user.Username]
 	if !exists {
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(Response{
+		json.NewEncoder(w).Encode(AuthResponse{
 			Success: false,
 			Message: "Invalid username or password",
 		})
@@ -215,98 +268,73 @@ func login(w http.ResponseWriter, r *http.Request) {
 	// Compare the password
 	if err := bcrypt.CompareHashAndPassword([]byte(storedUser.Password), []byte(user.Password)); err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(Response{
+		json.NewEncoder(w).Encode(AuthResponse{
 			Success: false,
 			Message: "Invalid username or password",
 		})
 		return
 	}
 
-	// Generate session ID
-	sessionID := uuid.New().String()
-
-	// Create session
-	sessions[sessionID] = Session{
-		UserID:    user.Username,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+	// Generate access token
+	accessClaims := &Claims{
+		Username: user.Username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+		},
 	}
 
-	var domain string
-	if os.Getenv("ENVIRONMENT") == "production" {
-		domain = ".primith.com"
-	} else {
-		domain = ".localhost"
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	accessTokenString, err := accessToken.SignedString([]byte(JWT_SECRET_KEY))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(AuthResponse{
+			Success: false,
+			Message: "Failed to generate access token",
+		})
+		return
 	}
 
-	var sameSiteMode http.SameSite
-	if os.Getenv("ENVIRONMENT") == "production" {
-		sameSiteMode = http.SameSiteLaxMode
-	} else {
-		sameSiteMode = http.SameSiteNoneMode // Required for cross-domain in development
+	// Generate refresh token
+	refreshClaims := &Claims{
+		Username: user.Username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+		},
 	}
 
-	// Set session cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "sessionID",
-		Value:    sessionID,
-		Expires:  time.Now().Add(24 * time.Hour),
-		HttpOnly: true,
-		Secure:   true,
-		Path:     "/",
-		Domain:   domain,
-		SameSite: sameSiteMode,
-	})
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshTokenString, err := refreshToken.SignedString([]byte(JWT_SECRET_KEY))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(AuthResponse{
+			Success: false,
+			Message: "Failed to generate refresh token",
+		})
+		return
+	}
 
-	log.Printf("New session created: %s for user: %s", sessionID, user.Username)
+	log.Printf("Login successful for user: %s", user.Username)
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(Response{Success: true, Message: "Logged in successfully"})
+	json.NewEncoder(w).Encode(AuthResponse{
+		Success:      true,
+		Message:      "Logged in successfully",
+		Token:        accessTokenString,
+		RefreshToken: refreshTokenString,
+	})
 }
 
 func protected(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	log.Printf("Protected route accessed from: %s", r.RemoteAddr)
-	log.Printf("Request cookies: %v", r.Cookies())
 
-	cookie, err := r.Cookie("sessionID")
-	if err != nil {
-		log.Printf("Cookie error: %v", err)
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(Response{
-			Success: false,
-			Message: "Unauthorized - No session found",
-		})
-		return
-	}
+	claims := r.Context().Value(claimsKey).(*Claims)
 
-	// Validate session
-	session, exists := sessions[cookie.Value]
-	if !exists {
-		log.Printf("Invalid session ID: %s", cookie.Value)
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(Response{
-			Success: false,
-			Message: "Unauthorized - Invalid session",
-		})
-		return
-	}
-
-	// Check if session is expired
-	if time.Now().After(session.ExpiresAt) {
-		log.Printf("Expired session: %s", cookie.Value)
-		delete(sessions, cookie.Value)
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(Response{
-			Success: false,
-			Message: "Session expired",
-		})
-		return
-	}
-
-	log.Printf("Valid session found for user: %s", session.UserID)
 	json.NewEncoder(w).Encode(Response{
 		Success: true,
-		Message: fmt.Sprintf("Hello, %s! This is a protected route.", session.UserID),
+		Message: fmt.Sprintf("Hello, %s! This is a protected route.", claims.Username),
 	})
 }
 
@@ -340,71 +368,122 @@ func register(w http.ResponseWriter, r *http.Request) {
 }
 
 func logout(w http.ResponseWriter, r *http.Request) {
+	refreshToken := r.Header.Get("X-Refresh-Token")
+	if refreshToken != "" {
+		delete(refreshTokens, refreshToken)
+	}
+
+	json.NewEncoder(w).Encode(Response{
+		Success: true,
+		Message: "Logged out successfully",
+	})
+}
+
+func refreshAccessToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	cookie, err := r.Cookie("sessionID")
-	if err == nil {
-		// Delete session if it exists
-		delete(sessions, cookie.Value)
+	refreshTokenString := r.Header.Get("X-Refresh-Token")
+	if refreshTokenString == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(AuthResponse{
+			Success: false,
+			Message: "No refresh token provided",
+		})
+		return
 	}
 
-	var domain string
-	if os.Getenv("ENVIRONMENT") == "production" {
-		domain = ".primith.com"
-	} else {
-		domain = ".localhost"
+	claims, err := validateToken(refreshTokenString)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(AuthResponse{
+			Success: false,
+			Message: "Invalid refresh token",
+		})
+		return
 	}
 
-	var sameSiteMode http.SameSite
-	if os.Getenv("ENVIRONMENT") == "production" {
-		sameSiteMode = http.SameSiteLaxMode
-	} else {
-		sameSiteMode = http.SameSiteNoneMode // Required for cross-domain in development
+	// Generate new access token
+	accessClaims := &Claims{
+		Username: claims.Username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+		},
 	}
 
-	// Clear the cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "sessionID",
-		Value:    "",
-		Expires:  time.Unix(0, 0),
-		HttpOnly: true,
-		Secure:   true,
-		Path:     "/",
-		Domain:   domain,
-		SameSite: sameSiteMode,
+	// Generate new refresh token
+	refreshClaims := &Claims{
+		Username: claims.Username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	accessTokenString, err := accessToken.SignedString([]byte(JWT_SECRET_KEY))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(AuthResponse{
+			Success: false,
+			Message: "Failed to generate new access token",
+		})
+		return
+	}
+
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshTokenString, err = refreshToken.SignedString([]byte(JWT_SECRET_KEY))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(AuthResponse{
+			Success: false,
+			Message: "Failed to generate new refresh token",
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(AuthResponse{
+		Success:      true,
+		Message:      "Tokens refreshed successfully",
+		Token:        accessTokenString,
+		RefreshToken: refreshTokenString,
 	})
-
-	json.NewEncoder(w).Encode(Response{Success: true, Message: "Logged out successfully"})
 }
 
 func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		cookie, err := r.Cookie("sessionID")
+		// Get token from Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(Response{
+				Success: false,
+				Message: "No token provided",
+			})
+			return
+		}
+
+		// Remove "Bearer " prefix
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
+		// Validate token
+		claims, err := validateToken(tokenString)
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(Response{
 				Success: false,
-				Message: "Unauthorized - No session found",
+				Message: "Invalid token",
 			})
 			return
 		}
 
-		session, exists := sessions[cookie.Value]
-		if !exists || time.Now().After(session.ExpiresAt) {
-			if exists {
-				delete(sessions, cookie.Value)
-			}
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(Response{
-				Success: false,
-				Message: "Unauthorized - Invalid or expired session",
-			})
-			return
-		}
-
-		next(w, r)
+		// Add claims to request context
+		ctx := context.WithValue(r.Context(), claimsKey, claims)
+		next(w, r.WithContext(ctx))
 	}
 }
 
@@ -413,7 +492,7 @@ func main() {
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:5173", "http://portal.localhost:5173", "https://primith.com", "https://portal.primith.com"},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization", "X-Refresh-Token"},
 		AllowCredentials: true,
 	})
 
@@ -425,7 +504,7 @@ func main() {
 	r.HandleFunc("/register", register).Methods("POST")
 	r.HandleFunc("/login", login).Methods("POST")
 	r.HandleFunc("/logout", logout).Methods("POST")
-
+	r.HandleFunc("/refresh", refreshAccessToken).Methods("POST")
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
 

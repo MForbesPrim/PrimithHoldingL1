@@ -29,6 +29,7 @@ jobs:
         SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
         CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
         ENVIRONMENT: ${{ vars.ENVIRONMENT }}
+        JWT_SECRET: ${{ vars.JWT_SECRET }}
       with:
         app-name: 'primith-srv'
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
@@ -37,3 +38,4 @@ jobs:
           SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}
           CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
           ENVIRONMENT=${{ vars.ENVIRONMENT }}
+          JWT_SECRET: ${{ vars.JWT_SECRET }}

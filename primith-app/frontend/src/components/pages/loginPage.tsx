@@ -1,6 +1,7 @@
 import { Sparkle } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import AuthService from '@/services/auth'
 
 function Spinner() {
   return (
@@ -19,75 +20,47 @@ export function LoginPage() {
   const [searchParams] = useSearchParams()
   const redirectUrl = searchParams.get('redirect')
   const homeUrl = import.meta.env.MODE === 'development' 
-  ? 'http://localhost:5173'
-  : 'https://primith.com'
+    ? 'http://localhost:5173'
+    : 'https://primith.com'
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
     
     try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/login`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({ username, password }),
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username, password }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        AuthService.setTokens({
+          token: data.token,
+          refreshToken: data.refreshToken
         })
 
-        if (response.ok) {
-            console.log('Login successful')
-            
-            // In development mode, redirect immediately
-            // On localhost, use the portal subdomain
-            if (import.meta.env.MODE === 'development') {
-              // Wait briefly for cookie to be set in development
-              await new Promise(resolve => setTimeout(resolve, 100))
-              const verifyResponse = await fetch(`${import.meta.env.VITE_API_URL}/protected`, {
-                  credentials: 'include',
-              })
-
-              if (verifyResponse.ok) {
-                  window.location.href = 'http://portal.localhost:5173/dashboard'
-              } else {
-                  setError('Session verification failed')
-                  setIsLoading(false)
-              }
-              return
-          }
-            
-            // In production, verify the session first
-            await new Promise(resolve => setTimeout(resolve, 100))
-            const verifyResponse = await fetch(`${import.meta.env.VITE_API_URL}/protected`, {
-                credentials: 'include',
-            })
-
-            if (verifyResponse.ok) {
-                console.log('Session verified, now redirecting...')
-                
-                if (redirectUrl) {
-                    window.location.href = decodeURIComponent(redirectUrl)
-                } else {
-                    window.location.href = 'https://portal.primith.com/dashboard'
-                }
-            } else {
-                const errorData = await verifyResponse.json()
-                console.error('Session verification failed:', errorData)
-                setError('Session verification failed')
-                setIsLoading(false)
-            }
+        if (redirectUrl) {
+          window.location.href = decodeURIComponent(redirectUrl)
         } else {
-            const data = await response.json()
-            console.error('Login failed:', data)
-            setError(data.message || 'Login failed')
-            setIsLoading(false)
+          window.location.href = import.meta.env.MODE === 'development'
+            ? 'http://portal.localhost:5173/dashboard'
+            : 'https://portal.primith.com/dashboard'
         }
-    } catch (err) {
-        console.error('Login error:', err)
-        setError('An error occurred during login')
+      } else {
+        setError(data.message || 'Login failed')
         setIsLoading(false)
+      }
+    } catch (err) {
+      console.error('Login error:', err)
+      setError('An error occurred during login')
+      setIsLoading(false)
     }
-}
+  }
 
   return (
     <div className="flex flex-col items-center h-screen mt-40">

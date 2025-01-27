@@ -6,6 +6,10 @@ export function PortalHomePage() {
         credentials: 'include',
       })
       if (response.ok) {
+        // Clear tokens from localStorage
+        localStorage.removeItem('accessToken')
+        localStorage.removeItem('refreshToken')
+
         const loginUrl = import.meta.env.MODE === 'development'
           ? 'http://portal.localhost:5173/login'
           : 'https://portal.primith.com/login'
