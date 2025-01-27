@@ -18,7 +18,9 @@ export function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [searchParams] = useSearchParams()
   const redirectUrl = searchParams.get('redirect')
-
+  const homeUrl = import.meta.env.MODE === 'development' 
+  ? 'http://localhost:5173'
+  : 'https://primith.com'
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
@@ -89,7 +91,7 @@ export function LoginPage() {
 
   return (
     <div className="flex flex-col items-center h-screen mt-40">
-      <Link to="/" className="hover:text-gray-400 text-gray-700 dark:text-gray-200 transition-colors font-bold mb-10">
+      <Link to={homeUrl} className="hover:text-gray-400 text-gray-700 dark:text-gray-200 transition-colors font-bold mb-10">
         <Sparkle size={40} />
       </Link>
       <h1 className="text-4xl font-bold mb-4">Login</h1>
