@@ -8,6 +8,7 @@ export function HomePage() {
   // A simple boolean check to see if there's a token stored
   const isAuthenticated = Boolean(localStorage.getItem("token"))
   const loginPath = `${import.meta.env.VITE_PORTAL_URL}/login`
+  console.log('Login path:', loginPath) 
   // Example logout function: removes the token and redirects
   function handleLogout() {
     localStorage.removeItem("token")
