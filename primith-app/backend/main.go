@@ -188,10 +188,12 @@ func handleContact(w http.ResponseWriter, r *http.Request) {
 }
 
 func login(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	log.Println("Received /login request")
 
 	var user User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(Response{
 			Success: false,
 			Message: "Invalid request format",
@@ -202,6 +204,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	// Check if the user exists
 	storedUser, exists := users[user.Username]
 	if !exists {
+		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(Response{
 			Success: false,
 			Message: "Invalid username or password",
@@ -211,6 +214,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 
 	// Compare the password
 	if err := bcrypt.CompareHashAndPassword([]byte(storedUser.Password), []byte(user.Password)); err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(Response{
 			Success: false,
 			Message: "Invalid username or password",
@@ -241,32 +245,42 @@ func login(w http.ResponseWriter, r *http.Request) {
 		Value:    sessionID,
 		Expires:  time.Now().Add(24 * time.Hour),
 		HttpOnly: true,
-		Secure:   os.Getenv("ENVIRONMENT") == "production", // Set to true in production
+		Secure:   os.Getenv("ENVIRONMENT") == "production",
 		Path:     "/",
 		Domain:   domain,
 		SameSite: http.SameSiteLaxMode,
 	})
 
 	log.Printf("New session created: %s for user: %s", sessionID, user.Username)
-	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(Response{Success: true, Message: "Logged in successfully"})
 }
 
 func protected(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	log.Printf("Protected route accessed from: %s", r.RemoteAddr)
 	log.Printf("Request cookies: %v", r.Cookies())
 
 	cookie, err := r.Cookie("sessionID")
 	if err != nil {
 		log.Printf("Cookie error: %v", err)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(Response{
+			Success: false,
+			Message: "Unauthorized - No session found",
+		})
 		return
 	}
+
 	// Validate session
 	session, exists := sessions[cookie.Value]
 	if !exists {
 		log.Printf("Invalid session ID: %s", cookie.Value)
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(Response{
+			Success: false,
+			Message: "Unauthorized - Invalid session",
+		})
 		return
 	}
 
@@ -274,16 +288,18 @@ func protected(w http.ResponseWriter, r *http.Request) {
 	if time.Now().After(session.ExpiresAt) {
 		log.Printf("Expired session: %s", cookie.Value)
 		delete(sessions, cookie.Value)
-		http.Error(w, "Session expired", http.StatusUnauthorized)
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(Response{
+			Success: false,
+			Message: "Session expired",
+		})
 		return
 	}
 
 	log.Printf("Valid session found for user: %s", session.UserID)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"authenticated": true,
-		"user":          session.UserID,
-		"message":       fmt.Sprintf("Hello, %s! This is a protected route.", session.UserID),
+	json.NewEncoder(w).Encode(Response{
+		Success: true,
+		Message: fmt.Sprintf("Hello, %s! This is a protected route.", session.UserID),
 	})
 }
 
@@ -341,15 +357,28 @@ func logout(w http.ResponseWriter, r *http.Request) {
 
 func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
 		cookie, err := r.Cookie("sessionID")
 		if err != nil {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(Response{
+				Success: false,
+				Message: "Unauthorized - No session found",
+			})
 			return
 		}
 
 		session, exists := sessions[cookie.Value]
 		if !exists || time.Now().After(session.ExpiresAt) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			if exists {
+				delete(sessions, cookie.Value)
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(Response{
+				Success: false,
+				Message: "Unauthorized - Invalid or expired session",
+			})
 			return
 		}
 
