@@ -62,16 +62,6 @@ type User struct {
 // In-memory user store (replace with database in production)
 var users = map[string]User{}
 
-func loadConfig() (Config, error) {
-	var config Config
-	file, err := os.Open("config.json")
-	if err != nil {
-		return config, err
-	}
-	defer file.Close()
-	return config, json.NewDecoder(file).Decode(&config)
-}
-
 // Initialize the application
 func init() {
 	env := os.Getenv("ENVIRONMENT")
@@ -234,15 +224,22 @@ func login(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: time.Now().Add(24 * time.Hour),
 	}
 
+	var domain string
+	if os.Getenv("ENVIRONMENT") == "production" {
+		domain = ".primith.com"
+	} else {
+		domain = "localhost"
+	}
+
 	// Set session cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sessionID",
 		Value:    sessionID,
 		Expires:  time.Now().Add(24 * time.Hour),
 		HttpOnly: true,
-		Secure:   false, // Set to true in production
+		Secure:   os.Getenv("ENVIRONMENT") == "production", // Set to true in production
 		Path:     "/",
-		Domain:   ".primith.com", // Change to .yourdomain.com in production
+		Domain:   domain,
 		SameSite: http.SameSiteLaxMode,
 	})
 

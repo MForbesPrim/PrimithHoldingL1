@@ -10,49 +10,56 @@ export function LoginPage() {
   const redirectUrl = searchParams.get('redirect')
 
   const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include', // Ensures cookies are sent with the request
-        body: JSON.stringify({ username, password }),
-      })
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/login`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include', // Ensures cookies are sent with the request
+            body: JSON.stringify({ username, password }),
+        });
 
-      if (response.ok) {
-        // Wait a brief moment for cookie to be set
-        await new Promise(resolve => setTimeout(resolve, 100))
-        
-        // Verify cookie exists before redirect
-        const verifyResponse = await fetch(`${import.meta.env.VITE_API_URL}/protected`, {
-          credentials: 'include'
-        })
+        if (response.ok) {
+            console.log('Login successful, verifying session...');
+            
+            // Wait a brief moment for cookie to be set
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Verify cookie exists before redirect
+            const verifyResponse = await fetch(`${import.meta.env.VITE_API_URL}/protected`, {
+                credentials: 'include',
+            });
 
-        if (verifyResponse.ok) {
-          // If there's a redirect URL, use it, otherwise go to default portal URL
-          if (redirectUrl) {
-            window.location.href = decodeURIComponent(redirectUrl)
-          } else {
-            const portalUrl = import.meta.env.MODE === 'development' 
-              ? 'http://portal.localhost:5173/dashboard'
-              : 'https://portal.primith.com/dashboard'
-            window.location.href = portalUrl
-          }
+            if (verifyResponse.ok) {
+                console.log('Session verified, redirecting...');
+                
+                // If there's a redirect URL, use it, otherwise go to default portal URL
+                if (redirectUrl) {
+                    window.location.href = decodeURIComponent(redirectUrl);
+                } else {
+                    const portalUrl = import.meta.env.MODE === 'development' 
+                        ? 'http://portal.localhost:5173/dashboard'
+                        : 'https://portal.primith.com/dashboard';
+                    window.location.href = portalUrl;
+                }
+            } else {
+                const errorData = await verifyResponse.json();
+                console.error('Session verification failed:', errorData);
+                setError('Session verification failed');
+            }
         } else {
-          setError('Session verification failed')
+            const data = await response.json();
+            console.error('Login failed:', data);
+            setError(data.message || 'Login failed');
         }
-      } else {
-        const data = await response.json()
-        setError(data.message || 'Login failed')
-      }
     } catch (err) {
-      console.error('Login error:', err)
-      setError('An error occurred during login')
+        console.error('Login error:', err);
+        setError('An error occurred during login');
     }
-  }
+};
 
   return (
     <div className="flex flex-col items-center h-screen mt-40">
