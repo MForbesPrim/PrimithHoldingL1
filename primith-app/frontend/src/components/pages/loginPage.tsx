@@ -37,10 +37,22 @@ export function LoginPage() {
             console.log('Login successful')
             
             // In development mode, redirect immediately
+            // On localhost, use the portal subdomain
             if (import.meta.env.MODE === 'development') {
-                window.location.href = 'http://portal.localhost:5173/dashboard'
-                return
-            }
+              // Wait briefly for cookie to be set in development
+              await new Promise(resolve => setTimeout(resolve, 100))
+              const verifyResponse = await fetch(`${import.meta.env.VITE_API_URL}/protected`, {
+                  credentials: 'include',
+              })
+
+              if (verifyResponse.ok) {
+                  window.location.href = 'http://portal.localhost:5173/dashboard'
+              } else {
+                  setError('Session verification failed')
+                  setIsLoading(false)
+              }
+              return
+          }
             
             // In production, verify the session first
             await new Promise(resolve => setTimeout(resolve, 100))

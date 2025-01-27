@@ -236,7 +236,14 @@ func login(w http.ResponseWriter, r *http.Request) {
 	if os.Getenv("ENVIRONMENT") == "production" {
 		domain = ".primith.com"
 	} else {
-		domain = "localhost"
+		domain = ".localhost"
+	}
+
+	var sameSiteMode http.SameSite
+	if os.Getenv("ENVIRONMENT") == "production" {
+		sameSiteMode = http.SameSiteLaxMode
+	} else {
+		sameSiteMode = http.SameSiteNoneMode // Required for cross-domain in development
 	}
 
 	// Set session cookie
@@ -245,10 +252,10 @@ func login(w http.ResponseWriter, r *http.Request) {
 		Value:    sessionID,
 		Expires:  time.Now().Add(24 * time.Hour),
 		HttpOnly: true,
-		Secure:   os.Getenv("ENVIRONMENT") == "production",
+		Secure:   true,
 		Path:     "/",
 		Domain:   domain,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSiteMode,
 	})
 
 	log.Printf("New session created: %s for user: %s", sessionID, user.Username)
@@ -345,7 +352,14 @@ func logout(w http.ResponseWriter, r *http.Request) {
 	if os.Getenv("ENVIRONMENT") == "production" {
 		domain = ".primith.com"
 	} else {
-		domain = "localhost"
+		domain = ".localhost"
+	}
+
+	var sameSiteMode http.SameSite
+	if os.Getenv("ENVIRONMENT") == "production" {
+		sameSiteMode = http.SameSiteLaxMode
+	} else {
+		sameSiteMode = http.SameSiteNoneMode // Required for cross-domain in development
 	}
 
 	// Clear the cookie
@@ -354,10 +368,10 @@ func logout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
-		Secure:   os.Getenv("ENVIRONMENT") == "production",
+		Secure:   true,
 		Path:     "/",
 		Domain:   domain,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSiteMode,
 	})
 
 	json.NewEncoder(w).Encode(Response{Success: true, Message: "Logged out successfully"})

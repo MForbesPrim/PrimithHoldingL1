@@ -52,7 +52,14 @@ function App() {
                 ) : (
                   // Development: Portal routes are not protected
                   <>
-                    <Route path="/" element={<PortalHomePage />} />
+                    <Route
+                      path="/"
+                      element={
+                        <ProtectedRoute>
+                          <PortalHomePage />
+                        </ProtectedRoute>
+                      }
+                    />
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/auth-redirect" element={<AuthRedirect />} />
                     {/* Add other portal-specific routes here */}

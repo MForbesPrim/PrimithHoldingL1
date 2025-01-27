@@ -12,6 +12,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   useEffect(() => {
     const abortController = new AbortController();
+    let isActive = true;
 
     const checkAuth = async () => {
       console.log('Checking auth status...');
@@ -26,20 +27,32 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
           signal: abortController.signal
         });
 
+        if (!isActive) return;
+
         if (response.ok) {
           const data = await response.json();
           setIsAuthenticated(data.success);
         } else {
           setIsAuthenticated(false);
         }
-      } catch (error) {
+      } catch (error: unknown) {
+        if (!isActive) return;
+        
+        if (error instanceof Error && error.name === 'AbortError') {
+          return;
+        }
+        
         console.error('Error checking authentication:', error);
         setIsAuthenticated(false);
       }
     }
 
     checkAuth()
-    return () => abortController.abort()
+
+    return () => {
+      isActive = false;
+      abortController.abort();
+    }
   }, [])
 
   if (isAuthenticated === null) {
