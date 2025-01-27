@@ -192,25 +192,29 @@ func login(w http.ResponseWriter, r *http.Request) {
 
 	var user User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		log.Printf("Failed to decode JSON: %v", err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		json.NewEncoder(w).Encode(Response{
+			Success: false,
+			Message: "Invalid request format",
+		})
 		return
 	}
-
-	log.Printf("Login attempt for user: %s", user.Username)
 
 	// Check if the user exists
 	storedUser, exists := users[user.Username]
 	if !exists {
-		log.Printf("User does not exist: %s", user.Username)
-		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(Response{
+			Success: false,
+			Message: "Invalid username or password",
+		})
 		return
 	}
 
 	// Compare the password
 	if err := bcrypt.CompareHashAndPassword([]byte(storedUser.Password), []byte(user.Password)); err != nil {
-		log.Printf("Password mismatch for user: %s", user.Username)
-		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(Response{
+			Success: false,
+			Message: "Invalid username or password",
+		})
 		return
 	}
 
