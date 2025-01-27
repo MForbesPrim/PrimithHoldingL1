@@ -13,6 +13,7 @@ jobs:
   build_and_deploy_job:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
+    environment: production  
     name: Build and Deploy Job
     permissions:
        id-token: write
@@ -37,7 +38,7 @@ jobs:
           VITE_RECAPTCHA_SITE_KEY: ${{ secrets.VITE_RECAPTCHA_SITE_KEY }}
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
-          VITE_PORTAL_URL: ${{ secrets.VITE_PORTAL_URL }}
+          VITE_PORTAL_URL: ${{ vars.VITE_PORTAL_URL }}
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
         with:
@@ -50,7 +51,6 @@ jobs:
           api_location: "" # Api source code path - optional
           output_location: "build" # Built app content directory - optional
           github_id_token: ${{ steps.idtoken.outputs.result }}
-          app_build_command: "VITE_PORTAL_URL=${{ secrets.VITE_PORTAL_URL }} npm run build"
           ###### End of Repository/Build Configurations ######
 
   close_pull_request_job:
