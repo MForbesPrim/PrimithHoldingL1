@@ -137,7 +137,7 @@ func cleanupSessions() {
 func sendEmail(request ContactRequest) error {
 	apiKey := os.Getenv("SENDGRID_API_KEY")
 	if apiKey == "" {
-		config, err := loadConfig()
+		config, err := loadConfigIfDev()
 		if err != nil {
 			return err
 		}
