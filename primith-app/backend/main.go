@@ -74,14 +74,15 @@ func loadConfig() (Config, error) {
 
 // Initialize the application
 func init() {
-	config, err := loadConfigIfDev()
-	if err != nil {
-		log.Printf("Failed to load config for development mode: %v", err)
+	env := os.Getenv("ENVIRONMENT")
+	if env == "production" {
+		// Use environment variables for production
+		clerk.SetKey(os.Getenv("CLERK_SECRET_KEY"))
 	} else {
-		// Clerk Configuration
-		domain := config.Environment
-		if domain == "production" {
-			clerk.SetKey(config.Clerk.ProdKey)
+		// Load config for development
+		config, err := loadConfigIfDev()
+		if err != nil {
+			log.Printf("Failed to load config for development mode: %v", err)
 		} else {
 			clerk.SetKey(config.Clerk.DevKey)
 		}
@@ -105,7 +106,7 @@ func loadConfigIfDev() (Config, error) {
 	var config Config
 
 	env := os.Getenv("ENVIRONMENT")
-	if env == "" || env == "development" {
+	if env == "development" {
 		file, err := os.Open("config.json")
 		if err != nil {
 			return config, err
