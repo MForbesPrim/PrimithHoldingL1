@@ -74,17 +74,17 @@ func loadConfig() (Config, error) {
 
 // Initialize the application
 func init() {
-	config, err := loadConfig()
+	config, err := loadConfigIfDev()
 	if err != nil {
-		log.Fatal("Failed to load config:", err)
-	}
-
-	// Clerk Configuration
-	domain := config.Environment
-	if domain == "production" {
-		clerk.SetKey(config.Clerk.ProdKey)
+		log.Printf("Failed to load config for development mode: %v", err)
 	} else {
-		clerk.SetKey(config.Clerk.DevKey)
+		// Clerk Configuration
+		domain := config.Environment
+		if domain == "production" {
+			clerk.SetKey(config.Clerk.ProdKey)
+		} else {
+			clerk.SetKey(config.Clerk.DevKey)
+		}
 	}
 
 	// Add a hardcoded user for testing (remove in production)
@@ -98,6 +98,25 @@ func init() {
 	go cleanupSessions()
 
 	log.Println("Initialization complete")
+}
+
+// LoadConfigIfDev checks if we're in development mode before loading the config
+func loadConfigIfDev() (Config, error) {
+	var config Config
+
+	env := os.Getenv("ENVIRONMENT")
+	if env == "" || env == "development" {
+		file, err := os.Open("config.json")
+		if err != nil {
+			return config, err
+		}
+		defer file.Close()
+		err = json.NewDecoder(file).Decode(&config)
+		if err != nil {
+			return config, err
+		}
+	}
+	return config, nil
 }
 
 // Periodically cleanup expired sessions
@@ -222,7 +241,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		Secure:   false, // Set to true in production
 		Path:     "/",
-		Domain:   ".localhost", // Change to .yourdomain.com in production
+		Domain:   ".primith.com", // Change to .yourdomain.com in production
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -310,7 +329,7 @@ func logout(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		Secure:   false, // Set to true in production
 		Path:     "/",
-		Domain:   ".localhost", // Change to .yourdomain.com in production
+		Domain:   ".primith.com", // Change to .yourdomain.com in production
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -358,9 +377,12 @@ func main() {
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
 
 	handler := c.Handler(r)
-	port := ":8080"
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080" // Default to 8080 if not set
+	}
 	log.Printf("Server starting on port %s", port)
-	if err := http.ListenAndServe(port, handler); err != nil {
+	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatal(err)
 	}
 }
