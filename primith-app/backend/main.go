@@ -347,7 +347,7 @@ func main() {
 
 	// Public routes
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Welcome to the Primith API!")
+		fmt.Fprintf(w, "Welcome to the Primith API")
 	}).Methods("GET")
 	r.HandleFunc("/api/contact", handleContact).Methods("POST")
 	r.HandleFunc("/register", register).Methods("POST")
