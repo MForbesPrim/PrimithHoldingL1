@@ -34,12 +34,12 @@ export function HomePage() {
             <div className="flex items-center gap-6">
               {/* Show Sign In if not logged in */}
               {!isAuthenticated && (
-                <Link
-                  to={loginPath}
+                <button
+                  onClick={() => window.location.href = loginPath}
                   className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors font-bold"
                 >
                   Sign In
-                </Link>
+                </button>
               )}
 
               {/* Show Logout if logged in */}
