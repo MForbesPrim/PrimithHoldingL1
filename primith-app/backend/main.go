@@ -333,10 +333,19 @@ func register(w http.ResponseWriter, r *http.Request) {
 }
 
 func logout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
 	cookie, err := r.Cookie("sessionID")
 	if err == nil {
 		// Delete session if it exists
 		delete(sessions, cookie.Value)
+	}
+
+	var domain string
+	if os.Getenv("ENVIRONMENT") == "production" {
+		domain = ".primith.com"
+	} else {
+		domain = "localhost"
 	}
 
 	// Clear the cookie
@@ -345,13 +354,12 @@ func logout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
-		Secure:   false, // Set to true in production
+		Secure:   os.Getenv("ENVIRONMENT") == "production",
 		Path:     "/",
-		Domain:   ".primith.com", // Change to .yourdomain.com in production
+		Domain:   domain,
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(Response{Success: true, Message: "Logged out successfully"})
 }
 
