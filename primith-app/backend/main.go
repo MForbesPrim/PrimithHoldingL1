@@ -128,13 +128,27 @@ func init() {
 
 func initDB(config Config) error {
 	var err error
+	var connStr string
 
-	connStr := fmt.Sprintf("user=%s dbname=%s password=%s host=%s sslmode=%s",
-		config.Database.User,
-		config.Database.DBName,
-		config.Database.Password,
-		config.Database.Host,
-		config.Database.SSLMode)
+	if os.Getenv("ENVIRONMENT") == "production" {
+		// Use environment variables in production
+		connStr = fmt.Sprintf("user=%s dbname=%s password=%s host=%s sslmode=%s",
+			os.Getenv("DB_USER"),
+			os.Getenv("DB_NAME"),
+			os.Getenv("DB_PASSWORD"),
+			os.Getenv("DB_HOST"),
+			os.Getenv("DB_SSLMODE"))
+	} else {
+		// Use config file in development
+		connStr = fmt.Sprintf("user=%s dbname=%s password=%s host=%s sslmode=%s",
+			config.Database.User,
+			config.Database.DBName,
+			config.Database.Password,
+			config.Database.Host,
+			config.Database.SSLMode)
+	}
+
+	log.Printf("Attempting to connect with connection string")
 
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
@@ -539,9 +553,14 @@ func main() {
 	})
 
 	// Initialize database connection
-	config, err := loadConfigIfDev()
-	if err != nil {
-		log.Fatal("Failed to load config:", err)
+	var config Config
+	var err error
+
+	if os.Getenv("ENVIRONMENT") != "production" {
+		config, err = loadConfigIfDev()
+		if err != nil {
+			log.Fatal("Failed to load config:", err)
+		}
 	}
 
 	if err := initDB(config); err != nil {
