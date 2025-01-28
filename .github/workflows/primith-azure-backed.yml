@@ -39,13 +39,3 @@ jobs:
         app-name: 'primith-srv'
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
         package: ./primith-app/backend
-        app-settings: |
-          SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}
-          CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
-          ENVIRONMENT=${{ vars.ENVIRONMENT }}
-          JWT_SECRET: ${{ vars.JWT_SECRET }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: ${{ vars.JWT_SECRET }}
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_SSLMODE: ${{ vars.JWT_SECRET }}
