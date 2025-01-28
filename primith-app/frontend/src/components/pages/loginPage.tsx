@@ -2,6 +2,23 @@ import { Sparkle } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import AuthService from '@/services/auth'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+
+interface User {
+  firstName: string
+  lastName: string
+  email: string
+}
+
+interface LoginResponse {
+  success: boolean
+  message: string
+  token?: string
+  refreshToken?: string
+  user?: User
+}
 
 function Spinner() {
   return (
@@ -36,14 +53,18 @@ export function LoginPage() {
         body: JSON.stringify({ username, password }),
       })
 
-      const data = await response.json()
+      const data: LoginResponse = await response.json()
 
-      if (response.ok && data.success) {
+      if (response.ok && data.success && data.token && data.refreshToken) {
         AuthService.setTokens({
           token: data.token,
           refreshToken: data.refreshToken
-        })
-
+        });
+        
+        if (data.user) {
+          AuthService.setUser(data.user);
+        }
+      
         if (redirectUrl) {
           window.location.href = decodeURIComponent(redirectUrl)
         } else {
@@ -63,37 +84,61 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex flex-col items-center h-screen mt-40">
-      <Link to={homeUrl} className="hover:text-gray-400 text-gray-700 dark:text-gray-200 transition-colors font-bold mb-10">
-        <Sparkle size={40} />
-      </Link>
-      <h1 className="text-4xl font-bold mb-4">Login</h1>
-      {error && <div className="text-red-500 mb-4">{error}</div>}
-      <form onSubmit={handleLogin} className="flex flex-col w-64">
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          className="mb-2 p-2 border rounded"
-          required
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="mb-4 p-2 border rounded"
-          required
-        />
-        <button 
-          type="submit" 
-          disabled={isLoading}
-          className="p-2 bg-blue-500 text-white rounded flex items-center justify-center disabled:bg-blue-300"
+    <div className="flex min-h-screen items-center mt-40 flex-col">
+      <div className="flex flex-col items-center space-y-6">
+        <Link 
+          to={homeUrl} 
+          className="hover:text-gray-400 text-gray-700 dark:text-gray-200 transition-colors"
         >
-          {isLoading ? <Spinner /> : 'Login'}
-        </button>
-      </form>
+          <Sparkle size={40} />
+        </Link>
+
+        <Card className="w-[350px]">
+          <CardHeader>
+            <CardTitle className="text-2xl text-center">Login</CardTitle>
+            <CardDescription className="text-center">
+              Enter your credentials to access your account
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleLogin} className="space-y-4">
+              {error && (
+                <div className="text-sm text-red-500 text-center">
+                  {error}
+                </div>
+              )}
+              <div className="space-y-2">
+                <Input
+                  type="text"
+                  placeholder="Email"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Input
+                  type="password"
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <Button 
+                type="submit" 
+                className="w-full" 
+                disabled={isLoading}
+              >
+                {isLoading ? <Spinner /> : 'Sign In'}
+              </Button>
+            </form>
+          </CardContent>
+          <CardFooter className="flex justify-center text-sm text-muted-foreground">
+            <p>Protected by Primith</p>
+          </CardFooter>
+        </Card>
+      </div>
     </div>
   )
 }

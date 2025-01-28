@@ -49,6 +49,20 @@ type ContactRequest struct {
 	CaptchaToken string `json:"captchaToken"`
 }
 
+type UserData struct {
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Email     string `json:"email"`
+}
+
+type LoginResponse struct {
+	Success      bool     `json:"success"`
+	Message      string   `json:"message"`
+	Token        string   `json:"token,omitempty"`
+	RefreshToken string   `json:"refreshToken,omitempty"`
+	User         UserData `json:"user,omitempty"`
+}
+
 type contextKey string
 
 const claimsKey contextKey = "userClaims"
@@ -281,7 +295,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	var user User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(AuthResponse{
+		json.NewEncoder(w).Encode(LoginResponse{
 			Success: false,
 			Message: "Invalid request format",
 		})
@@ -290,10 +304,13 @@ func login(w http.ResponseWriter, r *http.Request) {
 
 	// Query the database for the user
 	var storedHash string
-	err := db.QueryRow("SELECT password_hash FROM auth.users WHERE email = $1", user.Username).Scan(&storedHash)
+	var userData UserData
+	err := db.QueryRow("SELECT password_hash, first_name, last_name, email FROM auth.users WHERE email = $1",
+		user.Username).Scan(&storedHash, &userData.FirstName, &userData.LastName, &userData.Email)
+
 	if err == sql.ErrNoRows {
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(AuthResponse{
+		json.NewEncoder(w).Encode(LoginResponse{
 			Success: false,
 			Message: "Invalid email or password",
 		})
@@ -301,7 +318,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	} else if err != nil {
 		log.Printf("Database error: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(AuthResponse{
+		json.NewEncoder(w).Encode(LoginResponse{
 			Success: false,
 			Message: "Internal server error",
 		})
@@ -311,7 +328,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	// Compare the password
 	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(user.Password)); err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(AuthResponse{
+		json.NewEncoder(w).Encode(LoginResponse{
 			Success: false,
 			Message: "Invalid email or password",
 		})
@@ -332,7 +349,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	accessTokenString, err := accessToken.SignedString([]byte(JWT_SECRET_KEY))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(AuthResponse{
+		json.NewEncoder(w).Encode(LoginResponse{
 			Success: false,
 			Message: "Failed to generate access token",
 		})
@@ -353,7 +370,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	refreshTokenString, err := refreshToken.SignedString([]byte(JWT_SECRET_KEY))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(AuthResponse{
+		json.NewEncoder(w).Encode(LoginResponse{
 			Success: false,
 			Message: "Failed to generate refresh token",
 		})
@@ -362,11 +379,12 @@ func login(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Login successful for user: %s", user.Username)
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(AuthResponse{
+	json.NewEncoder(w).Encode(LoginResponse{
 		Success:      true,
 		Message:      "Logged in successfully",
 		Token:        accessTokenString,
 		RefreshToken: refreshTokenString,
+		User:         userData,
 	})
 }
 
