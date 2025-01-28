@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,6 +14,7 @@ import (
 	"github.com/clerk/clerk-sdk-go/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
+	_ "github.com/lib/pq"
 	"github.com/rs/cors"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
@@ -73,6 +75,13 @@ type Config struct {
 		DevKey  string `json:"CLERK_SECRET_KEY_DEV"`
 		ProdKey string `json:"CLERK_SECRET_KEY"`
 	} `json:"clerk"`
+	Database struct {
+		User     string `json:"DB_USER"`
+		Password string `json:"DB_PASSWORD"`
+		DBName   string `json:"DB_NAME"`
+		Host     string `json:"DB_HOST"`
+		SSLMode  string `json:"DB_SSLMODE"`
+	} `json:"database"`
 }
 
 // User represents a user in the system
@@ -93,7 +102,7 @@ type Claims struct {
 }
 
 // In-memory user store (replace with database in production)
-var users = map[string]User{}
+var db *sql.DB
 
 // Initialize the application
 func init() {
@@ -111,35 +120,46 @@ func init() {
 		}
 	}
 
-	// Add a hardcoded user for testing (remove in production)
-	users["john"] = User{
-		Username: "john",
-		// bcrypt hash of "secret123"
-		Password: "$2a$12$K2akvDXv0MqFmmHFyUqoVed/jA6IC5/TZFU0OJMFpSNRN80YR0tW.",
-	}
-
 	// Start session cleanup goroutine
 	go cleanupSessions()
 
 	log.Println("Initialization complete")
 }
 
+func initDB(config Config) error {
+	var err error
+
+	connStr := fmt.Sprintf("user=%s dbname=%s password=%s host=%s sslmode=%s",
+		config.Database.User,
+		config.Database.DBName,
+		config.Database.Password,
+		config.Database.Host,
+		config.Database.SSLMode)
+
+	db, err = sql.Open("postgres", connStr)
+	if err != nil {
+		return err
+	}
+	return db.Ping()
+}
+
 // LoadConfigIfDev checks if we're in development mode before loading the config
 func loadConfigIfDev() (Config, error) {
 	var config Config
 
-	env := os.Getenv("ENVIRONMENT")
-	if env == "development" {
-		file, err := os.Open("config.json")
-		if err != nil {
-			return config, err
-		}
-		defer file.Close()
-		err = json.NewDecoder(file).Decode(&config)
-		if err != nil {
-			return config, err
-		}
+	file, err := os.Open("config.json")
+	if err != nil {
+		log.Printf("Error opening config.json: %v", err)
+		return config, err
 	}
+	defer file.Close()
+
+	err = json.NewDecoder(file).Decode(&config)
+	if err != nil {
+		log.Printf("Error decoding config.json: %v", err)
+		return config, err
+	}
+
 	return config, nil
 }
 
@@ -254,23 +274,32 @@ func login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if the user exists
-	storedUser, exists := users[user.Username]
-	if !exists {
+	// Query the database for the user
+	var storedHash string
+	err := db.QueryRow("SELECT password_hash FROM auth.users WHERE email = $1", user.Username).Scan(&storedHash)
+	if err == sql.ErrNoRows {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(AuthResponse{
 			Success: false,
-			Message: "Invalid username or password",
+			Message: "Invalid email or password",
+		})
+		return
+	} else if err != nil {
+		log.Printf("Database error: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(AuthResponse{
+			Success: false,
+			Message: "Internal server error",
 		})
 		return
 	}
 
 	// Compare the password
-	if err := bcrypt.CompareHashAndPassword([]byte(storedUser.Password), []byte(user.Password)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(user.Password)); err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(AuthResponse{
 			Success: false,
-			Message: "Invalid username or password",
+			Message: "Invalid email or password",
 		})
 		return
 	}
@@ -347,8 +376,17 @@ func register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, exists := users[user.Username]; exists {
-		http.Error(w, "Username already exists", http.StatusConflict)
+	// Check if user already exists
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM auth.users WHERE email = $1)", user.Username).Scan(&exists)
+	if err != nil {
+		log.Printf("Database error: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if exists {
+		http.Error(w, "Email already exists", http.StatusConflict)
 		return
 	}
 
@@ -358,9 +396,13 @@ func register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	users[user.Username] = User{
-		Username: user.Username,
-		Password: string(hashedPassword),
+	// Insert new user
+	_, err = db.Exec("INSERT INTO auth.users (email, password_hash) VALUES ($1, $2)",
+		user.Username, string(hashedPassword))
+	if err != nil {
+		log.Printf("Database error: %v", err)
+		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
@@ -495,6 +537,17 @@ func main() {
 		AllowedHeaders:   []string{"Content-Type", "Authorization", "X-Refresh-Token"},
 		AllowCredentials: true,
 	})
+
+	// Initialize database connection
+	config, err := loadConfigIfDev()
+	if err != nil {
+		log.Fatal("Failed to load config:", err)
+	}
+
+	if err := initDB(config); err != nil {
+		log.Fatal("Failed to initialize database:", err)
+	}
+	defer db.Close()
 
 	// Public routes
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

@@ -13,6 +13,7 @@ require (
 
 require (
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
+	github.com/lib/pq v1.10.9
 	github.com/sendgrid/rest v2.6.9+incompatible // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
 	golang.org/x/net v0.34.0 // indirect
