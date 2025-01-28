@@ -1,11 +1,3 @@
-import {
-  NavigationMenu,
-  NavigationMenuContent,
-  NavigationMenuItem,
-  NavigationMenuLink,
-  NavigationMenuList,
-  NavigationMenuTrigger,
-} from "@/components/ui/navigation-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -18,9 +10,10 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent
 } from "@/components/ui/dropdown-menu"
-import { Sparkle, Grip, LogOut, Settings, User, FolderClosed, Contrast, Sun, Moon } from "lucide-react"
+import { Sparkle, Grip, LogOut, Settings, User, FolderClosed, Contrast, Sun, Moon, SquareArrowOutUpRight, Landmark, Handshake } from "lucide-react"
 import { Link } from "react-router-dom"
 import AuthService from '@/services/auth'
+import { NotificationBell } from "@/components/ui/notification-bell"
 
 export function PortalHomePage() {
   const user = AuthService.getUser()
@@ -70,9 +63,13 @@ export function PortalHomePage() {
             </div>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56">
-              <DropdownMenuLabel>Your Apps</DropdownMenuLabel>
+              <DropdownMenuLabel className="text-xs">Your Apps</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer text-xs"><FolderClosed className="w-5 h-5" /> ATR Reporting</DropdownMenuItem>
+              <DropdownMenuItem className="cursor-pointer text-xs"><FolderClosed className="w-5 h-5" /> Primith ATR</DropdownMenuItem>
+              <DropdownMenuLabel className="pt-4 text-xs">More Apps</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="cursor-pointer text-xs"><Landmark className="w-5 h-5" /> Primith Financing</DropdownMenuItem>
+              <DropdownMenuItem className="cursor-pointer text-xs"><Handshake className="w-5 h-5" /> Primith Consulting</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <Link
@@ -84,95 +81,106 @@ export function PortalHomePage() {
           </Link>
         </div>
 
-          <NavigationMenu>
-            <NavigationMenuList>
-              <NavigationMenuItem>
-                <NavigationMenuTrigger>Dashboard</NavigationMenuTrigger>
-                <NavigationMenuContent>
-                  <ul className="grid gap-3 p-4 w-[200px]">
-                    <li>
-                      <NavigationMenuLink asChild>
-                        <a href="#" className="text-sm block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
-                          Overview
-                        </a>
-                      </NavigationMenuLink>
-                    </li>
-                    <li>
-                      <NavigationMenuLink asChild>
-                        <a href="#" className="text-sm block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
-                          Analytics
-                        </a>
-                      </NavigationMenuLink>
-                    </li>
-                  </ul>
-                </NavigationMenuContent>
-              </NavigationMenuItem>
-
-              <NavigationMenuItem>
-                <NavigationMenuTrigger>Settings</NavigationMenuTrigger>
-                <NavigationMenuContent>
-                  <ul className="grid gap-3 p-4 w-[200px]">
-                    <li>
-                      <NavigationMenuLink asChild>
-                        <a href="#" className="text-sm block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
-                          Profile
-                        </a>
-                      </NavigationMenuLink>
-                    </li>
-                    <li>
-                      <NavigationMenuLink asChild>
-                        <a href="#" className="text-sm block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
-                          Preferences
-                        </a>
-                      </NavigationMenuLink>
-                    </li>
-                  </ul>
-                </NavigationMenuContent>
-              </NavigationMenuItem>
-            </NavigationMenuList>
-          </NavigationMenu>
-
           <div className="ml-auto flex items-center space-x-4">
+          <NotificationBell />
           <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Avatar className="relative h-8 w-8 text-sm rounded-full hover:ring-1 hover:ring-black focus:ring-0 active:ring-0 data-[state=open]:ring-0 cursor-pointer">
-              <AvatarImage 
-                src="/placeholder-avatar.jpg" 
-                alt={user ? `${user.firstName} ${user.lastName}` : 'User'} 
-              />
-              <AvatarFallback>
-                {user ? getInitials(user.firstName, user.lastName) : 'U'}
-              </AvatarFallback>
-            </Avatar>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel>
-              {user ? `${user.firstName} ${user.lastName}` : 'My Account'}
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="cursor-pointer text-xs"><User className="w-5 h-5" /> Account</DropdownMenuItem>
-            <DropdownMenuItem className="cursor-pointer text-xs"><Settings className="w-5 h-5" /> Settings</DropdownMenuItem>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className="cursor-pointer text-xs"><Contrast className="w-5 h-5" /> Theme</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                <DropdownMenuItem onClick={() => setTheme('light')} className="cursor-pointer text-xs"><Sun className="w-5 h-5" /> Light</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setTheme('dark')} className="cursor-pointer text-xs"><Moon className="w-5 h-5" /> Dark</DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-xs">
-              <LogOut className="w-5 h-5" />
-              Log out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Avatar className="relative h-8 w-8 text-sm rounded-full hover:ring-1 hover:ring-black focus:ring-0 active:ring-0 data-[state=open]:ring-0 cursor-pointer">
+                <AvatarImage 
+                  src="/placeholder-avatar.jpg" 
+                  alt={user ? `${user.firstName} ${user.lastName}` : 'User'} 
+                />
+                <AvatarFallback>
+                  {user ? getInitials(user.firstName, user.lastName) : 'U'}
+                </AvatarFallback>
+              </Avatar>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>
+                {user ? `${user.firstName} ${user.lastName}` : 'My Account'}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              
+              {/* Account Menu Item */}
+              <DropdownMenuItem className="cursor-pointer text-xs flex items-center">
+                <User className="w-5 h-5 mr-2" /> 
+                <span>Account</span>
+              </DropdownMenuItem>
+              
+              {/* Settings Submenu */}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className="cursor-pointer text-xs flex items-center">
+                  <Settings className="w-5 h-5 mr-2" /> 
+                  <span>Settings</span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  
+                  {/* Administration with Description */}
+                  <DropdownMenuItem className="cursor-pointer text-xs font-light flex justify-between items-start p-2">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-normal">Administration</span>
+                      <p className="text-[10px] text-gray-500 mt-0.5">Control user roles and permissions</p>
+                    </div>
+                    <SquareArrowOutUpRight className="w-4 h-4 mt-1 text-gray-500" />
+                  </DropdownMenuItem>
+                  
+                  {/* Licensing with Description */}
+                  <DropdownMenuItem className="cursor-pointer text-xs font-light flex justify-between items-start p-2">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-normal">Licensing</span>
+                      <p className="text-[10px] text-gray-500 mt-0.5">View and manage licenses</p>
+                    </div>
+                    <SquareArrowOutUpRight className="w-4 h-4 mt-1 text-gray-500" />
+                  </DropdownMenuItem>
+                  
+                  {/* Billing with Description */}
+                  <DropdownMenuItem className="cursor-pointer text-xs font-light flex justify-between items-start p-2">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-normal">Billing</span>
+                      <p className="text-[10px] text-gray-500 mt-0.5">Update your billing information</p>
+                    </div>
+                    <SquareArrowOutUpRight className="w-4 h-4 mt-1 text-gray-500" />
+                  </DropdownMenuItem>
+                  
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              
+              {/* Theme Submenu */}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className="cursor-pointer text-xs flex items-center">
+                  <Contrast className="w-5 h-5 mr-2" /> 
+                  <span>Theme</span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuItem onClick={() => setTheme('light')} className="cursor-pointer flex items-center p-2">
+                    <Sun className="w-5 h-5 mr-2" /> 
+                    <span className="text-xs font-normal">Light</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setTheme('dark')} className="cursor-pointer flex items-center p-2">
+                    <Moon className="w-5 h-5 mr-2" /> 
+                    <span className="text-xs font-normal">Dark</span>
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              
+              <DropdownMenuSeparator />
+              
+              {/* Log Out Menu Item */}
+              <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-xs flex items-center">
+                <LogOut className="w-5 h-5 mr-2" />
+                <span>Log out</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           </div>
         </div>
       </nav>
 
       <main className="container mx-auto px-4 py-8">
-        <h1 className="text-4xl font-bold mb-4">Welcome to the Portal</h1>
-        <p className="text-xl mb-8">You are successfully authenticated!</p>
+        <h1 className="text-3xl font-bold mb-4 text-[#172B4D] dark:text-gray-300">
+          Hello, {user ? `${user.firstName}` : 'User'}
+        </h1>
       </main>
     </div>
   )
