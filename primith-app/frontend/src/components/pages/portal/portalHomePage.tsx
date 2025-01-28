@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button"
 import {
   NavigationMenu,
   NavigationMenuContent,
@@ -16,7 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Sparkle, Grip } from "lucide-react"
+import { Sparkle, Grip, LogOut, Settings, Smile, FolderClosed } from "lucide-react"
 import { Link } from "react-router-dom"
 import AuthService from '@/services/auth'
 
@@ -56,14 +55,14 @@ export function PortalHomePage() {
         <div className="mr-8 flex items-center">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <Grip className="w-5 h-5" />
-              </Button>
+            <div className="rounded-sm p-2 hover:bg-accent hover:text-accent-foreground cursor-pointer">
+              <Grip className="w-4 h-4" />
+            </div>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56">
               <DropdownMenuLabel>Your Apps</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>ATR Reporting</DropdownMenuItem>
+              <DropdownMenuItem className="cursor-pointer"><FolderClosed className="w-5 h-5" /> ATR Reporting</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <Link
@@ -126,8 +125,7 @@ export function PortalHomePage() {
           <div className="ml-auto flex items-center space-x-4">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                <Avatar className="h-8 w-8">
+                  <Avatar className="relative h-8 w-8 text-sm rounded-full hover:ring-1 hover:ring-black focus:ring-0 active:ring-0 data-[state=open]:ring-0 cursor-pointer">
                   <AvatarImage 
                     src="/placeholder-avatar.jpg" 
                     alt={user ? `${user.firstName} ${user.lastName}` : 'User'} 
@@ -136,17 +134,17 @@ export function PortalHomePage() {
                     {user ? getInitials(user.firstName, user.lastName) : 'U'}
                   </AvatarFallback>
                 </Avatar>
-                </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel>
                   {user ? `${user.firstName} ${user.lastName}` : 'My Account'}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>Profile</DropdownMenuItem>
-                <DropdownMenuItem>Settings</DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer"><Smile className="w-5 h-5" /> Account</DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer"><Settings className="w-5 h-5" /> Settings</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                <DropdownMenuItem onClick={handleLogout} className="cursor-pointer">
+                  <LogOut className="w-5 h-5" />
                   Log out
                 </DropdownMenuItem>
               </DropdownMenuContent>
