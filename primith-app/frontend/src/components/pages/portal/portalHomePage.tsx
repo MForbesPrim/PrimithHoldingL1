@@ -14,8 +14,11 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent
 } from "@/components/ui/dropdown-menu"
-import { Sparkle, Grip, LogOut, Settings, Smile, FolderClosed } from "lucide-react"
+import { Sparkle, Grip, LogOut, Settings, User, FolderClosed, Contrast, Sun, Moon } from "lucide-react"
 import { Link } from "react-router-dom"
 import AuthService from '@/services/auth'
 
@@ -25,6 +28,13 @@ export function PortalHomePage() {
   const getInitials = (firstName: string, lastName: string) => {
     return `${firstName[0]}${lastName[0]}`
   }
+
+  const setTheme = (theme: string) => {
+    // Logic to set the theme (e.g., update localStorage or a state management system)
+    document.documentElement.classList.remove("light", "dark");
+    document.documentElement.classList.add(theme);
+    localStorage.setItem("theme", theme);
+  };
 
   const handleLogout = async () => {
     try {
@@ -62,7 +72,7 @@ export function PortalHomePage() {
             <DropdownMenuContent align="start" className="w-56">
               <DropdownMenuLabel>Your Apps</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer"><FolderClosed className="w-5 h-5" /> ATR Reporting</DropdownMenuItem>
+              <DropdownMenuItem className="cursor-pointer text-xs"><FolderClosed className="w-5 h-5" /> ATR Reporting</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <Link
@@ -82,14 +92,14 @@ export function PortalHomePage() {
                   <ul className="grid gap-3 p-4 w-[200px]">
                     <li>
                       <NavigationMenuLink asChild>
-                        <a href="#" className="block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
+                        <a href="#" className="text-sm block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
                           Overview
                         </a>
                       </NavigationMenuLink>
                     </li>
                     <li>
                       <NavigationMenuLink asChild>
-                        <a href="#" className="block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
+                        <a href="#" className="text-sm block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
                           Analytics
                         </a>
                       </NavigationMenuLink>
@@ -104,14 +114,14 @@ export function PortalHomePage() {
                   <ul className="grid gap-3 p-4 w-[200px]">
                     <li>
                       <NavigationMenuLink asChild>
-                        <a href="#" className="block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
+                        <a href="#" className="text-sm block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
                           Profile
                         </a>
                       </NavigationMenuLink>
                     </li>
                     <li>
                       <NavigationMenuLink asChild>
-                        <a href="#" className="block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
+                        <a href="#" className="text-sm block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
                           Preferences
                         </a>
                       </NavigationMenuLink>
@@ -123,32 +133,39 @@ export function PortalHomePage() {
           </NavigationMenu>
 
           <div className="ml-auto flex items-center space-x-4">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                  <Avatar className="relative h-8 w-8 text-sm rounded-full hover:ring-1 hover:ring-black focus:ring-0 active:ring-0 data-[state=open]:ring-0 cursor-pointer">
-                  <AvatarImage 
-                    src="/placeholder-avatar.jpg" 
-                    alt={user ? `${user.firstName} ${user.lastName}` : 'User'} 
-                  />
-                  <AvatarFallback>
-                    {user ? getInitials(user.firstName, user.lastName) : 'U'}
-                  </AvatarFallback>
-                </Avatar>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>
-                  {user ? `${user.firstName} ${user.lastName}` : 'My Account'}
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="cursor-pointer"><Smile className="w-5 h-5" /> Account</DropdownMenuItem>
-                <DropdownMenuItem className="cursor-pointer"><Settings className="w-5 h-5" /> Settings</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="cursor-pointer">
-                  <LogOut className="w-5 h-5" />
-                  Log out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Avatar className="relative h-8 w-8 text-sm rounded-full hover:ring-1 hover:ring-black focus:ring-0 active:ring-0 data-[state=open]:ring-0 cursor-pointer">
+              <AvatarImage 
+                src="/placeholder-avatar.jpg" 
+                alt={user ? `${user.firstName} ${user.lastName}` : 'User'} 
+              />
+              <AvatarFallback>
+                {user ? getInitials(user.firstName, user.lastName) : 'U'}
+              </AvatarFallback>
+            </Avatar>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>
+              {user ? `${user.firstName} ${user.lastName}` : 'My Account'}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="cursor-pointer text-xs"><User className="w-5 h-5" /> Account</DropdownMenuItem>
+            <DropdownMenuItem className="cursor-pointer text-xs"><Settings className="w-5 h-5" /> Settings</DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="cursor-pointer text-xs"><Contrast className="w-5 h-5" /> Theme</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuItem onClick={() => setTheme('light')} className="cursor-pointer text-xs"><Sun className="w-5 h-5" /> Light</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setTheme('dark')} className="cursor-pointer text-xs"><Moon className="w-5 h-5" /> Dark</DropdownMenuItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-xs">
+              <LogOut className="w-5 h-5" />
+              Log out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
           </div>
         </div>
       </nav>
