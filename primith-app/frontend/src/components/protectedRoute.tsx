@@ -129,7 +129,7 @@ export function PortalHomePage() {
       })
 
       if (response.ok) {
-        AuthService.clearTokens();
+        AuthService.clearAll();
         const loginUrl = import.meta.env.MODE === 'development'
           ? 'http://portal.localhost:5173/login'
           : 'https://portal.primith.com/login'
