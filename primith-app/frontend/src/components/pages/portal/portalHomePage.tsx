@@ -68,7 +68,7 @@ export function PortalHomePage() {
           </DropdownMenu>
           <Link
             to="/"
-            className="font-bold tracking-tighter flex items-center gap-2 text-gray-500 hover:text-gray-400 ml-1"
+            className="font-bold tracking-tighter flex items-center gap-2 text-gray-500 hover:text-gray-400 ml-3"
           >
             <Sparkle className="w-5 h-5" />
             <span className="bg-gradient-to-r from-gray-300 to-gray-700 text-transparent bg-clip-text text-md">Primith Portal</span>
