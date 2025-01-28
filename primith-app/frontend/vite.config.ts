@@ -4,10 +4,15 @@ import { defineConfig } from "vite"
  
 export default defineConfig({
   build: {
-    outDir: 'build',  // Change output directory to 'build'
-    assetsDir: 'assets',
+    outDir: 'build',
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+      },
+    },
   },
-  plugins: [react(),],
+  plugins: [react()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

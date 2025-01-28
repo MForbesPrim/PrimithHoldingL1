@@ -4,10 +4,16 @@
         "exclude": ["/images/*.{png,jpg,gif}", "/css/*", "/js/*", "/assets/*"]
     },
     "mimeTypes": {
-        ".js": "text/javascript",
-        ".mjs": "text/javascript",
+        ".js": "application/javascript",
+        ".mjs": "application/javascript",
+        ".jsx": "application/javascript",
+        ".ts": "application/javascript",
+        ".tsx": "application/javascript",
         ".css": "text/css",
-        ".json": "application/json"
+        ".json": "application/json",
+        ".ico": "image/x-icon",
+        ".svg": "image/svg+xml",
+        ".html": "text/html; charset=utf-8"
     },
     "globalHeaders": {
         "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://rsms.me; style-src-elem 'self' 'unsafe-inline' https://rsms.me; font-src 'self' data: https://rsms.me; img-src 'self' data: https:;"
