@@ -83,7 +83,7 @@ export function AdminLayout() {
             <div className="h-6 w-px bg-gray-200" />
             <div className="flex items-center gap-2">
                 <Shield className="w-6 h-6" />
-                <h1 className="text-2xl font-bold">Admin Portal</h1>
+                <h1 className="text-2xl font-bold text-[#172B4D] dark:text-gray-300">Admin Portal</h1>
             </div>
             </div>
 
