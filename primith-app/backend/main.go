@@ -579,8 +579,6 @@ func handleListUsers(w http.ResponseWriter, r *http.Request) {
 		users = append(users, userMap)
 	}
 
-	log.Printf("Retrieved %d users", len(users))
-
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"users": users,
 	})
