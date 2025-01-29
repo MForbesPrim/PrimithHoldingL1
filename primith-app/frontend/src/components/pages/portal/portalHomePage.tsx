@@ -14,6 +14,7 @@ import { Sparkle, Grip, LogOut, Settings, User, FolderClosed, Contrast, Sun, Moo
 import { Link } from "react-router-dom"
 import AuthService from '@/services/auth'
 import { NotificationBell } from "@/components/ui/notification-bell"
+import { AdminNav } from './adminNav'
 
 export function PortalHomePage() {
   const user = AuthService.getUser()
@@ -100,6 +101,8 @@ export function PortalHomePage() {
                 {user ? `${user.firstName} ${user.lastName}` : 'My Account'}
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+
+              <AdminNav />
               
               {/* Account Menu Item */}
               <DropdownMenuItem className="cursor-pointer text-xs flex items-center">

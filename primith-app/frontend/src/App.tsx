@@ -13,8 +13,12 @@ import { ProtectedPage } from "@/components/pages/protectedPage"
 import { PortalHomePage } from "@/components/pages/portal/portalHomePage"
 import { ProtectedRoute } from "@/components/protectedRoute"
 import { ProtectedLayout } from '@/protectedLayout';
+import { AdminLayout } from "@/components/pages/admin/adminLayout"
+import { UsersPage } from "@/components/pages/admin/usersPage"
+import { OrganizationsPage } from "@/components/pages/admin/organizationsPage"
+import { RolesPage } from "@/components/pages/admin/rolesPage"
+import { ServicesPage } from "@/components/pages/admin/servicesPage"
 
-// src/App.tsx
 function App() {
   const domain = window.location.hostname
   const isPortal = domain === 'portal.primith.com' || domain === 'portal.localhost'
@@ -31,14 +35,18 @@ function App() {
                   // Production: Portal routes are protected
                   <>
                     <Route element={<ProtectedLayout />}>
-                      <Route
-                        path="/"
-                        element={
-                          <ProtectedRoute>
-                            <PortalHomePage />
-                          </ProtectedRoute>
-                        }
-                      />
+                      <Route path="/" element={
+                        <ProtectedRoute>
+                          <PortalHomePage />
+                        </ProtectedRoute>
+                      } />
+                      {/* Admin routes */}
+                      <Route path="/admin" element={<AdminLayout />}>
+                        <Route path="users" element={<UsersPage />} />
+                        <Route path="organizations" element={<OrganizationsPage />} />
+                        <Route path="roles" element={<RolesPage />} />
+                        <Route path="services" element={<ServicesPage />} />
+                      </Route>
                     </Route>
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/auth-redirect" element={<AuthRedirect />} />
@@ -48,14 +56,18 @@ function App() {
                   // Development: Portal routes are protected
                   <>
                     <Route element={<ProtectedLayout />}>
-                      <Route
-                        path="/"
-                        element={
-                          <ProtectedRoute>
-                            <PortalHomePage />
-                          </ProtectedRoute>
-                        }
-                      />
+                      <Route path="/" element={
+                        <ProtectedRoute>
+                          <PortalHomePage />
+                        </ProtectedRoute>
+                      } />
+                      {/* Admin routes */}
+                      <Route path="/admin" element={<AdminLayout />}>
+                        <Route path="users" element={<UsersPage />} />
+                        <Route path="organizations" element={<OrganizationsPage />} />
+                        <Route path="roles" element={<RolesPage />} />
+                        <Route path="services" element={<ServicesPage />} />
+                      </Route>
                     </Route>
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/auth-redirect" element={<AuthRedirect />} />
@@ -63,7 +75,7 @@ function App() {
                   </>
                 )
               ) : (
-                // Main site routes
+                // Main site routes remain unchanged
                 <>
                   <Route path="/" element={<HomePage />} />
                   <Route path="/login" element={<LoginPage />} />
@@ -72,14 +84,11 @@ function App() {
                   <Route path="/auth-redirect" element={<AuthRedirect />} />
                   <Route path="/protected" element={<ProtectedPage />} />
                   <Route element={<ProtectedLayout />}>
-                    <Route
-                      path="/portal"
-                      element={
-                        <ProtectedRoute>
-                          <PortalHomePage />
-                        </ProtectedRoute>
-                      }
-                    />
+                    <Route path="/portal" element={
+                      <ProtectedRoute>
+                        <PortalHomePage />
+                      </ProtectedRoute>
+                    } />
                   </Route>
                   <Route path="*" element={<Navigate to="/" />} />
                 </>

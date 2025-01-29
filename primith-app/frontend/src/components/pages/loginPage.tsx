@@ -63,6 +63,8 @@ export function LoginPage() {
         
         if (data.user) {
           AuthService.setUser(data.user);
+          // Add admin status check after setting user data
+          await AuthService.isSuperAdmin();
         }
       
         if (redirectUrl) {
