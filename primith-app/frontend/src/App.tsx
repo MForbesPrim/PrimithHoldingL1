@@ -1,7 +1,5 @@
-// src/App.tsx
-
 import "./App.css"
-import { Routes, Route, Navigate } from "react-router-dom"
+import { Routes, Route } from "react-router-dom"
 import { ThemeProvider } from "@/components/theme-provider"
 
 import { HomePage } from "@/components/pages/homePage"
@@ -18,87 +16,83 @@ import { UsersPage } from "@/components/pages/admin/usersPage"
 import { OrganizationsPage } from "@/components/pages/admin/organizationsPage"
 import { RolesPage } from "@/components/pages/admin/rolesPage"
 import { ServicesPage } from "@/components/pages/admin/servicesPage"
+import { NotFoundPage } from "@/components/pages/notFoundPage" 
 
 function App() {
-  const domain = window.location.hostname
-  const isPortal = domain === 'portal.primith.com' || domain === 'portal.localhost'
-  const isProduction = import.meta.env.PROD
+ const domain = window.location.hostname
+ const isPortal = domain === 'portal.primith.com' || domain === 'portal.localhost'
+ const isProduction = import.meta.env.PROD
 
-  return (
-    <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
-      <div className="flex h-screen w-screen">
-        <div className="flex flex-1 flex-col">
-          <main className="flex-1">
-            <Routes>
-              {isPortal ? (
-                isProduction ? (
-                  // Production: Portal routes are protected
-                  <>
-                    <Route element={<ProtectedLayout />}>
-                      <Route path="/" element={
-                        <ProtectedRoute>
-                          <PortalHomePage />
-                        </ProtectedRoute>
-                      } />
-                      {/* Admin routes */}
-                      <Route path="/admin" element={<AdminLayout />}>
-                        <Route path="users" element={<UsersPage />} />
-                        <Route path="organizations" element={<OrganizationsPage />} />
-                        <Route path="roles" element={<RolesPage />} />
-                        <Route path="services" element={<ServicesPage />} />
-                      </Route>
-                    </Route>
-                    <Route path="/login" element={<LoginPage />} />
-                    <Route path="/auth-redirect" element={<AuthRedirect />} />
-                    <Route path="*" element={<Navigate to="/" />} />
-                  </>
-                ) : (
-                  // Development: Portal routes are protected
-                  <>
-                    <Route element={<ProtectedLayout />}>
-                      <Route path="/" element={
-                        <ProtectedRoute>
-                          <PortalHomePage />
-                        </ProtectedRoute>
-                      } />
-                      {/* Admin routes */}
-                      <Route path="/admin" element={<AdminLayout />}>
-                        <Route path="users" element={<UsersPage />} />
-                        <Route path="organizations" element={<OrganizationsPage />} />
-                        <Route path="roles" element={<RolesPage />} />
-                        <Route path="services" element={<ServicesPage />} />
-                      </Route>
-                    </Route>
-                    <Route path="/login" element={<LoginPage />} />
-                    <Route path="/auth-redirect" element={<AuthRedirect />} />
-                    <Route path="*" element={<Navigate to="/" />} />
-                  </>
-                )
-              ) : (
-                // Main site routes remain unchanged
-                <>
-                  <Route path="/" element={<HomePage />} />
-                  <Route path="/login" element={<LoginPage />} />
-                  <Route path="/contact" element={<ContactPage />} />
-                  <Route path="/privacy-policy" element={<PrivacyPage />} />
-                  <Route path="/auth-redirect" element={<AuthRedirect />} />
-                  <Route path="/protected" element={<ProtectedPage />} />
-                  <Route element={<ProtectedLayout />}>
-                    <Route path="/portal" element={
-                      <ProtectedRoute>
-                        <PortalHomePage />
-                      </ProtectedRoute>
-                    } />
-                  </Route>
-                  <Route path="*" element={<Navigate to="/" />} />
-                </>
-              )}
-            </Routes>
-          </main>
-        </div>
-      </div>
-    </ThemeProvider>
-  )
+ return (
+   <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
+     <div className="flex h-screen w-screen">
+       <div className="flex flex-1 flex-col">
+         <main className="flex-1">
+           <Routes>
+             {isPortal ? (
+               isProduction ? (
+                 <>
+                   <Route element={<ProtectedLayout />}>
+                     <Route path="/" element={
+                       <ProtectedRoute>
+                         <PortalHomePage />
+                       </ProtectedRoute>
+                     } />
+                     <Route path="/admin" element={<AdminLayout />}>
+                       <Route path="users" element={<UsersPage />} />
+                       <Route path="organizations" element={<OrganizationsPage />} />
+                       <Route path="roles" element={<RolesPage />} />
+                       <Route path="services" element={<ServicesPage />} />
+                     </Route>
+                   </Route>
+                   <Route path="/login" element={<LoginPage />} />
+                   <Route path="/auth-redirect" element={<AuthRedirect />} />
+                   <Route path="*" element={<NotFoundPage />} />
+                 </>
+               ) : (
+                 <>
+                   <Route element={<ProtectedLayout />}>
+                     <Route path="/" element={
+                       <ProtectedRoute>
+                         <PortalHomePage />
+                       </ProtectedRoute>
+                     } />
+                     <Route path="/admin" element={<AdminLayout />}>
+                       <Route path="users" element={<UsersPage />} />
+                       <Route path="organizations" element={<OrganizationsPage />} />
+                       <Route path="roles" element={<RolesPage />} />
+                       <Route path="services" element={<ServicesPage />} />
+                     </Route>
+                   </Route>
+                   <Route path="/login" element={<LoginPage />} />
+                   <Route path="/auth-redirect" element={<AuthRedirect />} />
+                   <Route path="*" element={<NotFoundPage />} />
+                 </>
+               )
+             ) : (
+               <>
+                 <Route path="/" element={<HomePage />} />
+                 <Route path="/login" element={<LoginPage />} />
+                 <Route path="/contact" element={<ContactPage />} />
+                 <Route path="/privacy-policy" element={<PrivacyPage />} />
+                 <Route path="/auth-redirect" element={<AuthRedirect />} />
+                 <Route path="/protected" element={<ProtectedPage />} />
+                 <Route element={<ProtectedLayout />}>
+                   <Route path="/portal" element={
+                     <ProtectedRoute>
+                       <PortalHomePage />
+                     </ProtectedRoute>
+                   } />
+                 </Route>
+                 <Route path="*" element={<NotFoundPage />} />
+               </>
+             )}
+           </Routes>
+         </main>
+       </div>
+     </div>
+   </ThemeProvider>
+ )
 }
 
 export default App
