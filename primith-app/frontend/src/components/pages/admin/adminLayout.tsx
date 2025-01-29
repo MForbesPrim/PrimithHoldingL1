@@ -71,7 +71,7 @@ export function AdminLayout() {
 
     return (
         <div className="flex-1">
-        <div className="flex items-center justify-between p-6 border-b">
+        <div className="flex items-center justify-between px-4 h-16 border-b">
             <div className="flex items-center gap-4">
             <Link 
                 to="/" 
