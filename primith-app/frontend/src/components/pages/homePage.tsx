@@ -160,6 +160,12 @@ export function HomePage() {
               <span className="font-bold text-gray-500">Primith</span>
             </div>
             <div className="flex items-center text-sm text-gray-400">
+            <Link
+                to="/terms-of-service"
+                className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors text-xs mr-4"
+              >
+                Terms
+              </Link>
               <Link
                 to="/privacy-policy"
                 className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors text-xs mr-4"

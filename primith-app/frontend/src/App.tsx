@@ -1,14 +1,17 @@
 import "./App.css"
 import { Routes, Route } from "react-router-dom"
 import { ThemeProvider } from "@/components/theme-provider"
+import { Toaster } from "@/components/ui/toaster";
 
 import { HomePage } from "@/components/pages/homePage"
 import { LoginPage } from "@/components/pages/loginPage"
 import { ContactPage } from "@/components/pages/contactUsPage"
 import { PrivacyPage } from "@/components/pages/privacyNotice"
+import { TermsPage } from "@/components/pages/termsOfService"
 import { AuthRedirect } from "@/redirect"
 import { ProtectedPage } from "@/components/pages/protectedPage"
 import { PortalHomePage } from "@/components/pages/portal/portalHomePage"
+import { PrimithChat } from "@/components/pages/portal/primithChatLayout"
 import { ProtectedRoute } from "@/components/protectedRoute"
 import { ProtectedLayout } from '@/protectedLayout';
 import { AdminLayout } from "@/components/pages/admin/adminLayout"
@@ -38,6 +41,7 @@ function App() {
                          <PortalHomePage />
                        </ProtectedRoute>
                      } />
+                     <Route path="/primith-chat" element={<PrimithChat />}></Route>
                      <Route path="/admin" element={<AdminLayout />}>
                        <Route path="users" element={<UsersPage />} />
                        <Route path="organizations" element={<OrganizationsPage />} />
@@ -57,6 +61,7 @@ function App() {
                          <PortalHomePage />
                        </ProtectedRoute>
                      } />
+                     <Route path="/primith-chat" element={<PrimithChat />} />
                      <Route path="/admin" element={<AdminLayout />}>
                        <Route path="users" element={<UsersPage />} />
                        <Route path="organizations" element={<OrganizationsPage />} />
@@ -75,6 +80,7 @@ function App() {
                  <Route path="/login" element={<LoginPage />} />
                  <Route path="/contact" element={<ContactPage />} />
                  <Route path="/privacy-policy" element={<PrivacyPage />} />
+                 <Route path="/terms-of-service" element={<TermsPage />} />
                  <Route path="/auth-redirect" element={<AuthRedirect />} />
                  <Route path="/protected" element={<ProtectedPage />} />
                  <Route element={<ProtectedLayout />}>
@@ -91,6 +97,7 @@ function App() {
          </main>
        </div>
      </div>
+     <Toaster />
    </ThemeProvider>
  )
 }

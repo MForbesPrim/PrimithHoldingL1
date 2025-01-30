@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 	"github.com/rs/cors"
+	"github.com/sashabaranov/go-openai"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"golang.org/x/crypto/bcrypt"
@@ -96,6 +98,9 @@ type Config struct {
 		Host     string `json:"DB_HOST"`
 		SSLMode  string `json:"DB_SSLMODE"`
 	} `json:"database"`
+	OpenAI struct {
+		APIKey string `json:"OPENAI_API_KEY"`
+	} `json:"openai"`
 }
 
 // User represents a user in the system
@@ -141,6 +146,26 @@ type Service struct {
 	Status      string    `json:"status"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type ChatRequest struct {
+	Message string `json:"message"`
+}
+
+type CodeBlock struct {
+	Language string `json:"language"`
+	Content  string `json:"content"`
+}
+
+type ChatResponse struct {
+	Response string     `json:"response"`
+	Code     *CodeBlock `json:"code,omitempty"`
+	Table    *TableData `json:"table,omitempty"`
+}
+
+type TableData struct {
+	Headers []string   `json:"headers"`
+	Rows    [][]string `json:"rows"`
 }
 
 // JWT related constants
@@ -1375,6 +1400,151 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func handleChat(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding request: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Load config if in development
+	var apiKey string
+	if os.Getenv("ENVIRONMENT") == "production" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	} else {
+		config, err := loadConfigIfDev()
+		if err != nil {
+			log.Printf("Failed to load config: %v", err)
+			http.Error(w, "Server configuration error", http.StatusInternalServerError)
+			return
+		}
+		apiKey = config.OpenAI.APIKey
+	}
+
+	if apiKey == "" {
+		log.Printf("Missing OpenAI API key")
+		http.Error(w, "Server configuration error", http.StatusInternalServerError)
+		return
+	}
+
+	client := openai.NewClient(apiKey)
+
+	chatResp, err := client.CreateChatCompletion(
+		context.Background(),
+		openai.ChatCompletionRequest{
+			Model: openai.GPT4oMini,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleSystem,
+					Content: `You are an expert consultant and wit expert coding abilities. If response reqquires code, provide brief explanations and concise code in markdown blocks with language tags and essential comments only.`,
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: req.Message,
+				},
+			},
+		},
+	)
+	if err != nil {
+		log.Printf("Error from OpenAI Chat API: %v", err)
+		http.Error(w, "Failed to process request", http.StatusInternalServerError)
+		return
+	}
+
+	response := chatResp.Choices[0].Message.Content
+	chatResponse := ChatResponse{
+		Response: response,
+	}
+
+	// Check for code blocks
+	if code := extractCodeBlock(response); code != nil {
+		chatResponse.Code = code
+		// Clean the response by removing the code block
+		chatResponse.Response = cleanResponseText(response)
+	}
+
+	// Check for tables
+	if table := parseMarkdownTable(response); table != nil {
+		chatResponse.Table = table
+		// Clean the response by removing the table
+		chatResponse.Response = cleanTableText(response)
+	}
+
+	json.NewEncoder(w).Encode(chatResponse)
+}
+
+func cleanTableText(content string) string {
+	// Remove markdown table from the response
+	tableRegex := regexp.MustCompile(`\|([^\n]+)\|\n\|([-|\s]+)\|\n((?:\|[^\n]+\|\n?)*)`)
+	cleaned := tableRegex.ReplaceAllString(content, "")
+	return strings.TrimSpace(cleaned)
+}
+
+func extractCodeBlock(content string) *CodeBlock {
+	// Look for markdown code blocks
+	codeBlockRegex := regexp.MustCompile("```([a-zA-Z0-9]+)\n([^`]+)```")
+	matches := codeBlockRegex.FindStringSubmatch(content)
+
+	if len(matches) >= 3 {
+		return &CodeBlock{
+			Language: matches[1],
+			Content:  strings.TrimSpace(matches[2]),
+		}
+	}
+	return nil
+}
+
+func cleanResponseText(content string) string {
+	// Remove code blocks from the response
+	codeBlockRegex := regexp.MustCompile("```[a-zA-Z0-9]*\n[^`]+```")
+	cleaned := codeBlockRegex.ReplaceAllString(content, "")
+	// Clean up extra newlines
+	cleaned = strings.TrimSpace(cleaned)
+	return cleaned
+}
+
+func parseMarkdownTable(content string) *TableData {
+	// Look for markdown table in the content
+	tableRegex := regexp.MustCompile(`\|([^\n]+)\|\n\|([-|\s]+)\|\n((?:\|[^\n]+\|\n?)*)`)
+	matches := tableRegex.FindStringSubmatch(content)
+
+	if len(matches) < 4 {
+		return nil
+	}
+
+	// Parse headers
+	headers := strings.Split(strings.Trim(matches[1], "|"), "|")
+	for i := range headers {
+		headers[i] = strings.TrimSpace(headers[i])
+	}
+
+	// Parse rows
+	rowsStr := strings.Split(matches[3], "\n")
+	var rows [][]string
+	for _, row := range rowsStr {
+		if len(row) == 0 {
+			continue
+		}
+		// Split row and trim whitespace
+		cells := strings.Split(strings.Trim(row, "|"), "|")
+		var cleanCells []string
+		for _, cell := range cells {
+			cleanCells = append(cleanCells, strings.TrimSpace(cell))
+		}
+		if len(cleanCells) > 0 {
+			rows = append(rows, cleanCells)
+		}
+	}
+
+	return &TableData{
+		Headers: headers,
+		Rows:    rows,
+	}
+}
+
 func main() {
 	r := mux.NewRouter()
 	c := cors.New(cors.Options{
@@ -1447,6 +1617,10 @@ func main() {
 	r.HandleFunc("/admin/services/{id}", superAdminMiddleware(handleDeleteService)).Methods("DELETE")
 	r.HandleFunc("/admin/services/{serviceId}/organizations", superAdminMiddleware(handleAssignOrganizationToService)).Methods("POST")
 	r.HandleFunc("/admin/services/{serviceId}/organizations/{orgId}", superAdminMiddleware(handleRemoveOrganizationFromService)).Methods("DELETE")
+
+	// Open AI Chat
+	r.HandleFunc("/api/chat", authMiddleware(handleChat)).Methods("POST")
+
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
 

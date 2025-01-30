@@ -11,6 +11,8 @@ require (
 	golang.org/x/crypto v0.32.0
 )
 
+require github.com/sashabaranov/go-openai v1.36.1
+
 require (
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
 	github.com/lib/pq v1.10.9

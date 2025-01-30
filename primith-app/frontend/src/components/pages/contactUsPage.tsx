@@ -146,10 +146,14 @@ export function ContactPage() {
                        )}
                    </Button>
                    <div className="text-center text-sm text-gray-600 dark:text-gray-400">
-                       By submitting this form, you agree to our{" "}
-                       <Link to="/privacy-policy" className="underline hover:text-gray-800 dark:hover:text-gray-200">
-                           Privacy Policy
-                       </Link>
+                        By submitting this form, you agree to our{" "}
+                        <Link to="/terms-of-service" className="underline hover:text-gray-800 dark:hover:text-gray-200">
+                            Terms of Service
+                        </Link>{" "}
+                        and{" "}
+                        <Link to="/privacy-policy" className="underline hover:text-gray-800 dark:hover:text-gray-200">
+                            Privacy Policy
+                        </Link>
                    </div>
                </form>
            </div>

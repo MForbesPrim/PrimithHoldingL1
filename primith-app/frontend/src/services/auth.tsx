@@ -35,9 +35,17 @@ export interface Service {
   name: string;
   description?: string;
   status?: 'active' | 'inactive';
-  organizations?: Organization[];  // Add this line
+  organizations?: Organization[];
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface ChatMessage {
+  message: string;
+}
+
+export interface ChatResponse {
+  response: string;
 }
 
 class AuthService {
@@ -404,6 +412,28 @@ static async deleteRole(id: string): Promise<void> {
   });
 
   if (!response.ok) throw new Error('Failed to delete role');
+}
+
+static async sendChatMessage(message: string): Promise<ChatResponse> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/chat`, {
+          method: 'POST',
+          headers: {
+              'Authorization': `Bearer ${tokens.token}`,
+              'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ message }),
+      });
+
+      if (!response.ok) throw new Error('Failed to get chat response');
+      return await response.json();
+  } catch (error) {
+      console.error('Error in chat:', error);
+      throw error;
+  }
 }
   
 }
