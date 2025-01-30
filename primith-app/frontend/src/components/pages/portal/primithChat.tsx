@@ -107,7 +107,7 @@ export function ConsultantDashboard() {
                 </HoverCardTrigger>
                 <HoverCardContent className="w-80">
                     <p className="text-sm">
-                    Newly uploaded files may take a few minutes to be processed before they can be included in response context
+                    Newly uploaded files may take a few minutes to be processed before they can be included in the chat context
                     </p>
                 </HoverCardContent>
                 </HoverCard>
