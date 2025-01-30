@@ -144,8 +144,9 @@ export function PortalHomePage() {
                       <AvatarImage 
                         src="/placeholder-avatar.jpg" 
                         alt={user ? `${user.firstName} ${user.lastName}` : 'User'} 
+                        className="text-xs"
                       />
-                      <AvatarFallback>
+                      <AvatarFallback className="text-xs">
                         {user ? getInitials(user.firstName, user.lastName) : 'U'}
                       </AvatarFallback>
                     </Avatar>
