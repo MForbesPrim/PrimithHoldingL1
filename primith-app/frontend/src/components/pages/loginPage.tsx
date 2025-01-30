@@ -71,8 +71,8 @@ export function LoginPage() {
           window.location.href = decodeURIComponent(redirectUrl)
         } else {
           window.location.href = import.meta.env.MODE === 'development'
-            ? 'http://portal.localhost:5173/dashboard'
-            : 'https://portal.primith.com/dashboard'
+            ? 'http://portal.localhost:5173'
+            : 'https://portal.primith.com'
         }
       } else {
         setError(data.message || 'Login failed')
