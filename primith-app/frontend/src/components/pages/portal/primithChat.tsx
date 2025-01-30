@@ -99,7 +99,7 @@ export function ConsultantDashboard() {
                 htmlFor="rdm-mode"
                 className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                 >
-                Include your RDM PDF files in responses
+                Include RDM PDFs
                 </label>
                 <HoverCard>
                 <HoverCardTrigger asChild>
@@ -107,7 +107,7 @@ export function ConsultantDashboard() {
                 </HoverCardTrigger>
                 <HoverCardContent className="w-80">
                     <p className="text-sm">
-                    Newly uploaded files may take a few minutes to be processed before they can be included in responses
+                    Newly uploaded files may take a few minutes to be processed before they can be included in response context
                     </p>
                 </HoverCardContent>
                 </HoverCard>
