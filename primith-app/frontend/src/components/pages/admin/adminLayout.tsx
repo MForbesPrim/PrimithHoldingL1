@@ -1,4 +1,4 @@
-import { Navigate, Outlet, Link } from 'react-router-dom'
+import { Navigate, Outlet, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { Shield, ArrowLeft, User, Settings, Contrast, Sun, Moon, LogOut, SquareArrowOutUpRight } from 'lucide-react'
 import AuthService from '@/services/auth'
@@ -18,48 +18,53 @@ import { AdminNav } from '../portal/adminNav'
 
 
 export function AdminLayout() {
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
-  const user = AuthService.getUser()
+    const navigate = useNavigate()
+    const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
+    const user = AuthService.getUser()
 
-  useEffect(() => {
+    const handleGoBack = () => {
+        navigate(-1)
+    }
+
+    useEffect(() => {
     const checkAdmin = async () => {
-      const adminStatus = await AuthService.isSuperAdmin()
-      setIsAdmin(adminStatus)
+        const adminStatus = await AuthService.isSuperAdmin()
+        setIsAdmin(adminStatus)
     }
     checkAdmin()
-  }, [])
+    }, [])
 
-  const getInitials = (firstName: string, lastName: string) => {
-    return `${firstName[0]}${lastName[0]}`
-  }
-
-  const setTheme = (theme: string) => {
-    document.documentElement.classList.remove("light", "dark");
-    document.documentElement.classList.add(theme);
-    localStorage.setItem("theme", theme);
-  };
-
-  const handleLogout = async () => {
-    try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/logout`, {
-            method: 'POST',
-            credentials: 'include',
-        })
-        if (response.ok) {
-            localStorage.removeItem('accessToken')
-            localStorage.removeItem('refreshToken')
-
-            const loginUrl = import.meta.env.MODE === 'development'
-            ? 'http://portal.localhost:5173/login'
-            : 'https://portal.primith.com/login'
-            window.location.href = loginUrl
-        } else {
-            console.error('Logout failed')
-        }
-        } catch (error) {
-        console.error('Error during logout:', error)
-        }
+    const getInitials = (firstName: string, lastName: string) => {
+        return `${firstName[0]}${lastName[0]}`
     }
+
+    const setTheme = (theme: string) => {
+        document.documentElement.classList.remove("light", "dark");
+        document.documentElement.classList.add(theme);
+        localStorage.setItem("theme", theme);
+    };
+
+    const handleLogout = async () => {
+        try {
+            const response = await fetch(`${import.meta.env.VITE_API_URL}/logout`, {
+                method: 'POST',
+                credentials: 'include',
+            })
+            if (response.ok) {
+                localStorage.removeItem('accessToken')
+                localStorage.removeItem('refreshToken')
+
+                const loginUrl = import.meta.env.MODE === 'development'
+                ? 'http://portal.localhost:5173/login'
+                : 'https://portal.primith.com/login'
+                window.location.href = loginUrl
+            } else {
+                console.error('Logout failed')
+            }
+            } catch (error) {
+            console.error('Error during logout:', error)
+            }
+        }
 
     if (isAdmin === null) {
         return null
@@ -72,14 +77,14 @@ export function AdminLayout() {
     return (
         <div className="flex-1">
         <div className="flex items-center justify-between px-4 h-16 border-b">
-            <div className="flex items-center gap-4">
-            <Link 
-                to="/" 
+        <div className="flex items-center gap-4">
+            <button 
+                onClick={handleGoBack}
                 className="flex items-center gap-2 text-gray-500 hover:text-gray-700 transition-colors"
             >
                 <ArrowLeft className="w-5 h-5" />
-                <span className="text-sm">Back to Portal Home</span>
-            </Link>
+                <span className="text-sm">Back</span>
+            </button>
             <div className="h-6 w-px bg-gray-200" />
             <div className="flex items-center gap-2">
                 <Shield className="w-6 h-6" />
