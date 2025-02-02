@@ -25,7 +25,7 @@ import {
 import { ChatBot } from "@/components/pages/portal/primithChat"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 export function PortalHomePage() {
   const user = AuthService.getUser()
@@ -35,6 +35,13 @@ export function PortalHomePage() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false)
   const [showChatTooltip, setShowChatTooltip] = useState(false)
+
+  useEffect(() => {
+    if (!isChatOpen) {
+      setShowChatTooltip(false)
+    }
+  }, [isChatOpen])
+  
   const handleRdmNavigation = async () => {
     try {
       // Pass `navigate` into AuthService
