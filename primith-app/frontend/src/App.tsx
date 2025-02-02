@@ -26,96 +26,68 @@ import { ProtectedRdmLayout } from "@/components/pages/rdm/layouts/protected-rdm
 import { HelpPage } from "@/components/pages/helpCenterPage";
 
 function App() {
- const domain = window.location.hostname
- const isPortal = domain === 'portal.primith.com' || domain === 'portal.localhost'
- const isSupport = domain === 'support.primith.com' || domain === 'support.localhost'
+  const domain = window.location.hostname
+  const isPortal = domain === 'portal.primith.com' || domain === 'portal.localhost'
+  const isSupport = domain === 'support.primith.com' || domain === 'support.localhost'
 
- const isProduction = import.meta.env.PROD
-
- return (
-   <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
-     <div className="flex h-screen w-screen">
-       <div className="flex flex-1 flex-col">
-         <main className="flex-1">
-           <Routes>
-           {isSupport ? (
+  return (
+    <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
+      <div className="flex h-screen w-screen">
+        <div className="flex flex-1 flex-col">
+          <main className="flex-1">
+            <Routes>
+              {isSupport ? (
                 <Route path="/" element={<HelpPage />} />
               ) : isPortal ? (
-               isProduction ? (
-                 <>
-                   <Route element={<ProtectedLayout />}>
-                     <Route path="/" element={
-                       <ProtectedRoute>
-                         <PortalHomePage />
-                       </ProtectedRoute>
-                     } />
-                     <Route path="/admin" element={<AdminLayout />}>
-                       <Route path="users" element={<UsersPage />} />
-                       <Route path="organizations" element={<OrganizationsPage />} />
-                       <Route path="roles" element={<RolesPage />} />
-                       <Route path="services" element={<ServicesPage />} />
-                     </Route>
-                   </Route>
-                   <Route path="/login" element={<LoginPage />} />
-                   <Route path="/auth-redirect" element={<AuthRedirect />} />
-                   <Route path="*" element={<NotFoundPage />} />
-                 </>
-               ) : (
-                 <>
-                   <Route element={<ProtectedLayout />}>
-                     <Route path="/" element={
-                       <ProtectedRoute>
-                         <PortalHomePage />
-                       </ProtectedRoute>
-                     } />
-                     <Route path="/admin" element={<AdminLayout />}>
-                       <Route path="users" element={<UsersPage />} />
-                       <Route path="organizations" element={<OrganizationsPage />} />
-                       <Route path="roles" element={<RolesPage />} />
-                       <Route path="services" element={<ServicesPage />} />
-                     </Route>
-                   </Route>
-                   <Route element={<ProtectedRdmLayout />}>
-                    {/* If you go to the root ("/") on this domain, show RdmHomePage */}
+                <>
+                  <Route element={<ProtectedLayout />}>
+                    <Route path="/" element={
+                      <ProtectedRoute>
+                        <PortalHomePage />
+                      </ProtectedRoute>
+                    } />
+                    <Route path="/admin" element={<AdminLayout />}>
+                      <Route path="users" element={<UsersPage />} />
+                      <Route path="organizations" element={<OrganizationsPage />} />
+                      <Route path="roles" element={<RolesPage />} />
+                      <Route path="services" element={<ServicesPage />} />
+                    </Route>
+                  </Route>
+                  <Route element={<ProtectedRdmLayout />}>
                     <Route path="/rdm" element={<RdmHomePage />} />
                     <Route path="/projects" element={<ProjectsPage />} />
-                    <Route
-                      path="/document-management"
-                      element={<DocumentManagementPage />}
-                    />
+                    <Route path="/document-management" element={<DocumentManagementPage />} />
                   </Route>
-
-                   <Route path="/login" element={<LoginPage />} />
-                   <Route path="/auth-redirect" element={<AuthRedirect />} />
-                   <Route path="*" element={<NotFoundPage />} />
-                 </>
-               )
-             ) : (
-               <>
-                 <Route path="/" element={<HomePage />} />
-                 <Route path="/login" element={<LoginPage />} />
-                 <Route path="/contact" element={<ContactPage />} />
-                 <Route path="/privacy-policy" element={<PrivacyPage />} />
-                 <Route path="/terms-of-service" element={<TermsPage />} />
-                 <Route path="/auth-redirect" element={<AuthRedirect />} />
-                 <Route path="/protected" element={<ProtectedPage />} />
-                 <Route element={<ProtectedLayout />}>
-                   <Route path="/portal" element={
-                     <ProtectedRoute>
-                       <PortalHomePage />
-                     </ProtectedRoute>
-                   } />
-                 </Route>
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route path="/auth-redirect" element={<AuthRedirect />} />
                   <Route path="*" element={<NotFoundPage />} />
-               </>
-             )}
-           </Routes>
-         </main>
-       </div>
-     </div>
-     <Toaster />
-   </ThemeProvider>
- )
+                </>
+              ) : (
+                <>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route path="/contact" element={<ContactPage />} />
+                  <Route path="/privacy-policy" element={<PrivacyPage />} />
+                  <Route path="/terms-of-service" element={<TermsPage />} />
+                  <Route path="/auth-redirect" element={<AuthRedirect />} />
+                  <Route path="/protected" element={<ProtectedPage />} />
+                  <Route element={<ProtectedLayout />}>
+                    <Route path="/portal" element={
+                      <ProtectedRoute>
+                        <PortalHomePage />
+                      </ProtectedRoute>
+                    } />
+                  </Route>
+                  <Route path="*" element={<NotFoundPage />} />
+                </>
+              )}
+            </Routes>
+          </main>
+        </div>
+      </div>
+      <Toaster />
+    </ThemeProvider>
+  )
 }
 
 export default App
