@@ -10,8 +10,9 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent
 } from "@/components/ui/dropdown-menu"
-import { Sparkle, Grip, LogOut, Settings, User, FolderClosed, Contrast, Sun, Moon, SquareArrowOutUpRight, Landmark, Handshake, BotMessageSquare } from "lucide-react"
+import { Sparkle, Grip, LogOut, Settings, User, FolderClosed, Contrast, Sun, Moon, SquareArrowOutUpRight, Landmark, Handshake, Lightbulb, CircleHelp } from "lucide-react"
 import { Link } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 import AuthService from '@/services/auth'
 import { NotificationBell } from "@/components/ui/notification-bell"
 import { AdminNav } from './adminNav'
@@ -21,8 +22,33 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { ChatBot } from "@/components/pages/portal/primithChat"
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { useToast } from "@/hooks/use-toast"
+import { useState } from "react"
+
 export function PortalHomePage() {
   const user = AuthService.getUser()
+  const { toast } = useToast()
+  const navigate = useNavigate()
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false)
+  const [showChatTooltip, setShowChatTooltip] = useState(false)
+  const handleRdmNavigation = async () => {
+    try {
+      // Pass `navigate` into AuthService
+      await AuthService.navigateToRdm(navigate)
+    } catch (error) {
+      toast({
+        title: "Access Denied",
+        description: (<span>You don't have access to RDM. Please contact your administrator.</span>),
+        variant: "default",
+        duration: 5000,
+      })
+    }
+  }
+
 
   const getInitials = (firstName: string, lastName: string) => {
     return `${firstName[0]}${lastName[0]}`
@@ -58,7 +84,7 @@ export function PortalHomePage() {
   }
 
   return (
-<div className="min-h-screen bg-background">
+<div className="min-h-screen bg-background overflow-x-hidden">
     <nav className="border-b">
       <div className="flex h-16 items-center px-4">
         <div className="mr-8 flex items-center space-x-2">
@@ -79,18 +105,21 @@ export function PortalHomePage() {
               </Tooltip>
             </TooltipProvider>
             <DropdownMenuContent align="start" className="w-56">
-                  <DropdownMenuLabel className="text-xs">Your Apps</DropdownMenuLabel>
+                  <DropdownMenuLabel className="text-xs ">Your Apps</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem className="cursor-pointer text-xs">
-                    <FolderClosed className="w-5 h-5" /> Primith ATR
+                  <DropdownMenuItem className="cursor-pointer text-xs mt-.5 mb-1.5">
+                    <FolderClosed className="w-5 h-5" /> Primith RDM
                   </DropdownMenuItem>
-                  <DropdownMenuLabel className="pt-4 text-xs">More Apps</DropdownMenuLabel>
+                  <DropdownMenuLabel className="text-xs mb-1">More Apps</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem className="cursor-pointer text-xs">
+                  <DropdownMenuItem className="cursor-pointer text-xs mb-1">
                     <Landmark className="w-5 h-5" /> Primith Financing
                   </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer text-xs">
+                  <DropdownMenuItem className="cursor-pointer text-xs mb-1">
                     <Handshake className="w-5 h-5" /> Primith Consulting
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="cursor-pointer text-xs mb-1">
+                    <Lightbulb className="w-5 h-5" /> Primith Pro
                   </DropdownMenuItem>
                   </DropdownMenuContent>
           </DropdownMenu>
@@ -109,31 +138,45 @@ export function PortalHomePage() {
         <div className="ml-auto flex items-center space-x-4">
           <TooltipProvider>
             {/* Chat Assistant */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Link
-                  to="/primith-chat"
-                  className="font-bold tracking-tighter flex items-center gap-2 text-gray-500 hover:text-gray-400"
-                >
-                  <BotMessageSquare />
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Chat Assistant</p>
-              </TooltipContent>
-            </Tooltip>
+            <TooltipProvider>
+              <Tooltip open={showChatTooltip && !isChatOpen}>
+                  <TooltipTrigger asChild>
+                      <div 
+                          onMouseEnter={() => setShowChatTooltip(true)}
+                          onMouseLeave={() => setShowChatTooltip(false)}
+                      >
+                          <ChatBot 
+                              isOpen={isChatOpen}
+                              setIsOpen={setIsChatOpen}
+                              setShowTooltip={setShowChatTooltip}
+                          />
+                      </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                      <p>Chat Assistant</p>
+                  </TooltipContent>
+              </Tooltip>
+          </TooltipProvider>
 
             {/* Notifications */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div>
-                  <NotificationBell />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Notifications</p>
-              </TooltipContent>
-            </Tooltip>
+            <TooltipProvider>
+                <Tooltip open={showTooltip && !isNotificationOpen}>
+                    <TooltipTrigger asChild>
+                      <div 
+                            onMouseEnter={() => setShowTooltip(true)}
+                            onMouseLeave={() => setShowTooltip(false)}
+                        >
+                            <NotificationBell 
+                                isOpen={isNotificationOpen}
+                                setIsOpen={setIsNotificationOpen}
+                            />
+                        </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Notifications</p>
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
 
             {/* Account Settings */}
             <DropdownMenu>
@@ -217,7 +260,23 @@ export function PortalHomePage() {
                         </DropdownMenuItem>
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
-                    
+
+                    <DropdownMenuItem asChild className="cursor-pointer text-xs flex items-center">
+                        <a 
+                            href={import.meta.env.MODE === 'development' 
+                                ? 'http://support.localhost:5173'
+                                : 'https://support.primith.com'
+                            }
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="flex items-center"
+                        >
+                            <CircleHelp className="w-5 h-5 mr-2" />
+                            <span>Help Center</span>
+                            <SquareArrowOutUpRight className="w-4 h-4 mt-1 text-gray-500 ml-auto" />
+                        </a>
+                    </DropdownMenuItem>
+
                     <DropdownMenuSeparator />
                     
                     <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-xs flex items-center">
@@ -230,12 +289,27 @@ export function PortalHomePage() {
         </div>
       </div>
     </nav>
-
-    <main className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-4 text-[#172B4D] dark:text-gray-300">
+    <div className="flex">
+    <div className="w-60 shrink-0"></div>
+    <main className="container px-4 py-8 max-w-full">
+    <h1 className="text-3xl font-bold mb-4 text-[#172B4D] dark:text-gray-300">
         Hello, {user ? `${user.firstName}` : 'User'}
       </h1>
+      <Card 
+          onClick={handleRdmNavigation} 
+          className="cursor-pointer max-w-sm hover:shadow-lg transition-shadow"
+        >
+          <CardHeader>
+            <CardTitle className="text-lg font-bold">Primith RDM</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              Click here to access the Reporting and Document Management system.
+            </p>
+          </CardContent>
+        </Card>
     </main>
+    </div>
   </div>
   )
 }

@@ -11,7 +11,6 @@ import { TermsPage } from "@/components/pages/termsOfService"
 import { AuthRedirect } from "@/redirect"
 import { ProtectedPage } from "@/components/pages/protectedPage"
 import { PortalHomePage } from "@/components/pages/portal/portalHomePage"
-import { PrimithChat } from "@/components/pages/portal/primithChatLayout"
 import { ProtectedRoute } from "@/components/protectedRoute"
 import { ProtectedLayout } from '@/protectedLayout';
 import { AdminLayout } from "@/components/pages/admin/adminLayout"
@@ -20,10 +19,17 @@ import { OrganizationsPage } from "@/components/pages/admin/organizationsPage"
 import { RolesPage } from "@/components/pages/admin/rolesPage"
 import { ServicesPage } from "@/components/pages/admin/servicesPage"
 import { NotFoundPage } from "@/components/pages/notFoundPage" 
+import { RdmHomePage } from "@/components/pages/rdm/rdmHomePage";
+import { ProjectsPage } from "@/components/pages/rdm/projects/projectsDashboard";
+import { DocumentManagementPage } from "@/components/pages/rdm/documentManagement/dmDashboard";
+import { ProtectedRdmLayout } from "@/components/pages/rdm/layouts/protected-rdm-layout";
+import { HelpPage } from "@/components/pages/helpCenterPage";
 
 function App() {
  const domain = window.location.hostname
  const isPortal = domain === 'portal.primith.com' || domain === 'portal.localhost'
+ const isSupport = domain === 'support.primith.com' || domain === 'support.localhost'
+
  const isProduction = import.meta.env.PROD
 
  return (
@@ -32,7 +38,9 @@ function App() {
        <div className="flex flex-1 flex-col">
          <main className="flex-1">
            <Routes>
-             {isPortal ? (
+           {isSupport ? (
+                <Route path="/" element={<HelpPage />} />
+              ) : isPortal ? (
                isProduction ? (
                  <>
                    <Route element={<ProtectedLayout />}>
@@ -41,7 +49,6 @@ function App() {
                          <PortalHomePage />
                        </ProtectedRoute>
                      } />
-                     <Route path="/primith-chat" element={<PrimithChat />}></Route>
                      <Route path="/admin" element={<AdminLayout />}>
                        <Route path="users" element={<UsersPage />} />
                        <Route path="organizations" element={<OrganizationsPage />} />
@@ -61,7 +68,6 @@ function App() {
                          <PortalHomePage />
                        </ProtectedRoute>
                      } />
-                     <Route path="/primith-chat" element={<PrimithChat />} />
                      <Route path="/admin" element={<AdminLayout />}>
                        <Route path="users" element={<UsersPage />} />
                        <Route path="organizations" element={<OrganizationsPage />} />
@@ -69,6 +75,16 @@ function App() {
                        <Route path="services" element={<ServicesPage />} />
                      </Route>
                    </Route>
+                   <Route element={<ProtectedRdmLayout />}>
+                    {/* If you go to the root ("/") on this domain, show RdmHomePage */}
+                    <Route path="/rdm" element={<RdmHomePage />} />
+                    <Route path="/projects" element={<ProjectsPage />} />
+                    <Route
+                      path="/document-management"
+                      element={<DocumentManagementPage />}
+                    />
+                  </Route>
+
                    <Route path="/login" element={<LoginPage />} />
                    <Route path="/auth-redirect" element={<AuthRedirect />} />
                    <Route path="*" element={<NotFoundPage />} />
@@ -90,7 +106,7 @@ function App() {
                      </ProtectedRoute>
                    } />
                  </Route>
-                 <Route path="*" element={<NotFoundPage />} />
+                  <Route path="*" element={<NotFoundPage />} />
                </>
              )}
            </Routes>

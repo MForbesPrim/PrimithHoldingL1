@@ -29,7 +29,6 @@ export interface Organization {
   services?: Service[];
 }
 
-// In auth.ts
 export interface Service {
   id: string;
   name: string;
@@ -48,11 +47,40 @@ export interface ChatResponse {
   response: string;
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  organizationId: string;
+  createdBy: string;
+  status: 'active' | 'inactive';
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface Document {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string;
+  filePath: string;
+  fileType: string;
+  fileSize: number;
+  version: number;
+  status: 'active' | 'inactive';
+  createdBy: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 class AuthService {
   private static readonly ACCESS_TOKEN_KEY = 'accessToken';
   private static readonly REFRESH_TOKEN_KEY = 'refreshToken';
   private static readonly USER_KEY = 'user';
   private static readonly ADMIN_STATUS_KEY = 'isAdmin';
+  private static readonly RDM_ACCESS_TOKEN_KEY = 'rdm_access_token'
+  private static readonly RDM_REFRESH_TOKEN_KEY = 'rdm_refresh_token'
+  private static readonly RDM_USER_KEY = 'rdm_user'
 
   static getTokens(): AuthTokens | null {
     const token = localStorage.getItem(this.ACCESS_TOKEN_KEY);
@@ -435,7 +463,182 @@ static async sendChatMessage(message: string): Promise<ChatResponse> {
       throw error;
   }
 }
+
+  // RDM Project Methods
+  static async getProjects(): Promise<Project[]> {
+    const rdmAuth = this.getRdmTokens();
+    if (!rdmAuth?.tokens) throw new Error('No authentication tokens');
   
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/rdm/projects`, {
+      headers: {
+        'Authorization': `Bearer ${rdmAuth.tokens.token}`
+      }
+    });
+  
+    if (!response.ok) throw new Error('Failed to fetch projects');
+    const data = await response.json();
+    return data.projects;
+  }
+
+  static async createProject(projectData: Partial<Project>): Promise<Project> {
+    const rdmAuth = this.getRdmTokens();
+    if (!rdmAuth) throw new Error('No authentication tokens');
+
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/rdm/projects`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${rdmAuth.tokens.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(projectData),
+    });
+
+    if (!response.ok) throw new Error('Failed to create project');
+    return await response.json();
+  }
+
+  // Document Methods
+  static async getDocuments(projectId: string): Promise<Document[]> {
+    const rdmAuth = this.getRdmTokens();
+    if (!rdmAuth) throw new Error('No authentication tokens');
+
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/rdm/projects/${projectId}/documents`, {
+      headers: {
+        'Authorization': `Bearer ${rdmAuth.tokens.token}`,
+      }
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch documents');
+    const data = await response.json();
+    return data.documents;
+  }
+
+  static async uploadDocument(
+    projectId: string, 
+    file: File, 
+    metadata: Partial<Document>
+  ): Promise<Document> {
+    const rdmAuth = this.getRdmTokens();
+    if (!rdmAuth) throw new Error('No authentication tokens');
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('metadata', JSON.stringify(metadata));
+
+    const response = await fetch(
+      `${import.meta.env.VITE_API_URL}/rdm/projects/${projectId}/documents`, 
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${rdmAuth.tokens.token}`,
+        },
+        body: formData,
+      }
+    );
+
+    if (!response.ok) throw new Error('Failed to upload document');
+    return await response.json();
+  }
+
+  static setRdmTokens(tokens: AuthTokens, user: User) {
+    localStorage.setItem(this.RDM_ACCESS_TOKEN_KEY, tokens.token)
+    localStorage.setItem(this.RDM_REFRESH_TOKEN_KEY, tokens.refreshToken)
+    localStorage.setItem(this.RDM_USER_KEY, JSON.stringify(user))
+  }
+
+  static getRdmTokens(): { tokens: AuthTokens; user: User } | null {
+    const token = localStorage.getItem(this.RDM_ACCESS_TOKEN_KEY)
+    const refreshToken = localStorage.getItem(this.RDM_REFRESH_TOKEN_KEY)
+    const userStr = localStorage.getItem(this.RDM_USER_KEY)
+
+    if (!token || !refreshToken || !userStr) return null
+
+    return {
+      tokens: { token, refreshToken },
+      user: JSON.parse(userStr) as User,
+    }
+  }
+
+  static clearRdmTokens() {
+    localStorage.removeItem(this.RDM_ACCESS_TOKEN_KEY)
+    localStorage.removeItem(this.RDM_REFRESH_TOKEN_KEY)
+    localStorage.removeItem(this.RDM_USER_KEY)
+  }
+
+  static async navigateToRdm(navigate: (path: string) => void): Promise<void> {
+    try {
+      const tokens = this.getTokens()
+      const user = this.getUser()
+  
+      if (!tokens || !user) {
+        throw new Error('No authentication data available')
+      }
+  
+      // Check access to RDM
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/rdm/access`, {
+        headers: {
+          Authorization: `Bearer ${tokens.token}`,
+        },
+      })
+  
+      if (!response.ok) {
+        throw new Error('No access to RDM')
+      }
+  
+      // If access is granted, store RDM tokens if needed
+      this.setRdmTokens({ token: tokens.token, refreshToken: tokens.refreshToken }, user)
+  
+      // Then do a client-side navigation to /rdm
+      navigate('/rdm')  // <-- This is the key change
+    } catch (error) {
+      console.error('Navigation error:', error)
+      throw error
+    }
+  }
+  
+static async checkRdmAccess(): Promise<boolean> {
+  const rdmAuth = this.getRdmTokens()
+  if (!rdmAuth?.tokens) {
+    console.log('No RDM tokens available for access check')
+    return false
+  }
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/rdm/access`, {
+      headers: {
+        Authorization: `Bearer ${rdmAuth.tokens.token}`,
+      },
+    })
+    return response.ok
+  } catch (error) {
+    console.error('RDM access check error:', error)
+    return false
+  }
+}
+static async verifyAndNavigateToRdm(navigate: (path: string) => void) {
+  const tokens = AuthService.getTokens()
+  const user = AuthService.getUser()
+
+  if (!tokens || !user) {
+    throw new Error('No authentication data available')
+  }
+
+  // Optional: verify the user has RDM access
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/rdm/access`, {
+    headers: { Authorization: `Bearer ${tokens.token}` },
+  })
+
+  if (!response.ok) {
+    throw new Error('No access to RDM')
+  }
+
+  // If user has access, store the separate RDM tokens in localStorage
+  // (You may or may not want a different token from the server—this is up to you.)
+  this.setRdmTokens({ token: tokens.token, refreshToken: tokens.refreshToken }, user)
+
+  // Then navigate client-side to /rdm
+  navigate('/rdm')
+} 
 }
 
 export default AuthService;

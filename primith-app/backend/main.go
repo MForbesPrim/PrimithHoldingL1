@@ -12,12 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/clerk/clerk-sdk-go/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 	"github.com/rs/cors"
-	"github.com/sashabaranov/go-openai"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"golang.org/x/crypto/bcrypt"
@@ -101,6 +103,14 @@ type Config struct {
 	OpenAI struct {
 		APIKey string `json:"OPENAI_API_KEY"`
 	} `json:"openai"`
+	Azure struct {
+		OpenAIKey      string `json:"AZURE_OPENAI_API_KEY"`
+		DeploymentID   string `json:"AZURE_OPENAI_DEPLOYMENT_ID"`
+		Endpoint       string `json:"AZURE_OPENAI_ENDPOINT"`
+		SearchIndex    string `json:"AZURE_AI_SEARCH_INDEX"`
+		SearchEndpoint string `json:"AZURE_AI_SEARCH_ENDPOINT"`
+		SearchAPIKey   string `json:"AZURE_AI_SEARCH_API_KEY"`
+	} `json:"azure"`
 }
 
 // User represents a user in the system
@@ -1400,6 +1410,12 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func removeDocReferences(text string) string {
+	// Remove [doc1], [doc2] etc. patterns and any space before a period
+	re := regexp.MustCompile(`\s*\[doc\d+\]\s*\.`)
+	return re.ReplaceAllString(text, ".")
+}
+
 func handleChat(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -1410,10 +1426,17 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load config if in development
-	var apiKey string
+	// Get Azure configurations
+	var azureOpenAIKey, modelDeploymentID, azureOpenAIEndpoint string
+	var searchIndex, searchEndpoint, searchAPIKey string
+
 	if os.Getenv("ENVIRONMENT") == "production" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
+		azureOpenAIKey = os.Getenv("AZURE_OPENAI_API_KEY")
+		modelDeploymentID = os.Getenv("AZURE_OPENAI_DEPLOYMENT_ID")
+		azureOpenAIEndpoint = os.Getenv("AZURE_OPENAI_ENDPOINT")
+		searchIndex = os.Getenv("AZURE_AI_SEARCH_INDEX")
+		searchEndpoint = os.Getenv("AZURE_AI_SEARCH_ENDPOINT")
+		searchAPIKey = os.Getenv("AZURE_AI_SEARCH_API_KEY")
 	} else {
 		config, err := loadConfigIfDev()
 		if err != nil {
@@ -1421,55 +1444,80 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Server configuration error", http.StatusInternalServerError)
 			return
 		}
-		apiKey = config.OpenAI.APIKey
+		azureOpenAIKey = config.Azure.OpenAIKey
+		modelDeploymentID = config.Azure.DeploymentID
+		azureOpenAIEndpoint = config.Azure.Endpoint
+		searchIndex = config.Azure.SearchIndex
+		searchEndpoint = config.Azure.SearchEndpoint
+		searchAPIKey = config.Azure.SearchAPIKey
 	}
 
-	if apiKey == "" {
-		log.Printf("Missing OpenAI API key")
+	if azureOpenAIKey == "" || modelDeploymentID == "" || azureOpenAIEndpoint == "" ||
+		searchIndex == "" || searchEndpoint == "" || searchAPIKey == "" {
+		log.Printf("Missing Azure configuration")
 		http.Error(w, "Server configuration error", http.StatusInternalServerError)
 		return
 	}
 
-	client := openai.NewClient(apiKey)
+	keyCredential := azcore.NewKeyCredential(azureOpenAIKey)
+	client, err := azopenai.NewClientWithKeyCredential(azureOpenAIEndpoint, keyCredential, nil)
+	if err != nil {
+		log.Printf("Error creating Azure OpenAI client: %v", err)
+		http.Error(w, "Failed to initialize chat service", http.StatusInternalServerError)
+		return
+	}
 
-	chatResp, err := client.CreateChatCompletion(
-		context.Background(),
-		openai.ChatCompletionRequest{
-			Model: openai.GPT4oMini,
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role:    openai.ChatMessageRoleSystem,
-					Content: `You are an expert consultant and wit expert coding abilities. If response reqquires code, provide brief explanations and concise code in markdown blocks with language tags and essential comments only.`,
-				},
-				{
-					Role:    openai.ChatMessageRoleUser,
-					Content: req.Message,
+	systemPrompt := "You are an expert consultant and with expert coding abilities. If response requires code, provide brief explanations and concise code in markdown blocks with language tags and essential comments only. Do not include references to the source document in your responses (doc1)."
+
+	messages := []azopenai.ChatRequestMessageClassification{
+		&azopenai.ChatRequestSystemMessage{
+			Content: azopenai.NewChatRequestSystemMessageContent(systemPrompt),
+		},
+		&azopenai.ChatRequestUserMessage{
+			Content: azopenai.NewChatRequestUserMessageContent(req.Message),
+		},
+	}
+
+	resp, err := client.GetChatCompletions(context.TODO(), azopenai.ChatCompletionsOptions{
+		Messages:    messages,
+		MaxTokens:   to.Ptr[int32](800),
+		Temperature: to.Ptr[float32](0.7),
+		TopP:        to.Ptr[float32](0.95),
+		AzureExtensionsOptions: []azopenai.AzureChatExtensionConfigurationClassification{
+			&azopenai.AzureSearchChatExtensionConfiguration{
+				Parameters: &azopenai.AzureSearchChatExtensionParameters{
+					Endpoint:  &searchEndpoint,
+					IndexName: &searchIndex,
+					Authentication: &azopenai.OnYourDataAPIKeyAuthenticationOptions{
+						Key: &searchAPIKey,
+					},
+					InScope: to.Ptr(true),
 				},
 			},
 		},
-	)
+		DeploymentName: &modelDeploymentID,
+	}, nil)
+
 	if err != nil {
-		log.Printf("Error from OpenAI Chat API: %v", err)
+		log.Printf("Error from Azure OpenAI Chat API: %v", err)
 		http.Error(w, "Failed to process request", http.StatusInternalServerError)
 		return
 	}
 
-	response := chatResp.Choices[0].Message.Content
+	response := *resp.Choices[0].Message.Content
+	response = removeDocReferences(response)
 	chatResponse := ChatResponse{
 		Response: response,
 	}
 
-	// Check for code blocks
+	// Keep existing code block and table parsing logic
 	if code := extractCodeBlock(response); code != nil {
 		chatResponse.Code = code
-		// Clean the response by removing the code block
 		chatResponse.Response = cleanResponseText(response)
 	}
 
-	// Check for tables
 	if table := parseMarkdownTable(response); table != nil {
 		chatResponse.Table = table
-		// Clean the response by removing the table
 		chatResponse.Response = cleanTableText(response)
 	}
 
@@ -1543,6 +1591,34 @@ func parseMarkdownTable(content string) *TableData {
 		Headers: headers,
 		Rows:    rows,
 	}
+}
+
+func handleCheckRdmAccess(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var hasAccess bool
+	err := db.QueryRow(`
+        SELECT EXISTS(
+            SELECT 1 FROM services.organization_services os
+            JOIN auth.organizations o ON os.organization_id = o.id
+            JOIN auth.organization_members om ON o.id = om.organization_id
+            JOIN auth.users u ON om.user_id = u.id
+            WHERE u.email = $1 
+            AND os.service_id = (SELECT id FROM services.services WHERE name = 'rdm')
+        )
+    `, claims.Username).Scan(&hasAccess)
+
+	if err != nil {
+		http.Error(w, "Error checking RDM access", http.StatusInternalServerError)
+		return
+	}
+
+	if !hasAccess {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func main() {
@@ -1620,6 +1696,9 @@ func main() {
 
 	// Open AI Chat
 	r.HandleFunc("/api/chat", authMiddleware(handleChat)).Methods("POST")
+
+	// RDM API
+	r.HandleFunc("/rdm/access", authMiddleware(handleCheckRdmAccess)).Methods("GET")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

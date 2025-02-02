@@ -7,7 +7,7 @@ import { BrowserRouter } from "react-router-dom"
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-      <SidebarProvider>
+      <SidebarProvider defaultOpen={true}>
         <BrowserRouter>
           <App />
         </BrowserRouter>
