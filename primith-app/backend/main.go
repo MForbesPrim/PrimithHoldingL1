@@ -1671,9 +1671,16 @@ func handleCheckRdmAccess(w http.ResponseWriter, r *http.Request) {
 func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
 
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
 	// Get user's organization ID
 	var organizationID string
-	err := db.QueryRow(`
+	err = tx.QueryRow(`
         SELECT o.id 
         FROM auth.organizations o
         JOIN auth.organization_members om ON o.id = om.organization_id
@@ -1695,37 +1702,80 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If parentId is provided, verify it belongs to user's organization
-	if req.ParentID != nil {
-		var parentOrgID string
-		err = db.QueryRow(`
-            SELECT organization_id 
-            FROM rdm.folders 
-            WHERE id = $1
-        `, req.ParentID).Scan(&parentOrgID)
+	// Trim whitespace
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		http.Error(w, "Folder name cannot be blank", http.StatusBadRequest)
+		return
+	}
 
-		if err != nil || parentOrgID != organizationID {
-			http.Error(w, "Parent folder not found or access denied", http.StatusForbidden)
-			return
+	// Check for duplicate names at the same level
+	var duplicateExists bool
+	log.Printf("[DEBUG][CreateFolder] Checking for duplicate folder: name=%q, parentID=%v, organizationID=%s", name, req.ParentID, organizationID)
+	err = tx.QueryRow(`
+    SELECT EXISTS (
+        SELECT 1 
+        FROM rdm.folders 
+        WHERE parent_id IS NOT DISTINCT FROM $1
+        AND organization_id = $2
+        AND name ILIKE $3
+    )
+	`, req.ParentID, organizationID, name).Scan(&duplicateExists)
+	if err != nil {
+		http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[DEBUG][CreateFolder] Duplicate exists for %q: %v", name, duplicateExists)
+
+	// If duplicate exists, find a unique name
+	if duplicateExists {
+		counter := 1
+		baseName := name
+		for duplicateExists {
+			name = fmt.Sprintf("%s (%d)", baseName, counter)
+			log.Printf("[DEBUG][CreateFolder] Trying new folder name: %q", name)
+			err = tx.QueryRow(`
+                SELECT EXISTS (
+                    SELECT 1 
+                    FROM rdm.folders 
+                    WHERE parent_id IS NOT DISTINCT FROM $1
+                    AND organization_id = $2
+                    AND LOWER(name) = LOWER($3)
+                )
+            `, req.ParentID, organizationID, name).Scan(&duplicateExists)
+
+			if err != nil {
+				http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
+				return
+			}
+			log.Printf("[DEBUG][CreateFolder] Duplicate exists for %q: %v", name, duplicateExists)
+			counter++
 		}
+		log.Printf("[DEBUG][CreateFolder] Final folder name determined: %q", name)
 	}
 
 	var folderID string
-	err = db.QueryRow(`
+	err = tx.QueryRow(`
         INSERT INTO rdm.folders (name, parent_id, organization_id)
         VALUES ($1, $2, $3)
         RETURNING id
-    `, req.Name, req.ParentID, organizationID).Scan(&folderID)
+    `, name, req.ParentID, organizationID).Scan(&folderID)
 
 	if err != nil {
-		log.Printf("Error creating folder: %v", err)
+		log.Printf("[ERROR][CreateFolder] Error creating folder: %v", err)
 		http.Error(w, "Failed to create folder", http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{
-		"id": folderID,
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":   folderID,
+		"name": name,
 	})
 }
 
@@ -1841,9 +1891,30 @@ func handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	folderID := vars["id"]
 
-	// Verify user has access to this folder
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// First, get the current folder's details
+	var currentFolder Folder
+	err = tx.QueryRow(`
+        SELECT id, name, parent_id, organization_id
+        FROM rdm.folders 
+        WHERE id = $1
+    `, folderID).Scan(&currentFolder.ID, &currentFolder.Name, &currentFolder.ParentID, &currentFolder.OrganizationID)
+
+	if err != nil {
+		http.Error(w, "Folder not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify user has access
 	var authorized bool
-	err := db.QueryRow(`
+	err = tx.QueryRow(`
         SELECT EXISTS (
             SELECT 1
             FROM rdm.folders f
@@ -1858,7 +1929,6 @@ func handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode the request body into a temporary struct
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -1867,15 +1937,58 @@ func handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Trim whitespace from the folder name and check if it's empty
+	// Trim whitespace
 	newName := strings.TrimSpace(req.Name)
 	if newName == "" {
 		http.Error(w, "Folder name cannot be blank", http.StatusBadRequest)
 		return
 	}
 
+	// Check for duplicate names at the same level
+	var duplicateExists bool
+	err = tx.QueryRow(`
+    SELECT EXISTS (
+        SELECT 1 
+        FROM rdm.folders 
+        WHERE parent_id IS NOT DISTINCT FROM $1
+        AND organization_id = $2
+        AND name ILIKE $3
+        AND id != $4
+    )
+	`, currentFolder.ParentID, currentFolder.OrganizationID, newName, folderID).Scan(&duplicateExists)
+
+	if err != nil {
+		http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
+		return
+	}
+
+	if duplicateExists {
+		// Find a unique name
+		counter := 1
+		baseName := newName
+		for duplicateExists {
+			newName = fmt.Sprintf("%s (%d)", baseName, counter)
+			err = tx.QueryRow(`
+                SELECT EXISTS (
+                    SELECT 1 
+                    FROM rdm.folders 
+                    WHERE parent_id IS NOT DISTINCT FROM $1
+                    AND organization_id = $2
+                    AND LOWER(name) = LOWER($3)
+                    AND id != $4
+                )
+            `, currentFolder.ParentID, currentFolder.OrganizationID, newName, folderID).Scan(&duplicateExists)
+
+			if err != nil {
+				http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
+				return
+			}
+			counter++
+		}
+	}
+
 	// Update the folder with the new name
-	_, err = db.Exec(`
+	_, err = tx.Exec(`
         UPDATE rdm.folders 
         SET name = $1, updated_at = CURRENT_TIMESTAMP 
         WHERE id = $2
@@ -1887,7 +2000,17 @@ func handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the new name in the response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"id":   folderID,
+		"name": newName,
+	})
 }
 
 func handleMoveFolderStructure(w http.ResponseWriter, r *http.Request) {

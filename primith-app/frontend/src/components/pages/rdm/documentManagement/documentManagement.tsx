@@ -48,14 +48,38 @@ export function DocumentManagement() {
     }
   }
 
-  const handleCreateFolder = async (parentId: string | null, name: string) => {
+  const handleCreateFolder = async (parentId: string | null, suggestedName: string) => {
     try {
-      await documentService.createFolder(name, parentId)
-      await loadFolders()
+      // Start with suggested name or "New Folder" as base
+      const baseName = suggestedName || "New Folder";
+      let counter = 1;
+      let uniqueName = baseName;
+  
+      // Get all folders at the same level
+      const siblingFolders = folders.filter(f => f.parentId === parentId);
+      
+      // Keep incrementing counter until we find a unique name
+      while (true) {
+        // Check if current name exists (case insensitive)
+        const nameExists = siblingFolders.some(
+          f => f.name.toLowerCase() === uniqueName.toLowerCase()
+        );
+  
+        if (!nameExists) {
+          break;
+        }
+  
+        // If name exists, increment counter and try again
+        uniqueName = `${baseName} (${counter})`;
+        counter++;
+      }
+  
+      await documentService.createFolder(uniqueName, parentId);
+      await loadFolders();
     } catch (error) {
-      console.error('Failed to create folder:', error)
+      console.error('Failed to create folder:', error);
     }
-  }
+  };
 
   const handleMoveFolder = async (folderId: string, newParentId: string | null) => {
     try {
@@ -75,14 +99,46 @@ export function DocumentManagement() {
     }
   }
 
-  const handleRenameFolder = async (folderId: string, newName: string) => {
-    try {
-      await documentService.renameFolder(folderId, newName)
-      await loadFolders()
-    } catch (error) {
-      console.error('Failed to rename folder:', error)
+const handleRenameFolder = async (folderId: string, newName: string) => {
+  try {
+    const folder = folders.find(f => f.id === folderId);
+    if (!folder) return;
+
+    const trimmedNewName = newName.trim();
+    if (folder.name === trimmedNewName) return;
+
+    // Get all siblings except the current folder
+    const siblings = folders.filter(f => 
+      f.parentId === folder.parentId && 
+      f.id !== folder.id
+    );
+
+    // Check if the new name already exists among siblings
+    const nameExists = siblings.some(
+      f => f.name.toLowerCase() === trimmedNewName.toLowerCase()
+    );
+
+    if (nameExists) {
+      let counter = 1;
+      let uniqueName = trimmedNewName;
+
+      while (siblings.some(
+        f => f.name.toLowerCase() === uniqueName.toLowerCase()
+      )) {
+        uniqueName = `${trimmedNewName} (${counter})`;
+        counter++;
+      }
+
+      await documentService.renameFolder(folderId, uniqueName);
+    } else {
+      await documentService.renameFolder(folderId, trimmedNewName);
     }
+    
+    await loadFolders();
+  } catch (error) {
+    console.error('Failed to rename folder:', error);
   }
+};
 
   const handleFileUpload = async (file: File) => {
     setIsUploading(true)

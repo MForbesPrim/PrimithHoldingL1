@@ -1,6 +1,15 @@
 // src/components/FolderTree.tsx
 import { useState, useEffect } from 'react'
-import { ChevronRight, ChevronDown, Folder, FolderPlus, FolderEdit, Trash2, Plus, MoreHorizontal } from 'lucide-react'
+import { 
+  ChevronRight, 
+  ChevronDown, 
+  Folder, 
+  FolderPlus, 
+  FolderEdit, 
+  Trash2, 
+  Plus,
+  MoreHorizontal
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -91,12 +100,9 @@ export function FolderTree({
     }
   
     if (overFolderId.startsWith('dropzone-')) {
-      // When dropping into a dropzone, we want the folder to become a sibling
-      // of the folder associated with that dropzone
       const targetFolder = folders.find(f => f.id === overFolderId.replace('dropzone-', ''));
       onMoveFolder(draggedId, targetFolder?.parentId || null);
     } else {
-      // When dropping directly onto a folder, make it a child of that folder
       onMoveFolder(draggedId, overFolderId);
     }
   };
@@ -142,8 +148,7 @@ export function FolderTree({
     };
 
     const handleFinishRename = () => {
-        // Trim whitespace and ensure the new name is not blank.
-        const trimmedName = newFolderName.trim()
+        const trimmedName = newFolderName.trim();
         if (!trimmedName) {
           toast({
             title: "Invalid Folder Name",
@@ -151,12 +156,12 @@ export function FolderTree({
             variant: "default",
             duration: 5000,
           });
-          return; // Remain in editing mode until a valid name is entered.
+          return;
         }
-        if (trimmedName !== folder.name) {
-          onRenameFolder(folder.id, trimmedName)
-        }
-        setEditingFolder(null)
+      
+        // Don't need to check for duplicates here as it's handled in the parent component
+        onRenameFolder(folder.id, trimmedName);
+        setEditingFolder(null);
       };
 
     return (
