@@ -275,7 +275,7 @@ export function PortalHomePage() {
     <div className="flex">
     <div className="w-60 shrink-0"></div>
     <main className="container px-4 py-8 max-w-full">
-    <h1 className="text-3xl font-bold mb-4 text-[#172B4D] dark:text-gray-300">
+    <h1 className="text-3xl font-bold mb-4 dark:text-gray-300">
         Hello, {user ? `${user.firstName}` : 'User'}
       </h1>
       <Card 
