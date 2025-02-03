@@ -33,10 +33,9 @@ interface ChatResponse {
 interface ChatBotProps {
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
-  setShowTooltip: (show: boolean) => void;
 }
 
-export function ChatBot({ isOpen, setIsOpen, setShowTooltip }: ChatBotProps) {
+export function ChatBot({ isOpen, setIsOpen }: ChatBotProps) {
   const { toast } = useToast()
     const [question, setQuestion] = useState("")
     const [response, setResponse] = useState<ChatResponse | null>(null)
@@ -60,7 +59,6 @@ export function ChatBot({ isOpen, setIsOpen, setShowTooltip }: ChatBotProps) {
       if (!open) {
           setQuestion("")
           setResponse(null)
-          setShowTooltip(false)
       }
   }
 

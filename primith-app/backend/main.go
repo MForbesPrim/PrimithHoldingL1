@@ -178,6 +178,22 @@ type TableData struct {
 	Rows    [][]string `json:"rows"`
 }
 
+type Folder struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	ProjectID      string    `json:"projectId"`
+	ParentID       *string   `json:"parentId"`
+	OrganizationID string    `json:"organizationId"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type CreateFolderRequest struct {
+	ProjectID string  `json:"projectId"`
+	Name      string  `json:"name"`
+	ParentID  *string `json:"parentId"`
+}
+
 // JWT related constants
 const JWT_EXPIRY = 24 * time.Hour
 
@@ -364,10 +380,22 @@ func validateToken(tokenString string) (*Claims, error) {
 
 func login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	log.Println("Received /login request")
+
+	// Get IP address and user agent
+	ipAddress := r.Header.Get("X-Real-IP")
+	if ipAddress == "" {
+		ipAddress = r.RemoteAddr
+	}
+	userAgent := r.Header.Get("User-Agent")
 
 	var user User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+		// Record failed attempt
+		var auditID string
+		if _, dbErr := db.Exec(`CALL auth.record_login_attempt($1, $2, $3, $4, $5, $6, $7)`,
+			nil, user.Username, ipAddress, userAgent, "failed", "Invalid request format", &auditID); dbErr != nil {
+			log.Printf("Failed to record login attempt: %v", dbErr)
+		}
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(LoginResponse{
 			Success: false,
@@ -379,10 +407,19 @@ func login(w http.ResponseWriter, r *http.Request) {
 	// Query the database for the user
 	var storedHash string
 	var userData UserData
-	err := db.QueryRow("SELECT password_hash, first_name, last_name, email FROM auth.users WHERE email = $1",
-		user.Username).Scan(&storedHash, &userData.FirstName, &userData.LastName, &userData.Email)
+	var userID string
+	err := db.QueryRow(`
+		SELECT id, password_hash, first_name, last_name, email 
+		FROM auth.users WHERE email = $1`,
+		user.Username).Scan(&userID, &storedHash, &userData.FirstName, &userData.LastName, &userData.Email)
 
 	if err == sql.ErrNoRows {
+		// Record failed attempt for non-existent user
+		var auditID string
+		if _, dbErr := db.Exec(`CALL auth.record_login_attempt($1, $2, $3, $4, $5, $6, $7)`,
+			nil, user.Username, ipAddress, userAgent, "failed", "User not found", &auditID); dbErr != nil {
+			log.Printf("Failed to record login attempt: %v", dbErr)
+		}
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(LoginResponse{
 			Success: false,
@@ -401,6 +438,11 @@ func login(w http.ResponseWriter, r *http.Request) {
 
 	// Compare the password
 	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(user.Password)); err != nil {
+		var auditID string
+		if _, dbErr := db.Exec(`CALL auth.record_login_attempt($1, $2, $3, $4, $5, $6, $7)`,
+			userID, user.Username, ipAddress, userAgent, "failed", "Invalid password", &auditID); dbErr != nil {
+			log.Printf("Failed to record login attempt: %v", dbErr)
+		}
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(LoginResponse{
 			Success: false,
@@ -451,7 +493,12 @@ func login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Login successful for user: %s", user.Username)
+	// Record successful login
+	if _, dbErr := db.Exec(`CALL auth.record_login_attempt($1, $2, $3, $4, $5, $6)`,
+		userID, user.Username, ipAddress, userAgent, "success", nil); dbErr != nil {
+		log.Printf("Failed to record successful login attempt for user %s: %v", user.Username, dbErr)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(LoginResponse{
 		Success:      true,
@@ -1621,6 +1668,378 @@ func handleCheckRdmAccess(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get user's organization ID
+	var organizationID string
+	err := db.QueryRow(`
+        SELECT o.id 
+        FROM auth.organizations o
+        JOIN auth.organization_members om ON o.id = om.organization_id
+        JOIN auth.users u ON u.id = om.user_id
+        WHERE u.email = $1
+    `, claims.Username).Scan(&organizationID)
+
+	if err != nil {
+		http.Error(w, "User not associated with an organization", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Name     string  `json:"name"`
+		ParentID *string `json:"parentId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// If parentId is provided, verify it belongs to user's organization
+	if req.ParentID != nil {
+		var parentOrgID string
+		err = db.QueryRow(`
+            SELECT organization_id 
+            FROM rdm.folders 
+            WHERE id = $1
+        `, req.ParentID).Scan(&parentOrgID)
+
+		if err != nil || parentOrgID != organizationID {
+			http.Error(w, "Parent folder not found or access denied", http.StatusForbidden)
+			return
+		}
+	}
+
+	var folderID string
+	err = db.QueryRow(`
+        INSERT INTO rdm.folders (name, parent_id, organization_id)
+        VALUES ($1, $2, $3)
+        RETURNING id
+    `, req.Name, req.ParentID, organizationID).Scan(&folderID)
+
+	if err != nil {
+		log.Printf("Error creating folder: %v", err)
+		http.Error(w, "Failed to create folder", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"id": folderID,
+	})
+}
+
+func handleGetFolders(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	rows, err := db.Query(`
+        WITH RECURSIVE folder_tree AS (
+            -- Base case: get root folders
+            SELECT 
+                id, 
+                name, 
+                parent_id, 
+                1 as level, 
+                ARRAY[name::text] as path
+            FROM rdm.folders
+            WHERE parent_id IS NULL 
+            AND organization_id IN (
+                SELECT o.id
+                FROM auth.organizations o
+                JOIN auth.organization_members om ON o.id = om.organization_id
+                JOIN auth.users u ON u.id = om.user_id
+                WHERE u.email = $1
+            )
+            
+            UNION ALL
+            
+            -- Recursive case: get child folders
+            SELECT 
+                f.id, 
+                f.name, 
+                f.parent_id, 
+                ft.level + 1, 
+                ft.path || f.name::text
+            FROM rdm.folders f
+            INNER JOIN folder_tree ft ON f.parent_id = ft.id
+        )
+        SELECT id, name, parent_id
+        FROM folder_tree
+        ORDER BY path;
+    `, claims.Username)
+
+	if err != nil {
+		log.Printf("Error fetching folders: %v", err)
+		http.Error(w, "Failed to fetch folders", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var folders []Folder
+	for rows.Next() {
+		var folder Folder
+		err := rows.Scan(&folder.ID, &folder.Name, &folder.ParentID)
+		if err != nil {
+			log.Printf("Error scanning folder row: %v", err)
+			continue
+		}
+		folders = append(folders, folder)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(folders)
+}
+
+func handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	folderID := vars["id"]
+
+	// Start a transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Verify user has access to the folder
+	var authorized bool
+	err = tx.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1
+            FROM rdm.folders f
+            JOIN auth.organization_members om ON f.organization_id = om.organization_id
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE f.id = $1 AND u.email = $2
+        )
+    `, folderID, claims.Username).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Folder not found or access denied", http.StatusForbidden)
+		return
+	}
+
+	// Delete the folder and all its children (relies on CASCADE)
+	_, err = tx.Exec("DELETE FROM rdm.folders WHERE id = $1", folderID)
+	if err != nil {
+		log.Printf("Error deleting folder: %v", err)
+		http.Error(w, "Failed to delete folder", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleRenameFolder(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	folderID := vars["id"]
+
+	// Verify user has access to this folder
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1
+            FROM rdm.folders f
+            JOIN auth.organization_members om ON f.organization_id = om.organization_id
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE f.id = $1 AND u.email = $2
+        )
+    `, folderID, claims.Username).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Folder not found or access denied", http.StatusForbidden)
+		return
+	}
+
+	// Decode the request body into a temporary struct
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Trim whitespace from the folder name and check if it's empty
+	newName := strings.TrimSpace(req.Name)
+	if newName == "" {
+		http.Error(w, "Folder name cannot be blank", http.StatusBadRequest)
+		return
+	}
+
+	// Update the folder with the new name
+	_, err = db.Exec(`
+        UPDATE rdm.folders 
+        SET name = $1, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = $2
+    `, newName, folderID)
+
+	if err != nil {
+		log.Printf("Error renaming folder: %v", err)
+		http.Error(w, "Failed to rename folder", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleMoveFolderStructure(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	folderID := vars["id"]
+
+	var req struct {
+		NewParentID *string `json:"newParentId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Start a transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Verify user has access to both folders
+	var authorized bool
+	err = tx.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1
+            FROM rdm.folders f
+            JOIN auth.organization_members om ON f.organization_id = om.organization_id
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE f.id = $1 AND u.email = $2
+        )
+    `, folderID, claims.Username).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Folder not found or access denied", http.StatusForbidden)
+		return
+	}
+
+	// If moving to a new parent, verify access to parent folder
+	if req.NewParentID != nil {
+		err = tx.QueryRow(`
+            SELECT EXISTS (
+                SELECT 1
+                FROM rdm.folders f
+                JOIN auth.organization_members om ON f.organization_id = om.organization_id
+                JOIN auth.users u ON u.id = om.user_id
+                WHERE f.id = $1 AND u.email = $2
+            )
+        `, req.NewParentID, claims.Username).Scan(&authorized)
+
+		if err != nil || !authorized {
+			http.Error(w, "Parent folder not found or access denied", http.StatusForbidden)
+			return
+		}
+	}
+
+	// Update the folder's parent
+	_, err = tx.Exec(`
+        UPDATE rdm.folders 
+        SET parent_id = $1, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = $2
+    `, req.NewParentID, folderID)
+
+	if err != nil {
+		log.Printf("Error moving folder: %v", err)
+		http.Error(w, "Failed to move folder", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	refreshTokenString := r.Header.Get("X-Refresh-Token")
+	if refreshTokenString == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(AuthResponse{
+			Success: false,
+			Message: "No refresh token provided",
+		})
+		return
+	}
+
+	claims, err := validateToken(refreshTokenString)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(AuthResponse{
+			Success: false,
+			Message: "Invalid refresh token",
+		})
+		return
+	}
+
+	// Generate new access token
+	accessClaims := &Claims{
+		Username: claims.Username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	// Generate new refresh token
+	refreshClaims := &Claims{
+		Username: claims.Username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	accessTokenString, err := accessToken.SignedString([]byte(JWT_SECRET_KEY))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(AuthResponse{
+			Success: false,
+			Message: "Failed to generate new access token",
+		})
+		return
+	}
+
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshTokenString, err = refreshToken.SignedString([]byte(JWT_SECRET_KEY))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(AuthResponse{
+			Success: false,
+			Message: "Failed to generate new refresh token",
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(AuthResponse{
+		Success:      true,
+		Message:      "RDM tokens refreshed successfully",
+		Token:        accessTokenString,
+		RefreshToken: refreshTokenString,
+	})
+}
+
 func main() {
 	r := mux.NewRouter()
 	c := cors.New(cors.Options{
@@ -1699,6 +2118,12 @@ func main() {
 
 	// RDM API
 	r.HandleFunc("/rdm/access", authMiddleware(handleCheckRdmAccess)).Methods("GET")
+	r.HandleFunc("/rdm/refresh", handleRdmRefreshToken).Methods("POST")
+	r.HandleFunc("/folders", authMiddleware(handleCreateFolder)).Methods("POST")
+	r.HandleFunc("/folders", authMiddleware(handleGetFolders)).Methods("GET")
+	r.HandleFunc("/folders/{id}", authMiddleware(handleDeleteFolder)).Methods("DELETE")
+	r.HandleFunc("/folders/{id}", authMiddleware(handleRenameFolder)).Methods("PUT")
+	r.HandleFunc("/folders/{id}/move", authMiddleware(handleMoveFolderStructure)).Methods("POST")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

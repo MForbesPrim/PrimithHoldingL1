@@ -25,7 +25,7 @@ import {
 import { ChatBot } from "@/components/pages/portal/primithChat"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
 export function PortalHomePage() {
   const user = AuthService.getUser()
@@ -34,14 +34,6 @@ export function PortalHomePage() {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false)
-  const [showChatTooltip, setShowChatTooltip] = useState(false)
-
-  useEffect(() => {
-    if (!isChatOpen) {
-      setShowChatTooltip(false)
-    }
-  }, [isChatOpen])
-  
   const handleRdmNavigation = async () => {
     try {
       // Pass `navigate` into AuthService
@@ -145,26 +137,10 @@ export function PortalHomePage() {
         <div className="ml-auto flex items-center space-x-4">
           <TooltipProvider>
             {/* Chat Assistant */}
-            <TooltipProvider>
-              <Tooltip open={showChatTooltip && !isChatOpen}>
-                  <TooltipTrigger asChild>
-                      <div 
-                          onMouseEnter={() => setShowChatTooltip(true)}
-                          onMouseLeave={() => setShowChatTooltip(false)}
-                      >
-                          <ChatBot 
-                              isOpen={isChatOpen}
-                              setIsOpen={setIsChatOpen}
-                              setShowTooltip={setShowChatTooltip}
+            <ChatBot 
+                isOpen={isChatOpen}
+                setIsOpen={setIsChatOpen}
                           />
-                      </div>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                      <p>Chat Assistant</p>
-                  </TooltipContent>
-              </Tooltip>
-          </TooltipProvider>
-
             {/* Notifications */}
             <TooltipProvider>
                 <Tooltip open={showTooltip && !isNotificationOpen}>

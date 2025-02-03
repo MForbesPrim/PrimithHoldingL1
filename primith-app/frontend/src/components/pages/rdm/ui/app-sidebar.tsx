@@ -26,21 +26,23 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Link } from 'react-router-dom'
+
 // Menu items.
 const items = [
   {
-    title: "Dasbooard",
-    url: "#",
+    title: "Dashboard",
+    url: "/rdm",
     icon: PanelsTopLeft,
   },
   {
     title: "Projects",
-    url: "#",
+    url: "/projects",
     icon: Box,
   },
   {
     title: "Document Management",
-    url: "#",
+    url: "/document-management",
     icon: Layers2,
   },
   {
@@ -106,10 +108,10 @@ export function AppSidebar() {
               {items.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
-                    <a href={item.url}>
+                    <Link to={item.url}>
                       <item.icon />
                       <span className="font-bold text-xs">{item.title}</span>
-                    </a>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

@@ -615,6 +615,8 @@ static async checkRdmAccess(): Promise<boolean> {
     return false
   }
 }
+
+
 static async verifyAndNavigateToRdm(navigate: (path: string) => void) {
   const tokens = AuthService.getTokens()
   const user = AuthService.getUser()
@@ -639,6 +641,41 @@ static async verifyAndNavigateToRdm(navigate: (path: string) => void) {
   // Then navigate client-side to /rdm
   navigate('/rdm')
 } 
+
+static async refreshRdmAccessToken(): Promise<AuthTokens | null> {
+  const refreshToken = localStorage.getItem(this.RDM_REFRESH_TOKEN_KEY);
+  if (!refreshToken) return null;
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/rdm/refresh`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Refresh-Token': refreshToken
+      }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && data.token && data.refreshToken) {
+        const tokens = {
+          token: data.token,
+          refreshToken: data.refreshToken
+        };
+        const user = this.getUser(); // Get current user
+        if (user) {
+          this.setRdmTokens(tokens, user);
+        }
+        return tokens;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error('Error refreshing RDM tokens:', error);
+    return null;
+  }
+}
+
 }
 
 export default AuthService;
