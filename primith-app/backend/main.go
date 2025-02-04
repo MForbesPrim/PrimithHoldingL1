@@ -1932,12 +1932,27 @@ func handleGetFolders(w http.ResponseWriter, r *http.Request) {
 	var folders []FolderWithMetadata
 	for rows.Next() {
 		var folder FolderWithMetadata
-		err := rows.Scan(&folder.ID, &folder.Name, &folder.ParentID,
-			&folder.OrganizationID, &folder.UpdatedAt, &folder.FileCount, &folder.LastUpdatedBy)
+		var lastUpdated sql.NullString
+		err := rows.Scan(
+			&folder.ID,
+			&folder.Name,
+			&folder.ParentID,
+			&folder.OrganizationID,
+			&folder.UpdatedAt,
+			&folder.FileCount,
+			&lastUpdated,
+		)
 		if err != nil {
 			log.Printf("Error scanning folder row: %v", err)
 			continue
 		}
+
+		if lastUpdated.Valid {
+			folder.LastUpdatedBy = lastUpdated.String
+		} else {
+			folder.LastUpdatedBy = ""
+		}
+
 		folders = append(folders, folder)
 	}
 
