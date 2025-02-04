@@ -18,3 +18,16 @@ export interface DocumentMetadata {
     parentId: string | null;
     children?: FolderNode[];
   }
+
+  export interface Organization {
+    id: string;
+    name: string;
+    description?: string;
+    services?: Service[];
+  }
+  
+  export interface Service {
+    id: string;
+    name: string;
+    status?: 'active' | 'inactive';
+  }

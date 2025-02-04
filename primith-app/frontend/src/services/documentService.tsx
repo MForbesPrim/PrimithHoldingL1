@@ -49,10 +49,25 @@ export class DocumentService {
     };
   }
   
-  async uploadDocument(file: File, folderId: string | null = null): Promise<DocumentMetadata> {
+  async getDocuments(folderId: string | null = null, organizationId: string): Promise<DocumentMetadata[]> {
+    const url = new URL(`${this.baseUrl}/documents`);
+    if (folderId) url.searchParams.append('folderId', folderId);
+    url.searchParams.append('organizationId', organizationId);
+
+    const headers = await this.getAuthHeader();
+    const response = await fetch(url.toString(), {
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error('Failed to fetch documents');
+    return response.json();
+  }
+
+  async uploadDocument(file: File, folderId: string | null = null, organizationId: string): Promise<DocumentMetadata> {
     const formData = new FormData();
     formData.append('file', file);
     if (folderId) formData.append('folderId', folderId);
+    formData.append('organizationId', organizationId);
 
     const headers = await this.getAuthHeader();
     const response = await fetch(`${this.baseUrl}/documents/upload`, {
@@ -61,39 +76,61 @@ export class DocumentService {
       headers: { 'Authorization': headers.Authorization },
       body: formData,
     });
-
     if (!response.ok) throw new Error('Failed to upload document');
     return response.json();
   }
 
-  async getDocuments(folderId: string | null = null): Promise<DocumentMetadata[]> {
-    const url = new URL(`${this.baseUrl}/documents`);
-    if (folderId) url.searchParams.append('folderId', folderId);
-
+  async getFolders(organizationId: string): Promise<FolderNode[]> {
     const headers = await this.getAuthHeader();
-    const response = await fetch(url.toString(), {
+    const response = await fetch(`${this.baseUrl}/folders?organizationId=${organizationId}`, {
       credentials: 'include',
       headers
     });
-    
-    if (!response.ok) throw new Error('Failed to fetch documents');
+    if (!response.ok) throw new Error('Failed to fetch folders');
     return response.json();
   }
 
-  async moveFolder(folderId: string, newParentId: string | null): Promise<void> {
+  async createFolder(name: string, parentId: string | null = null, organizationId: string): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/folders`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify({ name, parentId, organizationId }),
+    });
+    if (!response.ok) throw new Error('Failed to create folder');
+  }
+
+  async deleteFolder(folderId: string, organizationId: string): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/folders/${folderId}?organizationId=${organizationId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error('Failed to delete folder');
+  }
+
+  async renameFolder(folderId: string, newName: string, organizationId: string): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/folders/${folderId}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify({ name: newName, organizationId }),
+    });
+    if (!response.ok) throw new Error('Failed to rename folder');
+  }
+
+  async moveFolder(folderId: string, newParentId: string | null, organizationId: string): Promise<void> {
     const headers = await this.getAuthHeader();
     const response = await fetch(`${this.baseUrl}/folders/${folderId}/move`, {
       method: 'POST',
       credentials: 'include',
       headers,
-      body: JSON.stringify({ newParentId }),
+      body: JSON.stringify({ newParentId, organizationId }),
     });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Failed to move folder:', errorText);
-      throw new Error('Failed to move folder');
-    }
+    if (!response.ok) throw new Error('Failed to move folder');
   }
 
   async downloadDocument(documentId: string): Promise<Blob> {
@@ -102,55 +139,7 @@ export class DocumentService {
       credentials: 'include',
       headers
     });
-    
     if (!response.ok) throw new Error('Failed to download document');
     return response.blob();
-  }
-
-  async getFolders(): Promise<FolderNode[]> {
-    const headers = await this.getAuthHeader();
-    const response = await fetch(`${this.baseUrl}/folders`, {
-      credentials: 'include',
-      headers
-    });
-    if (!response.ok) throw new Error('Failed to fetch folders');
-    return response.json();
-  }
-
-  async createFolder(name: string, parentId: string | null = null): Promise<void> {
-    const headers = await this.getAuthHeader();
-    const response = await fetch(`${this.baseUrl}/folders`, {
-      method: 'POST',
-      credentials: 'include',
-      headers,
-      body: JSON.stringify({ name, parentId }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Failed to create folder:', errorText);
-      throw new Error('Failed to create folder');
-    }
-  }
-
-  async deleteFolder(folderId: string): Promise<void> {
-    const headers = await this.getAuthHeader();
-    const response = await fetch(`${this.baseUrl}/folders/${folderId}`, {
-      method: 'DELETE',
-      credentials: 'include',
-      headers
-    });
-    if (!response.ok) throw new Error('Failed to delete folder');
-  }
-
-  async renameFolder(folderId: string, newName: string): Promise<void> {
-    const headers = await this.getAuthHeader();
-    const response = await fetch(`${this.baseUrl}/folders/${folderId}`, {
-      method: 'PUT',
-      credentials: 'include',
-      headers,
-      body: JSON.stringify({ name: newName }),
-    });
-    if (!response.ok) throw new Error('Failed to rename folder');
   }
 }

@@ -676,6 +676,20 @@ static async refreshRdmAccessToken(): Promise<AuthTokens | null> {
   }
 }
 
+static async getRdmOrganizations(): Promise<Organization[]> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error("No authentication tokens");
+  
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/rdm/organizations`, {
+    headers: {
+      Authorization: `Bearer ${tokens.token}`,
+    },
+  });
+  if (!response.ok) throw new Error("Failed to fetch RDM organizations");
+  const data = await response.json();
+  return data.organizations;
+}
+
 }
 
 export default AuthService;

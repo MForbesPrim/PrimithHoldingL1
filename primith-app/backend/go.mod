@@ -22,6 +22,7 @@ require (
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai v0.7.1
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
+	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.10.9
 	github.com/sendgrid/rest v2.6.9+incompatible // indirect
 	github.com/stretchr/testify v1.10.0 // indirect

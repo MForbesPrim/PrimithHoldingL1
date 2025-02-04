@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/clerk/clerk-sdk-go/v2"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 	"github.com/rs/cors"
@@ -1641,19 +1644,30 @@ func parseMarkdownTable(content string) *TableData {
 }
 
 func handleCheckRdmAccess(w http.ResponseWriter, r *http.Request) {
+	organizationId := r.URL.Query().Get("organizationId")
 	claims := r.Context().Value(claimsKey).(*Claims)
 
-	var hasAccess bool
-	err := db.QueryRow(`
+	query := `
         SELECT EXISTS(
-            SELECT 1 FROM services.organization_services os
+            SELECT 1 
+            FROM services.organization_services os
             JOIN auth.organizations o ON os.organization_id = o.id
             JOIN auth.organization_members om ON o.id = om.organization_id
             JOIN auth.users u ON om.user_id = u.id
             WHERE u.email = $1 
             AND os.service_id = (SELECT id FROM services.services WHERE name = 'rdm')
-        )
-    `, claims.Username).Scan(&hasAccess)
+    `
+	args := []interface{}{claims.Username}
+
+	if organizationId != "" {
+		query += " AND o.id = $2"
+		args = append(args, organizationId)
+	}
+
+	query += ")"
+
+	var hasAccess bool
+	err := db.QueryRow(query, args...).Scan(&hasAccess)
 
 	if err != nil {
 		http.Error(w, "Error checking RDM access", http.StatusInternalServerError)
@@ -1671,6 +1685,33 @@ func handleCheckRdmAccess(w http.ResponseWriter, r *http.Request) {
 func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
 
+	var req struct {
+		Name           string  `json:"name"`
+		ParentID       *string `json:"parentId"`
+		OrganizationID string  `json:"organizationId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, req.OrganizationID).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Unauthorized access to organization", http.StatusForbidden)
+		return
+	}
+
+	// Start transaction
 	tx, err := db.Begin()
 	if err != nil {
 		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
@@ -1678,28 +1719,24 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Get user's organization ID
-	var organizationID string
-	err = tx.QueryRow(`
-        SELECT o.id 
-        FROM auth.organizations o
-        JOIN auth.organization_members om ON o.id = om.organization_id
-        JOIN auth.users u ON u.id = om.user_id
-        WHERE u.email = $1
-    `, claims.Username).Scan(&organizationID)
+	// If parentID is provided, verify it belongs to the same organization
+	if req.ParentID != nil {
+		var parentOrgID string
+		err := tx.QueryRow(`
+            SELECT organization_id 
+            FROM rdm.folders 
+            WHERE id = $1
+        `, req.ParentID).Scan(&parentOrgID)
 
-	if err != nil {
-		http.Error(w, "User not associated with an organization", http.StatusForbidden)
-		return
-	}
+		if err != nil {
+			http.Error(w, "Parent folder not found", http.StatusNotFound)
+			return
+		}
 
-	var req struct {
-		Name     string  `json:"name"`
-		ParentID *string `json:"parentId"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+		if parentOrgID != req.OrganizationID {
+			http.Error(w, "Parent folder belongs to different organization", http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Trim whitespace
@@ -1711,21 +1748,20 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 
 	// Check for duplicate names at the same level
 	var duplicateExists bool
-	log.Printf("[DEBUG][CreateFolder] Checking for duplicate folder: name=%q, parentID=%v, organizationID=%s", name, req.ParentID, organizationID)
 	err = tx.QueryRow(`
-    SELECT EXISTS (
-        SELECT 1 
-        FROM rdm.folders 
-        WHERE parent_id IS NOT DISTINCT FROM $1
-        AND organization_id = $2
-        AND name ILIKE $3
-    )
-	`, req.ParentID, organizationID, name).Scan(&duplicateExists)
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.folders 
+            WHERE parent_id IS NOT DISTINCT FROM $1
+            AND organization_id = $2
+            AND name ILIKE $3
+        )
+    `, req.ParentID, req.OrganizationID, name).Scan(&duplicateExists)
+
 	if err != nil {
 		http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("[DEBUG][CreateFolder] Duplicate exists for %q: %v", name, duplicateExists)
 
 	// If duplicate exists, find a unique name
 	if duplicateExists {
@@ -1733,7 +1769,6 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		baseName := name
 		for duplicateExists {
 			name = fmt.Sprintf("%s (%d)", baseName, counter)
-			log.Printf("[DEBUG][CreateFolder] Trying new folder name: %q", name)
 			err = tx.QueryRow(`
                 SELECT EXISTS (
                     SELECT 1 
@@ -1742,27 +1777,26 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
                     AND organization_id = $2
                     AND LOWER(name) = LOWER($3)
                 )
-            `, req.ParentID, organizationID, name).Scan(&duplicateExists)
+            `, req.ParentID, req.OrganizationID, name).Scan(&duplicateExists)
 
 			if err != nil {
 				http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
 				return
 			}
-			log.Printf("[DEBUG][CreateFolder] Duplicate exists for %q: %v", name, duplicateExists)
 			counter++
 		}
-		log.Printf("[DEBUG][CreateFolder] Final folder name determined: %q", name)
 	}
 
+	// Create the folder
 	var folderID string
 	err = tx.QueryRow(`
         INSERT INTO rdm.folders (name, parent_id, organization_id)
         VALUES ($1, $2, $3)
         RETURNING id
-    `, name, req.ParentID, organizationID).Scan(&folderID)
+    `, name, req.ParentID, req.OrganizationID).Scan(&folderID)
 
 	if err != nil {
-		log.Printf("[ERROR][CreateFolder] Error creating folder: %v", err)
+		log.Printf("Error creating folder: %v", err)
 		http.Error(w, "Failed to create folder", http.StatusInternalServerError)
 		return
 	}
@@ -1774,49 +1808,106 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":   folderID,
-		"name": name,
+		"id":             folderID,
+		"name":           name,
+		"parentId":       req.ParentID,
+		"organizationId": req.OrganizationID,
+	})
+}
+
+func handleGetUserRdmOrganizations(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	rows, err := db.Query(`
+        SELECT DISTINCT o.id, o.name, o.description, o.created_at, o.updated_at
+        FROM auth.organizations o
+        JOIN auth.organization_members om ON o.id = om.organization_id
+        JOIN auth.users u ON om.user_id = u.id
+        JOIN services.organization_services os ON o.id = os.organization_id
+        JOIN services.services s ON os.service_id = s.id
+        WHERE u.email = $1 
+        AND s.name = 'rdm'
+        AND os.status = 'active'
+        ORDER BY o.name
+    `, claims.Username)
+
+	if err != nil {
+		http.Error(w, "Failed to fetch organizations", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var organizations []Organization
+	for rows.Next() {
+		var org Organization
+		err := rows.Scan(&org.ID, &org.Name, &org.Description, &org.CreatedAt, &org.UpdatedAt)
+		if err != nil {
+			http.Error(w, "Error scanning organizations", http.StatusInternalServerError)
+			return
+		}
+		organizations = append(organizations, org)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"organizations": organizations,
 	})
 }
 
 func handleGetFolders(w http.ResponseWriter, r *http.Request) {
+	organizationId := r.URL.Query().Get("organizationId")
+	if organizationId == "" {
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
 	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
 
 	rows, err := db.Query(`
         WITH RECURSIVE folder_tree AS (
-            -- Base case: get root folders
             SELECT 
                 id, 
                 name, 
                 parent_id, 
+                organization_id,
                 1 as level, 
                 ARRAY[name::text] as path
             FROM rdm.folders
             WHERE parent_id IS NULL 
-            AND organization_id IN (
-                SELECT o.id
-                FROM auth.organizations o
-                JOIN auth.organization_members om ON o.id = om.organization_id
-                JOIN auth.users u ON u.id = om.user_id
-                WHERE u.email = $1
-            )
+            AND organization_id = $1
             
             UNION ALL
             
-            -- Recursive case: get child folders
             SELECT 
                 f.id, 
                 f.name, 
                 f.parent_id, 
+                f.organization_id,
                 ft.level + 1, 
                 ft.path || f.name::text
             FROM rdm.folders f
             INNER JOIN folder_tree ft ON f.parent_id = ft.id
         )
-        SELECT id, name, parent_id
+        SELECT id, name, parent_id, organization_id
         FROM folder_tree
         ORDER BY path;
-    `, claims.Username)
+    `, organizationId)
 
 	if err != nil {
 		log.Printf("Error fetching folders: %v", err)
@@ -1828,7 +1919,7 @@ func handleGetFolders(w http.ResponseWriter, r *http.Request) {
 	var folders []Folder
 	for rows.Next() {
 		var folder Folder
-		err := rows.Scan(&folder.ID, &folder.Name, &folder.ParentID)
+		err := rows.Scan(&folder.ID, &folder.Name, &folder.ParentID, &folder.OrganizationID)
 		if err != nil {
 			log.Printf("Error scanning folder row: %v", err)
 			continue
@@ -2090,6 +2181,292 @@ func handleMoveFolderStructure(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
+	organizationId := r.URL.Query().Get("organizationId")
+	folderId := r.URL.Query().Get("folderId")
+
+	if organizationId == "" {
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	// Build the query based on whether a folder ID is provided
+	query := `
+        SELECT 
+            d.id,
+            d.name,
+            d.file_type,
+            d.file_size,
+            d.version,
+            d.updated_at,
+            d.folder_id,
+            d.organization_id
+        FROM rdm.documents d
+        WHERE d.organization_id = $1
+    `
+	args := []interface{}{organizationId}
+
+	if folderId != "" {
+		query += " AND d.folder_id = $2"
+		args = append(args, folderId)
+	}
+
+	query += " ORDER BY d.updated_at DESC"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		log.Printf("Error querying documents: %v", err)
+		http.Error(w, "Failed to fetch documents", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type Document struct {
+		ID             string    `json:"id"`
+		Name           string    `json:"name"`
+		FileType       string    `json:"fileType"`
+		FileSize       int64     `json:"fileSize"`
+		Version        int       `json:"version"`
+		UpdatedAt      time.Time `json:"updatedAt"`
+		FolderID       *string   `json:"folderId"`
+		OrganizationID string    `json:"organizationId"`
+	}
+
+	var documents []Document
+
+	for rows.Next() {
+		var doc Document
+		if err := rows.Scan(
+			&doc.ID,
+			&doc.Name,
+			&doc.FileType,
+			&doc.FileSize,
+			&doc.Version,
+			&doc.UpdatedAt,
+			&doc.FolderID,
+			&doc.OrganizationID,
+		); err != nil {
+			log.Printf("Error scanning document row: %v", err)
+			continue
+		}
+		documents = append(documents, doc)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(documents)
+}
+
+func handleUploadDocument(w http.ResponseWriter, r *http.Request) {
+	organizationId := r.FormValue("organizationId")
+	folderId := r.FormValue("folderId")
+
+	if organizationId == "" {
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	// Get the file from the request
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Failed to get file from request", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Generate a unique file path
+	fileExt := filepath.Ext(header.Filename)
+	fileName := fmt.Sprintf("%s%s", uuid.New().String(), fileExt)
+	filePath := fmt.Sprintf("uploads/%s/%s", organizationId, fileName)
+
+	// Create the uploads directory if it doesn't exist
+	err = os.MkdirAll(fmt.Sprintf("uploads/%s", organizationId), 0755)
+	if err != nil {
+		http.Error(w, "Failed to create upload directory", http.StatusInternalServerError)
+		return
+	}
+
+	// Create the file
+	dst, err := os.Create(filePath)
+	if err != nil {
+		http.Error(w, "Failed to create file", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+
+	// Copy the uploaded file to the destination
+	if _, err := io.Copy(dst, file); err != nil {
+		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+		return
+	}
+
+	// Get file info for size
+	fileInfo, err := dst.Stat()
+	if err != nil {
+		http.Error(w, "Failed to get file info", http.StatusInternalServerError)
+		return
+	}
+
+	// Insert document record into database
+	var documentId string
+	err = tx.QueryRow(`
+        INSERT INTO rdm.documents (
+            name,
+            file_path,
+            file_type,
+            file_size,
+            version,
+            folder_id,
+            organization_id,
+            created_by
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, (
+            SELECT id FROM auth.users WHERE email = $8
+        ))
+        RETURNING id
+    `,
+		header.Filename,
+		filePath,
+		filepath.Ext(header.Filename),
+		fileInfo.Size(),
+		1,
+		folderId,
+		organizationId,
+		claims.Username,
+	).Scan(&documentId)
+
+	if err != nil {
+		http.Error(w, "Failed to create document record", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the document info
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":             documentId,
+		"name":           header.Filename,
+		"fileType":       filepath.Ext(header.Filename),
+		"fileSize":       fileInfo.Size(),
+		"version":        1,
+		"folderId":       folderId,
+		"organizationId": organizationId,
+	})
+}
+
+func handleDownloadDocument(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	documentId := vars["id"]
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the document's organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1
+            FROM rdm.documents d
+            JOIN auth.organization_members om ON d.organization_id = om.organization_id
+            JOIN auth.users u ON om.user_id = u.id
+            WHERE d.id = $1 AND u.email = $2
+        )
+    `, documentId, claims.Username).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied to document", http.StatusForbidden)
+		return
+	}
+
+	// Get document information
+	var filePath, fileName string
+	err = db.QueryRow(`
+        SELECT file_path, name
+        FROM rdm.documents
+        WHERE id = $1
+    `, documentId).Scan(&filePath, &fileName)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Document not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Failed to fetch document", http.StatusInternalServerError)
+		return
+	}
+
+	// Open the file
+	file, err := os.Open(filePath)
+	if err != nil {
+		http.Error(w, "Failed to open file", http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	// Get file info
+	fileInfo, err := file.Stat()
+	if err != nil {
+		http.Error(w, "Failed to get file info", http.StatusInternalServerError)
+		return
+	}
+
+	// Set response headers
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
+
+	// Stream the file to the response
+	if _, err := io.Copy(w, file); err != nil {
+		log.Printf("Error streaming file: %v", err)
+		return
+	}
+}
+
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -2241,13 +2618,16 @@ func main() {
 
 	// RDM API
 	r.HandleFunc("/rdm/access", authMiddleware(handleCheckRdmAccess)).Methods("GET")
+	r.HandleFunc("/rdm/organizations", authMiddleware(handleGetUserRdmOrganizations)).Methods("GET")
 	r.HandleFunc("/rdm/refresh", handleRdmRefreshToken).Methods("POST")
 	r.HandleFunc("/folders", authMiddleware(handleCreateFolder)).Methods("POST")
 	r.HandleFunc("/folders", authMiddleware(handleGetFolders)).Methods("GET")
 	r.HandleFunc("/folders/{id}", authMiddleware(handleDeleteFolder)).Methods("DELETE")
 	r.HandleFunc("/folders/{id}", authMiddleware(handleRenameFolder)).Methods("PUT")
 	r.HandleFunc("/folders/{id}/move", authMiddleware(handleMoveFolderStructure)).Methods("POST")
-
+	r.HandleFunc("/documents", authMiddleware(handleGetDocuments)).Methods("GET")
+	r.HandleFunc("/documents/upload", authMiddleware(handleUploadDocument)).Methods("POST")
+	r.HandleFunc("/documents/{id}/download", authMiddleware(handleDownloadDocument)).Methods("GET")
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
 
