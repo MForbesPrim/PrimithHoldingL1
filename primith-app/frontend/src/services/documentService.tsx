@@ -82,12 +82,17 @@ export class DocumentService {
 
   async getFolders(organizationId: string): Promise<FolderNode[]> {
     const headers = await this.getAuthHeader();
-    const response = await fetch(`${this.baseUrl}/folders?organizationId=${organizationId}`, {
+    const url = `${this.baseUrl}/folders?organizationId=${organizationId}`;
+    console.log('Fetching folders from URL:', url);
+    
+    const response = await fetch(url, {
       credentials: 'include',
       headers
     });
-  
-    if (!response.ok) throw new Error('Failed to fetch folders');
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch folders');
+    }
     return response.json();
   }
   
