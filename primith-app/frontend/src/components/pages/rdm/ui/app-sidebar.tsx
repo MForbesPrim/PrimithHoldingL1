@@ -9,7 +9,8 @@ import {
     Pickaxe,
     Lightbulb,
     Users,
-    LockKeyhole
+    LockKeyhole,
+    StickyNote
 } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { useState } from "react"
@@ -46,6 +47,11 @@ const items = [
     title: "Document Management",
     url: "/document-management",
     icon: Layers2,
+  },
+  {
+    title: "Pages",
+    url: "#",
+    icon: StickyNote,
   },
   {
     title: "Document Insights",

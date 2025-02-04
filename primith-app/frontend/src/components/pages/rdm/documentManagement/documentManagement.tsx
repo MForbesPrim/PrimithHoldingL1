@@ -14,28 +14,31 @@ import { FileUploader } from "@/components/pages/rdm/documentManagement/fileUplo
 import { FolderTree } from "@/components/pages/rdm/documentManagement/folderTree"
 import { FoldersTable } from "@/components/pages/rdm/documentManagement/foldersTable"
 import { useOrganization } from "@/components/pages/rdm/context/organizationContext"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ArrowLeft } from "lucide-react"
 
 export function DocumentManagement() {
  const [documents, setDocuments] = useState<DocumentMetadata[]>([])
  const [folders, setFolders] = useState<FolderNode[]>([])
  const [folderMetadata, setFolderMetadata] = useState<FolderMetadata[]>([])
  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
- const [viewMode, setViewMode] = useState<"folders" | "documents">("folders")
+ const [viewMode, setViewMode] = useState<"folders" | "documents">("documents")
  const [isUploading, setIsUploading] = useState(false)
 
  const { selectedOrgId } = useOrganization()
  const documentService = new DocumentService()
 
  useEffect(() => {
-   if (!selectedOrgId) {
-     setFolders([])
-     setDocuments([])
-     setFolderMetadata([])
-     setSelectedFolderId(null)
-     return
-   }
-   loadFolderData(selectedOrgId)
- }, [selectedOrgId])
+    if (!selectedOrgId) {
+      setFolders([])
+      setDocuments([])
+      setFolderMetadata([])
+      setSelectedFolderId(null)
+      return
+    }
+    loadFolderData(selectedOrgId)
+    loadDocuments(selectedOrgId, null)
+  }, [selectedOrgId])
 
  useEffect(() => {
    if (selectedOrgId && selectedFolderId) {
@@ -196,9 +199,9 @@ export function DocumentManagement() {
  }
 
  const handleFolderClick = (folderId: string) => {
-   setSelectedFolderId(folderId)
-   setViewMode("documents")
- }
+    setSelectedFolderId(folderId)
+    setViewMode("documents") // Switch to documents view when folder is clicked
+  }
 
  function formatFileSize(bytes: number): string {
    const units = ["B", "KB", "MB", "GB"]
@@ -225,24 +228,36 @@ export function DocumentManagement() {
      />
 
      <div className="flex-1 p-4">
-       <div className="flex justify-between items-center mb-4">
-         <div className="flex items-center gap-2">
-           <h2 className="text-xl font-semibold">
-             {viewMode === "folders" 
-               ? "All Folders" 
-               : `${getFolderName(selectedFolderId!)} Contents`}
-           </h2>
-           {viewMode === "documents" && (
-             <Button
-               variant="ghost"
-               onClick={() => setViewMode("folders")}
-             >
-               Back to Folders
-             </Button>
-           )}
-         </div>
-         <FileUploader onUpload={handleFileUpload} isUploading={isUploading} />
-       </div>
+     <div className="flex justify-between items-center mb-4">
+        <div className="flex items-center gap-4">
+        {selectedFolderId ? (
+            <>
+            <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => setSelectedFolderId(null)}
+            className="gap-2"
+            >
+            <ArrowLeft className="h-4 w-4" />
+            Back to All
+            </Button>
+            <h2 className="text-xl font-semibold">
+                {getFolderName(selectedFolderId)} Contents
+            </h2>
+            </>
+        ) : (
+            <>
+            <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "documents" | "folders")}>
+                <TabsList>
+                <TabsTrigger value="documents">All Documents</TabsTrigger>
+                <TabsTrigger value="folders">All Folders</TabsTrigger>
+                </TabsList>
+            </Tabs>
+            </>
+        )}
+        </div>
+        <FileUploader onUpload={handleFileUpload} isUploading={isUploading} />
+        </div>
 
        {viewMode === "folders" ? (
          <FoldersTable 
