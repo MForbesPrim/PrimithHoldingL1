@@ -1933,7 +1933,7 @@ func handleGetFolders(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var folder FolderWithMetadata
 		err := rows.Scan(&folder.ID, &folder.Name, &folder.ParentID,
-			&folder.OrganizationID, &folder.UpdatedAt, &folder.FileCount)
+			&folder.OrganizationID, &folder.UpdatedAt, &folder.FileCount, &folder.LastUpdatedBy)
 		if err != nil {
 			log.Printf("Error scanning folder row: %v", err)
 			continue

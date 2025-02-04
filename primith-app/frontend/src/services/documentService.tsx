@@ -83,24 +83,25 @@ export class DocumentService {
   async getFolders(organizationId: string): Promise<FolderNode[]> {
     const headers = await this.getAuthHeader();
     const url = `${this.baseUrl}/folders?organizationId=${organizationId}`;
-    console.log('Fetching folders from URL:', url);
-    
-    const response = await fetch(url, {
-      credentials: 'include',
-      headers,
-    });
-    
-    if (!response.ok) {
-      console.error('Failed to fetch folders. Status:', response.status);
-      throw new Error('Failed to fetch folders');
+  
+    try {
+      const response = await fetch(url, {
+        credentials: 'include',
+        headers
+      });
+  
+      if (!response.ok) {
+        console.error('Failed to fetch folders. Status:', response.status);
+        throw new Error('Failed to fetch folders');
+      }
+  
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error in getFolders:', error);
+      throw error;
     }
-    
-    // Log the raw JSON response
-    const data = await response.json();
-    console.log('Folder data received from API:', data);
-    
-    return data;
-  }  
+  } 
   
   async createFolder(name: string, parentId: string | null = null, organizationId: string): Promise<void> {
     const headers = await this.getAuthHeader();
