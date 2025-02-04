@@ -22,22 +22,40 @@ import {
   import { Button } from "@/components/ui/button"
   import { Checkbox } from "@/components/ui/checkbox"
   import { useState } from "react"
-  import { FolderMetadata } from '@/types/document'
-  import { DataTablePagination } from "../documentManagement/dataTablePagination"
-  import { Folder, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus } from "lucide-react"
+  import { DocumentMetadata } from '@/types/document'
+  import { DataTablePagination } from "./dataTablePagination"
+  import { File, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus, Upload } from "lucide-react"
   
-  interface FoldersTableProps {
-    folders: FolderMetadata[];
-    onFolderClick: (folderId: string) => void;
-    onDeleteFolders: (folderIds: string[]) => void;
+  interface DocumentsTableProps {
+    documents: DocumentMetadata[];
+    onDocumentDownload: (documentId: string, fileName: string) => void;
+    onDeleteDocuments?: (documentIds: string[]) => void;
+    showDownloadButton?: boolean;
   }
   
-  export function FoldersTable({ folders, onFolderClick, onDeleteFolders }: FoldersTableProps) {
+  export function DashboardTable({ 
+    documents, 
+    onDocumentDownload,
+    onDeleteDocuments, 
+    showDownloadButton = true
+  }: DocumentsTableProps) {
     const [sorting, setSorting] = useState<SortingState>([])
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
     const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   
-    const columns: ColumnDef<FolderMetadata>[] = [
+    function formatFileSize(bytes: number): string {
+      const units = ["B", "KB", "MB", "GB"]
+      let size = bytes
+      let unitIndex = 0
+   
+      while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024
+        unitIndex++
+      }
+      return `${size.toFixed(1)} ${units[unitIndex]}`
+    }
+  
+    const columns: ColumnDef<DocumentMetadata>[] = [
       {
         id: "select",
         header: ({ table }) => (
@@ -59,38 +77,58 @@ import {
       },
       {
         accessorKey: "name",
-        header: "Folder Name",
+        header: "Name",
         cell: ({ row }) => {
           return (
             <div className="flex items-center gap-2">
-              <Folder className="text-muted-foreground" size={16} />
-              {row.original.name}
+              <File className="text-muted-foreground" size={16} />
+              {row.getValue("name")}
             </div>
           )
         },
         enableSorting: true,
       },
       {
-        accessorKey: "fileCount",
-        header: "Files",
+        accessorKey: "fileType",
+        header: "Type",
+        enableSorting: true,
+      },
+      {
+        accessorKey: "fileSize",
+        header: "Size",
+        cell: ({ row }) => formatFileSize(row.getValue("fileSize")),
+        enableSorting: true,
+      },
+      {
+        accessorKey: "version",
+        header: "Version",
+        cell: ({ row }) => `v${row.getValue("version")}`,
         enableSorting: true,
       },
       {
         accessorKey: "updatedAt",
-        header: "Last Updated",
-        cell: ({ getValue }) =>
-          new Date(getValue() as string).toLocaleDateString(),
+        header: "Last Modified",
+        cell: ({ getValue }) => new Date(getValue() as string).toLocaleDateString(),
         enableSorting: true,
       },
       {
-        accessorKey: "lastUpdatedBy",
-        header: "Last Updated By",
-        enableSorting: true,
+        id: "actions",
+        cell: ({ row }) => {
+          if (!showDownloadButton) return null;
+          return (
+            <Button
+              variant="ghost"
+              onClick={() => onDocumentDownload(row.original.id, row.original.name)}
+            >
+              Download
+            </Button>
+          );
+        },
       },
-    ]
+    ];
   
     const table = useReactTable({
-      data: folders,
+      data: documents,
       columns,
       getCoreRowModel: getCoreRowModel(),
       getPaginationRowModel: getPaginationRowModel(),
@@ -107,16 +145,16 @@ import {
       },
     })
   
-    const selectedFolderIds = Object.keys(rowSelection)
+    const selectedDocumentIds = Object.keys(rowSelection)
       .filter(index => rowSelection[index])
-      .map(index => folders[parseInt(index)].id)
+      .map(index => documents[parseInt(index)].id)
   
       return (
         <div>
           <div className="flex items-center justify-between pb-4">
             <div className="flex items-center gap-2">
               <Input
-                placeholder="Filter folders..."
+                placeholder="Search..."
                 value={(table.getColumn("name")?.getFilterValue() as string) ?? ""}
                 onChange={(event) =>
                   table.getColumn("name")?.setFilterValue(event.target.value)
@@ -125,7 +163,7 @@ import {
               />
             </div>
             <div className="flex items-center gap-2">
-            <Button 
+              <Button 
                 size="sm" 
                 onClick={() => {
                   // Here you would need to pass the handleCreateFolder function from DocumentManagement
@@ -137,18 +175,29 @@ import {
                 <FolderPlus className="h-4 w-4" />
                 New Folder
               </Button>
-              </div>
-            {selectedFolderIds.length > 0 && (
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="destructive"
-                  onClick={() => onDeleteFolders(selectedFolderIds)}
-                >
-                  Delete Selected ({selectedFolderIds.length})
-                </Button>
-              </div>
-            )}
+              <Button 
+                size="sm" 
+                onClick={() => {
+                  // Similar to New Folder, this should trigger file upload functionality
+                  console.log("Upload Document button clicked");
+                }}
+                className="flex items-center gap-2"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                Upload Document
+              </Button>
+            </div>
           </div>
+          {selectedDocumentIds.length > 0 && onDeleteDocuments && (
+            <div className="flex justify-end pb-4">
+              <Button
+                variant="destructive"
+                onClick={() => onDeleteDocuments(selectedDocumentIds)}
+              >
+                Delete Selected ({selectedDocumentIds.length})
+              </Button>
+            </div>
+          )}
           <div className="rounded-md border mb-4">
             <Table>
             <TableHeader>
@@ -193,8 +242,7 @@ import {
                 table.getRowModel().rows.map((row) => (
                   <TableRow
                     key={row.id}
-                    className="cursor-pointer hover:bg-accent"
-                    onClick={() => onFolderClick(row.original.id)}
+                    className="hover:bg-accent"
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>

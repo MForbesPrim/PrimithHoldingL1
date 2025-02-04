@@ -155,4 +155,14 @@ export class DocumentService {
     if (!response.ok) throw new Error('Failed to download document');
     return response.blob();
   }
+
+  async deleteDocument(documentId: string, organizationId: string): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/documents/${documentId}?organizationId=${organizationId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error('Failed to delete document');
+  }
 }

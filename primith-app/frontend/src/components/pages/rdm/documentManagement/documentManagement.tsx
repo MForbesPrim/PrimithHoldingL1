@@ -13,17 +13,21 @@ import {
 import { FileUploader } from "@/components/pages/rdm/documentManagement/fileUploader"
 import { FolderTree } from "@/components/pages/rdm/documentManagement/folderTree"
 import { FoldersTable } from "@/components/pages/rdm/documentManagement/foldersTable"
+import { DocumentsOverview } from "@/components/pages/rdm/documentManagement/documentsOverview"
 import { useOrganization } from "@/components/pages/rdm/context/organizationContext"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { DashboardTable } from "@/components/pages/rdm/documentManagement/dmDashboardTable"
 
 export function DocumentManagement() {
  const [documents, setDocuments] = useState<DocumentMetadata[]>([])
  const [folders, setFolders] = useState<FolderNode[]>([])
  const [folderMetadata, setFolderMetadata] = useState<FolderMetadata[]>([])
  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
- const [viewMode, setViewMode] = useState<"folders" | "documents">("documents")
+ const [viewMode, setViewMode] = useState<"dashboard" | "documents" | "folders" | "overview">("dashboard")
  const [isUploading, setIsUploading] = useState(false)
+ const [isSidebarVisible, setIsSidebarVisible] = useState(true)
+
 
  const { selectedOrgId } = useOrganization()
  const documentService = new DocumentService()
@@ -45,6 +49,19 @@ export function DocumentManagement() {
      loadDocuments(selectedOrgId, selectedFolderId)
    }
  }, [selectedFolderId])
+
+ async function handleDeleteDocuments(documentIds: string[]) {
+    if (!selectedOrgId) return
+    try {
+      await Promise.all(documentIds.map(id => 
+        documentService.deleteDocument(id, selectedOrgId)
+      ))
+      await loadFolderData(selectedOrgId)
+      await loadDocuments(selectedOrgId, selectedFolderId)
+    } catch (error) {
+      console.error("Failed to delete documents:", error)
+    }
+  }
 
  async function loadFolderData(orgId: string) {
     try {
@@ -117,6 +134,18 @@ export function DocumentManagement() {
      console.error("Failed to delete folder:", error)
    }
  }
+
+ async function handleDeleteFolders(folderIds: string[]) {
+    if (!selectedOrgId) return
+    try {
+      await Promise.all(folderIds.map(id => 
+        documentService.deleteFolder(id, selectedOrgId)
+      ))
+      await loadFolderData(selectedOrgId)
+    } catch (error) {
+      console.error("Failed to delete folders:", error)
+    }
+  }
 
  async function handleRenameFolder(folderId: string, newName: string) {
    if (!selectedOrgId) return
@@ -216,90 +245,127 @@ export function DocumentManagement() {
  }
 
  return (
-   <div className="flex h-full">
-     <FolderTree
-       folders={folders}
-       onCreateFolder={handleCreateFolder}
-       onDeleteFolder={handleDeleteFolder}
-       onRenameFolder={handleRenameFolder}
-       onMoveFolder={handleMoveFolder}
-       onSelect={handleFolderClick}
-       selectedFolderId={selectedFolderId}
-     />
-
-     <div className="flex-1 p-4">
-     <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-4">
-        {selectedFolderId ? (
-            <>
-            <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={() => setSelectedFolderId(null)}
-            className="gap-2"
+    <div className="flex h-full">
+      {isSidebarVisible && (
+        <FolderTree
+          folders={folders}
+          onCreateFolder={handleCreateFolder}
+          onDeleteFolder={handleDeleteFolder}
+          onRenameFolder={handleRenameFolder}
+          onMoveFolder={handleMoveFolder}
+          onSelect={handleFolderClick}
+          selectedFolderId={selectedFolderId}
+        />
+      )}
+      
+      {/* Main Content */}
+      <div className="flex-1 p-4">
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsSidebarVisible(!isSidebarVisible)}
+              className="mr-2"
             >
-            <ArrowLeft className="h-4 w-4" />
-            Back to All
+              {isSidebarVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
             </Button>
-            <h2 className="text-xl font-semibold">
-                {getFolderName(selectedFolderId)} Contents
-            </h2>
-            </>
+            
+            {selectedFolderId ? (
+              <>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setSelectedFolderId(null)}
+                  className="gap-2"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Back to All
+                </Button>
+                <h2 className="text-xl font-semibold">
+                  {getFolderName(selectedFolderId)} Contents
+                </h2>
+              </>
+            ) : (
+              <>
+                <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "dashboard" | "documents" | "folders" | "overview")}>
+                  <TabsList>
+                    <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+                    <TabsTrigger value="documents">Documents</TabsTrigger>
+                    <TabsTrigger value="folders">Folders</TabsTrigger>
+                    <TabsTrigger value="overview">Overview</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              </>
+            )}
+          </div>
+        </div>
+  
+        {viewMode === "overview" ? (
+          <DocumentsOverview 
+            documents={documents}
+            folders={folderMetadata}
+            onFolderClick={handleFolderClick}
+            onDownload={handleDownload}
+          />
+        ) : viewMode === "dashboard" ? (
+          <div className="space-y-4">
+            <DashboardTable 
+              documents={documents}
+              onDocumentDownload={handleDownload}
+              onDeleteDocuments={handleDeleteDocuments}
+              showDownloadButton={false}
+            />
+          </div>
+        ) : viewMode === "folders" ? (
+          <div className="space-y-4">
+            <FoldersTable 
+              folders={folderMetadata}
+              onFolderClick={handleFolderClick}
+              onDeleteFolders={handleDeleteFolders}
+            />
+          </div>
         ) : (
-            <>
-            <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "documents" | "folders")}>
-                <TabsList>
-                <TabsTrigger value="documents">All Documents</TabsTrigger>
-                <TabsTrigger value="folders">All Folders</TabsTrigger>
-                </TabsList>
-            </Tabs>
-            </>
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <FileUploader onUpload={handleFileUpload} isUploading={isUploading} />
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Size</TableHead>
+                  <TableHead>Version</TableHead>
+                  <TableHead>Last Modified</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {documents.map((doc) => (
+                  <TableRow key={doc.id}>
+                    <TableCell>{doc.name}</TableCell>
+                    <TableCell>{doc.fileType}</TableCell>
+                    <TableCell>{formatFileSize(doc.fileSize)}</TableCell>
+                    <TableCell>v{doc.version}</TableCell>
+                    <TableCell>
+                      {new Date(doc.updatedAt).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleDownload(doc.id, doc.name)}
+                      >
+                        Download
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         )}
-        </div>
-        <FileUploader onUpload={handleFileUpload} isUploading={isUploading} />
-        </div>
-
-       {viewMode === "folders" ? (
-         <FoldersTable 
-           folders={folderMetadata}
-           onFolderClick={handleFolderClick}
-         />
-       ) : (
-         <Table>
-           <TableHeader>
-             <TableRow>
-               <TableHead>Name</TableHead>
-               <TableHead>Type</TableHead>
-               <TableHead>Size</TableHead>
-               <TableHead>Version</TableHead>
-               <TableHead>Last Modified</TableHead>
-               <TableHead>Actions</TableHead>
-             </TableRow>
-           </TableHeader>
-           <TableBody>
-             {documents.map((doc) => (
-               <TableRow key={doc.id}>
-                 <TableCell>{doc.name}</TableCell>
-                 <TableCell>{doc.fileType}</TableCell>
-                 <TableCell>{formatFileSize(doc.fileSize)}</TableCell>
-                 <TableCell>v{doc.version}</TableCell>
-                 <TableCell>
-                   {new Date(doc.updatedAt).toLocaleDateString()}
-                 </TableCell>
-                 <TableCell>
-                   <Button
-                     variant="ghost"
-                     onClick={() => handleDownload(doc.id, doc.name)}
-                   >
-                     Download
-                   </Button>
-                 </TableCell>
-               </TableRow>
-             ))}
-           </TableBody>
-         </Table>
-       )}
-     </div>
-   </div>
- )
+      </div>
+    </div>
+  )
 }
