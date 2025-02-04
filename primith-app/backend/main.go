@@ -1863,16 +1863,15 @@ func handleGetFolders(w http.ResponseWriter, r *http.Request) {
 
 	claims := r.Context().Value(claimsKey).(*Claims)
 
-	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+		SELECT EXISTS (
+			SELECT 1 
+			FROM auth.organization_members om
+			JOIN auth.users u ON u.id = om.user_id
+			WHERE u.email = $1 AND om.organization_id = $2
+		)
+	`, claims.Username, organizationId).Scan(&authorized)
 
 	if err != nil || !authorized {
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
@@ -1880,34 +1879,38 @@ func handleGetFolders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(`
-        WITH RECURSIVE folder_tree AS (
-            SELECT 
-                id, 
-                name, 
-                parent_id, 
-                organization_id,
-                1 as level, 
-                ARRAY[name::text] as path
-            FROM rdm.folders
-            WHERE parent_id IS NULL 
-            AND organization_id = $1
-            
-            UNION ALL
-            
-            SELECT 
-                f.id, 
-                f.name, 
-                f.parent_id, 
-                f.organization_id,
-                ft.level + 1, 
-                ft.path || f.name::text
-            FROM rdm.folders f
-            INNER JOIN folder_tree ft ON f.parent_id = ft.id
-        )
-        SELECT id, name, parent_id, organization_id
-        FROM folder_tree
-        ORDER BY path;
-    `, organizationId)
+    WITH RECURSIVE folder_tree AS (
+        SELECT 
+            f.id, 
+            f.name, 
+            f.parent_id, 
+            f.organization_id,
+            f.updated_at,
+            (SELECT COUNT(*) FROM rdm.documents d WHERE d.folder_id = f.id) as file_count,
+            (SELECT u.email FROM auth.users u WHERE u.id = f.updated_by) as last_updated_by,
+            ARRAY[f.name::text] as path
+        FROM rdm.folders f
+        WHERE f.parent_id IS NULL 
+        AND f.organization_id = $1
+        
+        UNION ALL
+        
+        SELECT 
+            f.id, 
+            f.name, 
+            f.parent_id, 
+            f.organization_id,
+            f.updated_at,
+            (SELECT COUNT(*) FROM rdm.documents d WHERE d.folder_id = f.id) as file_count,
+            (SELECT u.email FROM auth.users u WHERE u.id = f.updated_by) as last_updated_by,
+            ft.path || f.name::text
+        FROM rdm.folders f
+        INNER JOIN folder_tree ft ON f.parent_id = ft.id
+    )
+    SELECT id, name, parent_id, organization_id, updated_at, file_count, last_updated_by
+    FROM folder_tree
+    ORDER BY path;
+	`, organizationId)
 
 	if err != nil {
 		log.Printf("Error fetching folders: %v", err)
@@ -1916,10 +1919,21 @@ func handleGetFolders(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var folders []Folder
+	type FolderWithMetadata struct {
+		ID             string    `json:"id"`
+		Name           string    `json:"name"`
+		ParentID       *string   `json:"parentId"`
+		OrganizationID string    `json:"organizationId"`
+		UpdatedAt      time.Time `json:"updatedAt"`
+		FileCount      int       `json:"fileCount"`
+		LastUpdatedBy  string    `json:"lastUpdatedBy"`
+	}
+
+	var folders []FolderWithMetadata
 	for rows.Next() {
-		var folder Folder
-		err := rows.Scan(&folder.ID, &folder.Name, &folder.ParentID, &folder.OrganizationID)
+		var folder FolderWithMetadata
+		err := rows.Scan(&folder.ID, &folder.Name, &folder.ParentID,
+			&folder.OrganizationID, &folder.UpdatedAt, &folder.FileCount)
 		if err != nil {
 			log.Printf("Error scanning folder row: %v", err)
 			continue

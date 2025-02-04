@@ -16,6 +16,10 @@ export interface DocumentMetadata {
     id: string;
     name: string;
     parentId: string | null;
+    organizationId: string;
+    updatedAt: string;
+    fileCount: number;
+    lastUpdatedBy: string;
     children?: FolderNode[];
   }
 
@@ -30,4 +34,13 @@ export interface DocumentMetadata {
     id: string;
     name: string;
     status?: 'active' | 'inactive';
+  }
+
+  export interface FolderMetadata {
+    id: string;
+    name: string;
+    fileCount: number;
+    updatedAt: string;
+    parentId: string | null;
+    lastUpdatedBy: string;
   }

@@ -7,7 +7,9 @@ import {
     Landmark,
     Sparkle,
     Pickaxe,
-    Lightbulb
+    Lightbulb,
+    Users,
+    LockKeyhole
 } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { useState } from "react"
@@ -49,6 +51,16 @@ const items = [
     title: "Document Insights",
     url: "#",
     icon: Lightbulb,
+  },
+  {
+    title: "Collaborators",
+    url: "#",
+    icon: Users,
+  },
+  {
+    title: "Admin Console",
+    url: "#",
+    icon: LockKeyhole,
   },
 ]
 

@@ -86,10 +86,11 @@ export class DocumentService {
       credentials: 'include',
       headers
     });
+  
     if (!response.ok) throw new Error('Failed to fetch folders');
     return response.json();
   }
-
+  
   async createFolder(name: string, parentId: string | null = null, organizationId: string): Promise<void> {
     const headers = await this.getAuthHeader();
     const response = await fetch(`${this.baseUrl}/folders`, {

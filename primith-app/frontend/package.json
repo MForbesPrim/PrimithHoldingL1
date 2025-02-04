@@ -30,6 +30,7 @@
     "@radix-ui/react-toast": "^1.2.5",
     "@radix-ui/react-tooltip": "^1.1.7",
     "@tailwindcss/vite": "^4.0.0",
+    "@tanstack/react-table": "^8.20.6",
     "@types/react-syntax-highlighter": "^15.5.13",
     "autoprefixer": "^10.4.20",
     "axios": "^1.7.9",
