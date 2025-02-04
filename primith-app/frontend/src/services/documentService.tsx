@@ -87,14 +87,20 @@ export class DocumentService {
     
     const response = await fetch(url, {
       credentials: 'include',
-      headers
+      headers,
     });
     
     if (!response.ok) {
+      console.error('Failed to fetch folders. Status:', response.status);
       throw new Error('Failed to fetch folders');
     }
-    return response.json();
-  }
+    
+    // Log the raw JSON response
+    const data = await response.json();
+    console.log('Folder data received from API:', data);
+    
+    return data;
+  }  
   
   async createFolder(name: string, parentId: string | null = null, organizationId: string): Promise<void> {
     const headers = await this.getAuthHeader();
