@@ -138,16 +138,16 @@ import {
                 New Folder
               </Button>
               </div>
-            {selectedFolderIds.length > 0 && (
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="destructive"
-                  onClick={() => onDeleteFolders(selectedFolderIds)}
-                >
-                  Delete Selected ({selectedFolderIds.length})
-                </Button>
-              </div>
-            )}
+                {selectedFolderIds.length > 0 && (
+                <div className="flex items-center gap-2">
+                    <Button
+                    variant="destructive"
+                    onClick={() => onDeleteFolders(selectedFolderIds)}
+                    >
+                    Delete Selected ({selectedFolderIds.length})
+                    </Button>
+                </div>
+                )}
           </div>
           <div className="rounded-md border mb-4">
             <Table>

@@ -22,13 +22,17 @@ export function FileUploader({ onUpload, isUploading }: FileUploaderProps) {
         className="hidden"
         onChange={handleFileChange}
       />
-      <Button
-        disabled={isUploading}
-        onClick={() => document.getElementById('file-upload')?.click()}
-      >
+      <Button 
+        size="sm" 
+        onClick={() => {
+            // Similar to New Folder, this should trigger file upload functionality
+            console.log("Upload Document button clicked");
+        }}
+        className="flex items-center gap-2"
+        >
         <Upload className="w-4 h-4 mr-2" />
         {isUploading ? 'Uploading...' : 'Upload Document'}
-      </Button>
+        </Button>
     </div>
   )
 }

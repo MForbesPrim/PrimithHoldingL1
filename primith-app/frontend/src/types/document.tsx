@@ -44,3 +44,15 @@ export interface DocumentMetadata {
     parentId: string | null;
     lastUpdatedBy: string;
   }
+
+  export interface TableItem {
+    id: string;
+    name: string;
+    type: 'folder' | 'document';
+    fileType?: string;
+    fileSize?: number;
+    version?: number;
+    fileCount?: number;
+    updatedAt: string;
+    lastUpdatedBy?: string;
+  }

@@ -21,27 +21,59 @@ import {
   import { Input } from "@/components/ui/input"
   import { Button } from "@/components/ui/button"
   import { Checkbox } from "@/components/ui/checkbox"
-  import { useState } from "react"
-  import { DocumentMetadata } from '@/types/document'
+  import { useEffect, useMemo, useState } from "react"
+  import { DocumentMetadata, FolderMetadata, TableItem  } from "@/types/document"
   import { DataTablePagination } from "./dataTablePagination"
-  import { File, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus, Upload } from "lucide-react"
+  import { File, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus, Upload, Folder } from "lucide-react"
   
   interface DocumentsTableProps {
     documents: DocumentMetadata[];
+    folders: FolderMetadata[];
     onDocumentDownload: (documentId: string, fileName: string) => void;
     onDeleteDocuments?: (documentIds: string[]) => void;
+    onDeleteFolders?: (folderIds: string[]) => void;
+    onFolderClick: (folderId: string) => void;
     showDownloadButton?: boolean;
+    onCreateFolder: () => void;
   }
   
   export function DashboardTable({ 
     documents, 
+    folders,
     onDocumentDownload,
-    onDeleteDocuments, 
-    showDownloadButton = true
+    onDeleteDocuments,
+    onDeleteFolders,
+    onFolderClick,
+    showDownloadButton = true,
+    onCreateFolder 
   }: DocumentsTableProps) {
     const [sorting, setSorting] = useState<SortingState>([])
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
     const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+
+    const items = useMemo(() => [
+        ...folders.map(folder => ({
+          id: folder.id,
+          name: folder.name,
+          type: 'folder' as const,
+          fileCount: folder.fileCount,
+          updatedAt: folder.updatedAt,
+          lastUpdatedBy: folder.lastUpdatedBy
+        })),
+        ...documents.map(doc => ({
+          id: doc.id,
+          name: doc.name,
+          type: 'document' as const,
+          fileType: doc.fileType,
+          fileSize: doc.fileSize,
+          version: doc.version,
+          updatedAt: doc.updatedAt.toISOString(),
+        }))
+      ] as TableItem[], [folders, documents])
+
+      useEffect(() => {
+        setRowSelection({})
+      }, [items])
   
     function formatFileSize(bytes: number): string {
       const units = ["B", "KB", "MB", "GB"]
@@ -55,62 +87,81 @@ import {
       return `${size.toFixed(1)} ${units[unitIndex]}`
     }
   
-    const columns: ColumnDef<DocumentMetadata>[] = [
-      {
-        id: "select",
-        header: ({ table }) => (
-          <Checkbox
-            checked={table.getIsAllPageRowsSelected()}
-            onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-            aria-label="Select all"
-          />
-        ),
-        cell: ({ row }) => (
-          <Checkbox
-            checked={row.getIsSelected()}
-            onCheckedChange={(value) => row.toggleSelected(!!value)}
-            onClick={(e) => e.stopPropagation()}
-            aria-label="Select row"
-          />
-        ),
-        enableSorting: false,
-      },
-      {
-        accessorKey: "name",
-        header: "Name",
-        cell: ({ row }) => {
-          return (
-            <div className="flex items-center gap-2">
-              <File className="text-muted-foreground" size={16} />
-              {row.getValue("name")}
-            </div>
-          )
+    const columns: ColumnDef<TableItem>[] = [
+        {
+            id: "select",
+            header: ({ table }) => (
+              <Checkbox
+                checked={table.getIsAllPageRowsSelected()}
+                onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+                aria-label="Select all"
+              />
+            ),
+            cell: ({ row }) => (
+              <Checkbox
+                checked={row.getIsSelected()}
+                onCheckedChange={(value) => row.toggleSelected(!!value)}
+                onClick={(e) => e.stopPropagation()}
+                aria-label="Select row"
+              />
+            ),
+            enableSorting: false,
+          },
+        {
+            accessorKey: "name",
+            header: "Name",
+            cell: ({ row }) => {
+              const isFolder = row.original.type === 'folder'
+              return (
+                <div 
+                  className="flex items-center gap-2 cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation(); // Add this
+                    if (isFolder) {
+                      onFolderClick(row.original.id);
+                    }
+                  }}
+                >
+                  {isFolder ? (
+                    <Folder className="text-muted-foreground" size={16} />
+                  ) : (
+                    <File className="text-muted-foreground" size={16} />
+                  )}
+                  {row.getValue("name")}
+                </div>
+              )
+            },
+            enableSorting: true,
+          },
+        {
+          accessorKey: "type",
+          header: "Type",
+          cell: ({ row }) => row.original.type === 'folder' ? 'Folder' : row.original.fileType,
+          enableSorting: true,
         },
-        enableSorting: true,
-      },
-      {
-        accessorKey: "fileType",
-        header: "Type",
-        enableSorting: true,
-      },
-      {
-        accessorKey: "fileSize",
-        header: "Size",
-        cell: ({ row }) => formatFileSize(row.getValue("fileSize")),
-        enableSorting: true,
-      },
-      {
-        accessorKey: "version",
-        header: "Version",
-        cell: ({ row }) => `v${row.getValue("version")}`,
-        enableSorting: true,
-      },
-      {
-        accessorKey: "updatedAt",
-        header: "Last Modified",
-        cell: ({ getValue }) => new Date(getValue() as string).toLocaleDateString(),
-        enableSorting: true,
-      },
+        {
+          accessorKey: "size",
+          header: "Size",
+          cell: ({ row }) => {
+            if (row.original.type === 'folder') {
+              return `${row.original.fileCount} items`
+            }
+            return formatFileSize(row.getValue("size"))
+          },
+          enableSorting: true,
+        },
+        {
+          accessorKey: "version",
+          header: "Version",
+          cell: ({ row }) => row.original.type === 'folder' ? '-' : `v${row.getValue("version")}`,
+          enableSorting: true,
+        },
+        {
+          accessorKey: "updatedAt",
+          header: "Last Modified",
+          cell: ({ getValue }) => new Date(getValue() as string).toLocaleDateString(),
+          enableSorting: true,
+        },
       {
         id: "actions",
         cell: ({ row }) => {
@@ -118,6 +169,7 @@ import {
           return (
             <Button
               variant="ghost"
+              className="p-0 h-2"
               onClick={() => onDocumentDownload(row.original.id, row.original.name)}
             >
               Download
@@ -127,77 +179,100 @@ import {
       },
     ];
   
-    const table = useReactTable({
-      data: documents,
-      columns,
-      getCoreRowModel: getCoreRowModel(),
-      getPaginationRowModel: getPaginationRowModel(),
-      getSortedRowModel: getSortedRowModel(),
-      getFilteredRowModel: getFilteredRowModel(),
-      onSortingChange: setSorting,
-      onColumnFiltersChange: setColumnFilters,
-      onRowSelectionChange: setRowSelection,
-      enableRowSelection: true,
-      state: {
-        sorting,
-        columnFilters,
-        rowSelection,
-      },
-    })
+    const table = useReactTable<TableItem>({ 
+        data: items,
+        columns,
+        getCoreRowModel: getCoreRowModel(),
+        getPaginationRowModel: getPaginationRowModel(),
+        getSortedRowModel: getSortedRowModel(),
+        getFilteredRowModel: getFilteredRowModel(),
+        onSortingChange: setSorting,
+        onColumnFiltersChange: setColumnFilters,
+        onRowSelectionChange: setRowSelection,
+        enableRowSelection: true,
+        state: {
+          sorting,
+          columnFilters,
+          rowSelection,
+        },
+      })
+
+      const selectedItems = useMemo(() => {
+        return Object.keys(rowSelection)
+          .filter(index => rowSelection[index])
+          .map(index => items[parseInt(index)])
+      }, [rowSelection, items])
+      
+      const selectedDocuments = useMemo(() => 
+        selectedItems
+          .filter(item => item.type === 'document')
+          .map(item => item.id)
+      , [selectedItems])
+      
+      const selectedFolders = useMemo(() => 
+        selectedItems
+          .filter(item => item.type === 'folder')
+          .map(item => item.id)
+      , [selectedItems])
   
-    const selectedDocumentIds = Object.keys(rowSelection)
-      .filter(index => rowSelection[index])
-      .map(index => documents[parseInt(index)].id)
   
       return (
         <div>
-          <div className="flex items-center justify-between pb-4">
-            <div className="flex items-center gap-2">
-              <Input
-                placeholder="Search..."
-                value={(table.getColumn("name")?.getFilterValue() as string) ?? ""}
-                onChange={(event) =>
-                  table.getColumn("name")?.setFilterValue(event.target.value)
-                }
-                className="max-w-sm text-xs"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Button 
-                size="sm" 
-                onClick={() => {
-                  // Here you would need to pass the handleCreateFolder function from DocumentManagement
-                  // or implement a similar function within this component if possible.
-                  console.log("New Folder button clicked");
-                }}
-                className="flex items-center gap-2"
-              >
-                <FolderPlus className="h-4 w-4" />
-                New Folder
-              </Button>
-              <Button 
-                size="sm" 
-                onClick={() => {
-                  // Similar to New Folder, this should trigger file upload functionality
-                  console.log("Upload Document button clicked");
-                }}
-                className="flex items-center gap-2"
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                Upload Document
-              </Button>
-            </div>
+            <div className="flex items-center justify-between pb-4">
+                <div className="flex items-center gap-2">
+                <Input
+                    placeholder="Search..."
+                    value={(table.getColumn("name")?.getFilterValue() as string) ?? ""}
+                    onChange={(event) =>
+                    table.getColumn("name")?.setFilterValue(event.target.value)
+                    }
+                    className="max-w-sm text-xs"
+                />
+                </div>
+                <div className="flex items-center gap-2">
+                    <Button 
+                    size="sm" 
+                    onClick={onCreateFolder}
+                    className="flex items-center gap-2"
+                    >
+                    <FolderPlus className="h-4 w-4" />
+                    New Folder
+                    </Button>
+                    <Button 
+                    size="sm" 
+                    onClick={() => {
+                    // Similar to New Folder, this should trigger file upload functionality
+                    console.log("Upload Document button clicked");
+                    }}
+                    className="flex items-center gap-2"
+                    >
+                    <Upload className="w-4 h-4 mr-2" />
+                    Upload Document
+                    </Button>
+                    {(selectedDocuments.length > 0 || selectedFolders.length > 0) && (
+                    <div className="flex">
+                    {selectedDocuments.length > 0 && onDeleteDocuments && (
+                        <Button
+                        size="sm" 
+                        variant="destructive"
+                        onClick={() => onDeleteDocuments(selectedDocuments)}
+                        >
+                        Delete Selected Documents ({selectedDocuments.length})
+                        </Button>
+                    )}
+                    {selectedFolders.length > 0 && onDeleteFolders && (
+                        <Button
+                        size="sm" 
+                        variant="destructive"
+                        onClick={() => onDeleteFolders(selectedFolders)}
+                        >
+                        Delete Selected Folders ({selectedFolders.length})
+                        </Button>
+                    )}
+                    </div>
+                    )}
+                </div>
           </div>
-          {selectedDocumentIds.length > 0 && onDeleteDocuments && (
-            <div className="flex justify-end pb-4">
-              <Button
-                variant="destructive"
-                onClick={() => onDeleteDocuments(selectedDocumentIds)}
-              >
-                Delete Selected ({selectedDocumentIds.length})
-              </Button>
-            </div>
-          )}
           <div className="rounded-md border mb-4">
             <Table>
             <TableHeader>
@@ -242,7 +317,7 @@ import {
                 table.getRowModel().rows.map((row) => (
                   <TableRow
                     key={row.id}
-                    className="hover:bg-accent"
+                    className="cursor-pointer hover:bg-accent"
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>

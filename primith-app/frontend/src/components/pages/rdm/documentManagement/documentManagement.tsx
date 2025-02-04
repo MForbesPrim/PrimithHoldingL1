@@ -2,15 +2,7 @@ import { useEffect, useState } from "react"
 import { DocumentMetadata, FolderNode, FolderMetadata } from "@/types/document"
 import { DocumentService } from "@/services/documentService"
 import { Button } from "@/components/ui/button"
-import {
- Table,
- TableBody,
- TableCell,
- TableHead,
- TableHeader,
- TableRow,
-} from "@/components/ui/table"
-import { FileUploader } from "@/components/pages/rdm/documentManagement/fileUploader"
+//import { FileUploader } from "@/components/pages/rdm/documentManagement/fileUploader"
 import { FolderTree } from "@/components/pages/rdm/documentManagement/folderTree"
 import { FoldersTable } from "@/components/pages/rdm/documentManagement/foldersTable"
 import { DocumentsOverview } from "@/components/pages/rdm/documentManagement/documentsOverview"
@@ -25,9 +17,9 @@ export function DocumentManagement() {
  const [folderMetadata, setFolderMetadata] = useState<FolderMetadata[]>([])
  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
  const [viewMode, setViewMode] = useState<"dashboard" | "documents" | "folders" | "overview">("dashboard")
- const [isUploading, setIsUploading] = useState(false)
- const [isSidebarVisible, setIsSidebarVisible] = useState(true)
-
+ const [_isUploading, _setIsUploading] = useState(false)
+ const [isSidebarVisible, setIsSidebarVisible] = useState(false)
+ const [folderHistory, setFolderHistory] = useState<string[]>([])
 
  const { selectedOrgId } = useOrganization()
  const documentService = new DocumentService()
@@ -38,6 +30,7 @@ export function DocumentManagement() {
       setDocuments([])
       setFolderMetadata([])
       setSelectedFolderId(null)
+      setFolderHistory([])
       return
     }
     loadFolderData(selectedOrgId)
@@ -63,67 +56,100 @@ export function DocumentManagement() {
     }
   }
 
- async function loadFolderData(orgId: string) {
+  async function loadFolderData(orgId: string) {
     try {
-      const [folderData, documentData] = await Promise.all([
-        documentService.getFolders(orgId),
-        documentService.getDocuments(null, orgId)
-      ])
-   
+      const folderData = await documentService.getFolders(orgId)
       setFolders(folderData ?? [])
-      setDocuments(documentData ?? [])
-   
-      const metadata = (folderData ?? []).map(folder => {
-        const folderDocs = documentData?.filter(doc => doc.folderId === folder.id) ?? []
-   
-        return {
-          id: folder.id,
-          name: folder.name,
-          parentId: folder.parentId,
-          fileCount: folderDocs.length,
-          updatedAt: new Date(folder.updatedAt).toISOString(),
-          lastUpdatedBy: folder.lastUpdatedBy
-        }
-      })
-   
+
+      // Process metadata only for root-level folders
+      const rootFolders = (folderData ?? []).filter(folder => folder.parentId === null)
+      const metadata = rootFolders.map(folder => ({
+        id: folder.id,
+        name: folder.name,
+        parentId: folder.parentId,
+        fileCount: folder.fileCount,
+        updatedAt: new Date(folder.updatedAt).toISOString(),
+        lastUpdatedBy: folder.lastUpdatedBy
+      }))
+
       setFolderMetadata(metadata)
     } catch (error) {
       console.error("Failed to load folder data:", error)
     }
-   }
+  }
 
- async function loadDocuments(orgId: string, folderId: string | null) {
-   try {
-     const docs = await documentService.getDocuments(folderId, orgId)
-     setDocuments(docs ?? [])
-   } catch (error) {
-     console.error("Failed to load documents:", error)
-     setDocuments([])
-   }
- }
+
+  async function loadDocuments(orgId: string, folderId: string | null) {
+    try {
+      const [docs, folderData] = await Promise.all([
+        documentService.getDocuments(folderId, orgId),
+        documentService.getFolders(orgId)
+      ])
+  
+      setDocuments(docs ?? [])
+  
+      // If we're in a folder, get its subfolders
+      if (folderId) {
+        const subfolders = (folderData ?? [])
+          .filter(folder => folder.parentId === folderId)
+          .map(folder => ({
+            id: folder.id,
+            name: folder.name,
+            parentId: folder.parentId,
+            fileCount: folder.fileCount,
+            updatedAt: new Date(folder.updatedAt).toISOString(),
+            lastUpdatedBy: folder.lastUpdatedBy
+          }))
+        setFolderMetadata(subfolders)
+      } else {
+        // Root level folders
+        const rootFolders = (folderData ?? [])
+          .filter(folder => folder.parentId === null)
+          .map(folder => ({
+            id: folder.id,
+            name: folder.name,
+            parentId: folder.parentId,
+            fileCount: folder.fileCount,
+            updatedAt: new Date(folder.updatedAt).toISOString(),
+            lastUpdatedBy: folder.lastUpdatedBy
+          }))
+        setFolderMetadata(rootFolders)
+      }
+    } catch (error) {
+      console.error("Failed to load documents:", error)
+      setDocuments([])
+      setFolderMetadata([])
+    }
+  }
 
  async function handleCreateFolder(parentId: string | null, suggestedName: string) {
-   if (!selectedOrgId) return
-   try {
-     const baseName = suggestedName || "New Folder"
-     let counter = 1
-     let uniqueName = baseName
-
-     const siblingFolders = folders.filter((f) => f.parentId === parentId)
-     while (true) {
-       const nameExists = siblingFolders.some(
-         (f) => f.name.toLowerCase() === uniqueName.toLowerCase()
-       )
-       if (!nameExists) break
-       uniqueName = `${baseName} (${counter++})`
-     }
-
-     await documentService.createFolder(uniqueName, parentId, selectedOrgId)
-     await loadFolderData(selectedOrgId)
-   } catch (error) {
-     console.error("Failed to create folder:", error)
-   }
- }
+    if (!selectedOrgId) return
+    try {
+      const effectiveParentId = viewMode === "folders" ? null : parentId;
+      
+      const baseName = suggestedName || "New Folder"
+      let counter = 1
+      let uniqueName = baseName
+  
+      const siblingFolders = folders.filter((f) => f.parentId === effectiveParentId)
+      while (true) {
+        const nameExists = siblingFolders.some(
+          (f) => f.name.toLowerCase() === uniqueName.toLowerCase()
+        )
+        if (!nameExists) break
+        uniqueName = `${baseName} (${counter++})`
+      }
+  
+      await documentService.createFolder(uniqueName, effectiveParentId, selectedOrgId)
+      await loadFolderData(selectedOrgId)
+      // Add this to refresh documents at root level for dashboard view
+      if (viewMode === "dashboard") {
+        await loadDocuments(selectedOrgId, null)
+      }
+    } catch (error) {
+      console.error("Failed to create folder:", error)
+    }
+  }
 
  async function handleDeleteFolder(folderId: string) {
    if (!selectedOrgId) return
@@ -190,21 +216,23 @@ export function DocumentManagement() {
    }
  }
 
- async function handleFileUpload(file: File) {
-   if (!selectedOrgId) return
-   setIsUploading(true)
-   try {
-     await documentService.uploadDocument(file, selectedFolderId, selectedOrgId)
-     if (selectedFolderId) {
-       await loadDocuments(selectedOrgId, selectedFolderId)
-     }
-     await loadFolderData(selectedOrgId)
-   } catch (error) {
-     console.error("Upload failed:", error)
-   } finally {
-     setIsUploading(false)
-   }
- }
+//  async function handleFileUpload(file: File) {
+//     if (!selectedOrgId) return
+//     setIsUploading(true)
+//     try {
+//       // Pass null as selectedFolderId when in the documents view
+//       const folderId = viewMode === "documents" ? null : selectedFolderId;
+//       await documentService.uploadDocument(file, folderId, selectedOrgId)
+//       if (folderId) {
+//         await loadDocuments(selectedOrgId, folderId)
+//       }
+//       await loadFolderData(selectedOrgId)
+//     } catch (error) {
+//       console.error("Upload failed:", error)
+//     } finally {
+//       setIsUploading(false)
+//     }
+//   }
 
  async function handleDownload(documentId: string, fileName: string) {
    try {
@@ -228,21 +256,27 @@ export function DocumentManagement() {
  }
 
  const handleFolderClick = (folderId: string) => {
+    setFolderHistory(prev => [...prev, selectedFolderId].filter(Boolean) as string[])
     setSelectedFolderId(folderId)
-    setViewMode("documents") // Switch to documents view when folder is clicked
+    setViewMode("documents")
   }
 
- function formatFileSize(bytes: number): string {
-   const units = ["B", "KB", "MB", "GB"]
-   let size = bytes
-   let unitIndex = 0
-
-   while (size >= 1024 && unitIndex < units.length - 1) {
-     size /= 1024
-     unitIndex++
-   }
-   return `${size.toFixed(1)} ${units[unitIndex]}`
- }
+  const handleBackClick = async () => {
+    if (folderHistory.length > 0) {
+      const previousFolder = folderHistory[folderHistory.length - 1]
+      setFolderHistory(prev => prev.slice(0, -1))
+      setSelectedFolderId(previousFolder)
+      if (selectedOrgId) {
+        await loadDocuments(selectedOrgId, previousFolder)
+      }
+    } else {
+      setSelectedFolderId(null)
+      setViewMode("dashboard")
+      if (selectedOrgId) {
+        await loadDocuments(selectedOrgId, null)
+      }
+    }
+  }
 
  return (
     <div className="flex h-full">
@@ -276,11 +310,11 @@ export function DocumentManagement() {
                 <Button 
                   variant="ghost" 
                   size="sm" 
-                  onClick={() => setSelectedFolderId(null)}
+                  onClick={handleBackClick}
                   className="gap-2"
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  Back to All
+                  Back
                 </Button>
                 <h2 className="text-xl font-semibold">
                   {getFolderName(selectedFolderId)} Contents
@@ -301,7 +335,20 @@ export function DocumentManagement() {
           </div>
         </div>
   
-        {viewMode === "overview" ? (
+        {viewMode === "documents" ? (
+          <div className="space-y-4">
+            <DashboardTable 
+              documents={documents}
+              folders={folderMetadata}
+              onDocumentDownload={handleDownload}
+              onDeleteDocuments={handleDeleteDocuments}
+              onDeleteFolders={handleDeleteFolders}
+              onFolderClick={handleFolderClick}
+              showDownloadButton={true}
+              onCreateFolder={() => handleCreateFolder(selectedFolderId, "New Folder")}
+            />
+          </div>
+        ) : viewMode === "overview" ? (
           <DocumentsOverview 
             documents={documents}
             folders={folderMetadata}
@@ -312,9 +359,13 @@ export function DocumentManagement() {
           <div className="space-y-4">
             <DashboardTable 
               documents={documents}
+              folders={folderMetadata.filter(f => f.parentId === null)}
               onDocumentDownload={handleDownload}
               onDeleteDocuments={handleDeleteDocuments}
+              onDeleteFolders={handleDeleteFolders}
+              onFolderClick={handleFolderClick}
               showDownloadButton={false}
+              onCreateFolder={() => handleCreateFolder(null, "New Folder")}
             />
           </div>
         ) : viewMode === "folders" ? (
@@ -325,46 +376,7 @@ export function DocumentManagement() {
               onDeleteFolders={handleDeleteFolders}
             />
           </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex justify-end">
-              <FileUploader onUpload={handleFileUpload} isUploading={isUploading} />
-            </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Size</TableHead>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Last Modified</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {documents.map((doc) => (
-                  <TableRow key={doc.id}>
-                    <TableCell>{doc.name}</TableCell>
-                    <TableCell>{doc.fileType}</TableCell>
-                    <TableCell>{formatFileSize(doc.fileSize)}</TableCell>
-                    <TableCell>v{doc.version}</TableCell>
-                    <TableCell>
-                      {new Date(doc.updatedAt).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleDownload(doc.id, doc.name)}
-                      >
-                        Download
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+        ) : null}
       </div>
     </div>
   )
