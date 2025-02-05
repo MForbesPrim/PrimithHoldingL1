@@ -63,23 +63,24 @@ export class DocumentService {
     return response.json();
   }
 
-  async uploadDocument(file: File, folderId: string | null = null, organizationId: string): Promise<DocumentMetadata> {
-    const formData = new FormData();
-    formData.append('file', file);
-    if (folderId) formData.append('folderId', folderId);
-    formData.append('organizationId', organizationId);
+  async uploadDocument(file: File, folderId: string | null, organizationId: string): Promise<DocumentMetadata> {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (folderId) formData.append('folderId', folderId)
+    formData.append('organizationId', organizationId)
 
-    const headers = await this.getAuthHeader();
+    const headers = await this.getAuthHeader()
     const response = await fetch(`${this.baseUrl}/documents/upload`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Authorization': headers.Authorization },
       body: formData,
-    });
-    if (!response.ok) throw new Error('Failed to upload document');
-    return response.json();
+    })
+    
+    if (!response.ok) throw new Error('Failed to upload document')
+    return response.json()
   }
-
+  
   async getFolders(organizationId: string): Promise<FolderNode[]> {
     const headers = await this.getAuthHeader();
     const url = `${this.baseUrl}/folders?organizationId=${organizationId}`;

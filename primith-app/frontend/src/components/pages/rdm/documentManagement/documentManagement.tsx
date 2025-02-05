@@ -187,23 +187,17 @@ export function DocumentManagement() {
    }
  }
 
-//  async function handleFileUpload(file: File) {
-//     if (!selectedOrgId) return
-//     setIsUploading(true)
-//     try {
-//       // Pass null as selectedFolderId when in the documents view
-//       const folderId = viewMode === "documents" ? null : selectedFolderId;
-//       await documentService.uploadDocument(file, folderId, selectedOrgId)
-//       if (folderId) {
-//         await loadDocuments(selectedOrgId, folderId)
-//       }
-//       await loadFolderData(selectedOrgId)
-//     } catch (error) {
-//       console.error("Upload failed:", error)
-//     } finally {
-//       setIsUploading(false)
-//     }
-//   }
+ async function handleFileUpload(file: File) {
+    if (!selectedOrgId) return
+    try {
+      await documentService.uploadDocument(file, selectedFolderId, selectedOrgId)
+      // Refresh the documents list after upload
+      await loadDocuments(selectedOrgId, selectedFolderId)
+    } catch (error) {
+      console.error("Upload failed:", error)
+      // Add error handling here
+    }
+  }
 
  async function handleDownload(documentId: string, fileName: string) {
    try {
@@ -324,14 +318,15 @@ export function DocumentManagement() {
         ) : viewMode === "dashboard" ? (
           <div className="space-y-4">
             <DashboardTable 
-                documents={documents}
-                folders={folderMetadata.filter(f => f.parentId === null)}
-                onDocumentDownload={handleDownload}
-                onDeleteDocuments={handleDeleteDocuments}
-                onDeleteFolders={handleDeleteFolders}
-                onFolderClick={handleFolderClick}
-                showDownloadButton={false}
-                onCreateFolder={() => handleCreateFolder(null, "New Folder")}
+            documents={documents}
+            folders={folderMetadata.filter(f => f.parentId === null)}
+            onDocumentDownload={handleDownload}
+            onDeleteDocuments={handleDeleteDocuments}
+            onDeleteFolders={handleDeleteFolders}
+            onFolderClick={handleFolderClick}
+            showDownloadButton={false}
+            onCreateFolder={() => handleCreateFolder(null, "New Folder")}
+            onFileUpload={handleFileUpload}
             />
           </div>
         ) : viewMode === "folders" ? (

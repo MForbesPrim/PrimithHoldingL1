@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +21,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/clerk/clerk-sdk-go/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -113,6 +119,8 @@ type Config struct {
 		SearchIndex    string `json:"AZURE_AI_SEARCH_INDEX"`
 		SearchEndpoint string `json:"AZURE_AI_SEARCH_ENDPOINT"`
 		SearchAPIKey   string `json:"AZURE_AI_SEARCH_API_KEY"`
+		StorageAccount string `json:"AZURE_STORAGE_ACCOUNT_NAME"`
+		StorageKey     string `json:"AZURE_STORAGE_ACCOUNT_KEY"`
 	} `json:"azure"`
 }
 
@@ -210,6 +218,14 @@ type Claims struct {
 
 // In-memory user store (replace with database in production)
 var db *sql.DB
+
+type nopReadSeekCloser struct {
+	io.ReadSeeker
+}
+
+func (n nopReadSeekCloser) Close() error {
+	return nil
+}
 
 // Initialize the application
 func init() {
@@ -2306,15 +2322,15 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 func handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 	organizationId := r.FormValue("organizationId")
 	folderId := r.FormValue("folderId")
-
 	if organizationId == "" {
+		log.Println("Missing organizationId in request")
 		http.Error(w, "Organization ID is required", http.StatusBadRequest)
 		return
 	}
 
 	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("User %s is attempting to upload a document to organization %s", claims.Username, organizationId)
 
-	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
         SELECT EXISTS (
@@ -2324,13 +2340,193 @@ func handleUploadDocument(w http.ResponseWriter, r *http.Request) {
             WHERE u.email = $1 AND om.organization_id = $2
         )
     `, claims.Username, organizationId).Scan(&authorized)
+	if err != nil {
+		log.Printf("Error checking authorization: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !authorized {
+		log.Printf("User %s is not authorized for organization %s", claims.Username, organizationId)
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
 
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		log.Printf("Failed to retrieve file from request: %v", err)
+		http.Error(w, "Failed to get file from request", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	log.Printf("File %s received for upload", header.Filename)
+
+	// Read the file into memory so we can both compute the checksum and perform the upload.
+	data, err := io.ReadAll(file)
+	if err != nil {
+		log.Printf("Failed to read file content: %v", err)
+		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+
+	// Compute the checksum.
+	hasher := sha256.New()
+	hasher.Write(data)
+	checksum := hex.EncodeToString(hasher.Sum(nil))
+	log.Printf("Checksum for file %s: %s", header.Filename, checksum)
+
+	// Wrap the data into a reader that implements io.ReadSeekCloser.
+	src := nopReadSeekCloser{bytes.NewReader(data)}
+
+	// Get the blob client and container name.
+	client, containerName, err := getBlobClient(organizationId)
+	if err != nil {
+		log.Printf("Error initializing Azure client: %v", err)
+		http.Error(w, "Failed to initialize storage", http.StatusInternalServerError)
+		return
+	}
+
+	// Log the container name.
+	log.Printf("Using container: %s", containerName)
+
+	// Ensure the container exists.
+	containerClient := client.ServiceClient().NewContainerClient(containerName)
+	_, err = containerClient.Create(context.Background(), nil)
+	if err != nil {
+		// If the container already exists, the error can be ignored.
+		log.Printf("Container creation error (may already exist): %v", err)
+	}
+
+	// Build the blob name.
+	timestamp := time.Now().Format("2006/01/02")
+	blobName := fmt.Sprintf("%s/%s_%s", timestamp, uuid.New().String(), header.Filename)
+	log.Printf("Uploading file %s to blob %s in container %s", header.Filename, blobName, containerName)
+
+	// Get a BlockBlobClient.
+	blockBlobClient := containerClient.NewBlockBlobClient(blobName)
+
+	// Set upload options.
+	uploadOptions := &azblob.UploadStreamOptions{
+		BlockSize:   4 * 1024 * 1024, // 4 MiB
+		Concurrency: 3,
+	}
+
+	// Use the client's UploadStream method.
+	_, err = client.UploadStream(context.Background(), containerName, blobName, src, uploadOptions)
+	if err != nil {
+		log.Printf("UploadStream failed for blob %s: %v", blobName, err)
+		http.Error(w, "Failed to upload to Azure", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Upload succeeded for blob %s", blobName)
+
+	// Prepare folderId: if it's empty, pass nil so the UUID column receives a NULL.
+	var folderParam interface{}
+	if folderId == "" {
+		folderParam = nil
+	} else {
+		folderParam = folderId
+	}
+
+	// Insert document record in database.
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Failed to start DB transaction: %v", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	var documentId string
+	err = tx.QueryRow(`
+        INSERT INTO rdm.documents (
+            name, original_file_name, file_path, file_type, mime_type,
+            file_size, checksum, version, folder_id, organization_id,
+            created_by, upload_ip, user_agent
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, 
+            (SELECT id FROM auth.users WHERE email = $10), $11, $12)
+        RETURNING id
+    `,
+		header.Filename,
+		header.Filename,
+		blockBlobClient.URL(),
+		filepath.Ext(header.Filename),
+		header.Header.Get("Content-Type"),
+		header.Size,
+		checksum,
+		folderParam,
+		organizationId,
+		claims.Username,
+		r.RemoteAddr,
+		r.UserAgent(),
+	).Scan(&documentId)
+	if err != nil {
+		log.Printf("Failed to insert document record: %v", err)
+		http.Error(w, "Failed to create document record", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Document record created with ID %s", documentId)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":             documentId,
+		"name":           header.Filename,
+		"fileType":       filepath.Ext(header.Filename),
+		"fileSize":       header.Size,
+		"blobUrl":        blockBlobClient.URL(),
+		"version":        1,
+		"folderId":       folderId,
+		"organizationId": organizationId,
+	})
+}
+
+func handleUpdateDocument(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	documentId := vars["id"]
+
+	if documentId == "" {
+		http.Error(w, "Document ID is required", http.StatusBadRequest)
+		return
+	}
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var organizationId string
+	err := db.QueryRow(`
+        SELECT organization_id 
+        FROM rdm.documents 
+        WHERE id = $1
+    `, documentId).Scan(&organizationId)
+	if err != nil {
+		http.Error(w, "Document not found or error fetching document", http.StatusNotFound)
+		return
+	}
+
+	var authorized bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
 	if err != nil || !authorized {
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
 		return
 	}
 
-	// Get the file from the request
+	client, containerName, err := getBlobClient(organizationId)
+	if err != nil {
+		http.Error(w, "Failed to initialize storage", http.StatusInternalServerError)
+		return
+	}
+
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		http.Error(w, "Failed to get file from request", http.StatusBadRequest)
@@ -2338,7 +2534,6 @@ func handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Start transaction
 	tx, err := db.Begin()
 	if err != nil {
 		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
@@ -2346,69 +2541,113 @@ func handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Generate a unique file path
-	fileExt := filepath.Ext(header.Filename)
-	fileName := fmt.Sprintf("%s%s", uuid.New().String(), fileExt)
-	filePath := fmt.Sprintf("uploads/%s/%s", organizationId, fileName)
-
-	// Create the uploads directory if it doesn't exist
-	err = os.MkdirAll(fmt.Sprintf("uploads/%s", organizationId), 0755)
-	if err != nil {
-		http.Error(w, "Failed to create upload directory", http.StatusInternalServerError)
-		return
-	}
-
-	// Create the file
-	dst, err := os.Create(filePath)
-	if err != nil {
-		http.Error(w, "Failed to create file", http.StatusInternalServerError)
-		return
-	}
-	defer dst.Close()
-
-	// Copy the uploaded file to the destination
-	if _, err := io.Copy(dst, file); err != nil {
-		http.Error(w, "Failed to save file", http.StatusInternalServerError)
-		return
-	}
-
-	// Get file info for size
-	fileInfo, err := dst.Stat()
-	if err != nil {
-		http.Error(w, "Failed to get file info", http.StatusInternalServerError)
-		return
-	}
-
-	// Insert document record into database
-	var documentId string
+	var currentVersion int
+	var currentBlobPath string
 	err = tx.QueryRow(`
-        INSERT INTO rdm.documents (
-            name,
+        SELECT version, file_path 
+        FROM rdm.documents 
+        WHERE id = $1
+    `, documentId).Scan(&currentVersion, &currentBlobPath)
+	if err != nil {
+		http.Error(w, "Failed to get current document version", http.StatusInternalServerError)
+		return
+	}
+
+	srcBlobClient := client.ServiceClient().NewContainerClient(containerName).NewBlobClient(currentBlobPath)
+	dstBlobClient := client.ServiceClient().NewContainerClient(containerName).NewBlobClient(fmt.Sprintf("versions/%s/v%d_%s",
+		documentId,
+		currentVersion,
+		filepath.Base(currentBlobPath)))
+
+	_, err = dstBlobClient.StartCopyFromURL(context.Background(), srcBlobClient.URL(), nil)
+	if err != nil {
+		http.Error(w, "Failed to archive current version", http.StatusInternalServerError)
+		return
+	}
+
+	timestamp := time.Now().Format("2006/01/02")
+	newBlobName := fmt.Sprintf("%s/%s_%s",
+		timestamp,
+		uuid.New().String(),
+		header.Filename)
+
+	blobClient := client.ServiceClient().NewContainerClient(containerName).NewBlockBlobClient(newBlobName)
+	_, err = blobClient.Upload(context.Background(), file, nil)
+	if err != nil {
+		http.Error(w, "Failed to upload new version", http.StatusInternalServerError)
+		return
+	}
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		http.Error(w, "Failed to compute checksum", http.StatusInternalServerError)
+		return
+	}
+	checksum := hex.EncodeToString(hasher.Sum(nil))
+
+	_, err = tx.Exec(`
+        INSERT INTO rdm.document_versions (
+            document_id,
+            version,
             file_path,
             file_type,
             file_size,
-            version,
-            folder_id,
-            organization_id,
+            checksum,
             created_by
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, (
-            SELECT id FROM auth.users WHERE email = $8
-        ))
-        RETURNING id
+        SELECT 
+            id, 
+            version, 
+            file_path, 
+            file_type, 
+            file_size, 
+            checksum, 
+            created_by
+        FROM rdm.documents
+        WHERE id = $1
+    `, documentId)
+	if err != nil {
+		http.Error(w, "Failed to archive current version metadata", http.StatusInternalServerError)
+		return
+	}
+
+	newVersion := currentVersion + 1
+	blobURL := blobClient.URL()
+	mimeType := header.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	_, err = tx.Exec(`
+        UPDATE rdm.documents
+        SET 
+            original_file_name = $1,
+            file_path = $2,
+            file_type = $3,
+            mime_type = $4,
+            file_size = $5,
+            checksum = $6,
+            version = $7,
+            upload_ip = $8,
+            user_agent = $9,
+            updated_at = CURRENT_TIMESTAMP,
+            updated_by = (SELECT id FROM auth.users WHERE email = $10)
+        WHERE id = $11
     `,
 		header.Filename,
-		filePath,
+		blobURL,
 		filepath.Ext(header.Filename),
-		fileInfo.Size(),
-		1,
-		folderId,
-		organizationId,
+		mimeType,
+		header.Size,
+		checksum,
+		newVersion,
+		r.RemoteAddr,
+		r.UserAgent(),
 		claims.Username,
-	).Scan(&documentId)
-
+		documentId,
+	)
 	if err != nil {
-		http.Error(w, "Failed to create document record", http.StatusInternalServerError)
+		http.Error(w, "Failed to update document record", http.StatusInternalServerError)
 		return
 	}
 
@@ -2417,17 +2656,167 @@ func handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return the document info
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":             documentId,
-		"name":           header.Filename,
+		"version":        newVersion,
+		"filePath":       blobURL,
 		"fileType":       filepath.Ext(header.Filename),
-		"fileSize":       fileInfo.Size(),
-		"version":        1,
-		"folderId":       folderId,
+		"fileSize":       header.Size,
+		"mimeType":       mimeType,
+		"checksum":       checksum,
 		"organizationId": organizationId,
 	})
+}
+
+func handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	documentId := vars["id"]
+
+	// Get user claims from context.
+	claimsVal := r.Context().Value(claimsKey)
+	claims, ok := claimsVal.(*Claims)
+	if !ok || claims == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Look up document info.
+	var organizationId, blobUrl string
+	err := db.QueryRow(`
+        SELECT organization_id, file_path
+        FROM rdm.documents 
+        WHERE id = $1
+    `, documentId).Scan(&organizationId, &blobUrl)
+	if err != nil {
+		http.Error(w, "Document not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify user's authorization.
+	var authorized bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1
+            FROM auth.organization_members om
+            JOIN auth.users u ON om.user_id = u.id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+	if err != nil || !authorized {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	// Begin a transaction.
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
+
+	// Initialize the Azure Blob Storage client.
+	client, containerName, err := getBlobClient(organizationId)
+	if err != nil {
+		http.Error(w, "Failed to initialize storage client", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the blob URL to get the blob name.
+	parsedUrl, err := url.Parse(blobUrl)
+	if err != nil {
+		http.Error(w, "Invalid blob URL", http.StatusInternalServerError)
+		return
+	}
+	// Assume blobUrl is in format: "https://<account>.blob.core.windows.net/container/blobName"
+	blobName := strings.TrimPrefix(parsedUrl.Path, fmt.Sprintf("/%s/", containerName))
+	if blobName == "" {
+		http.Error(w, "Invalid blob name", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete the main blob.
+	blobClient := client.ServiceClient().NewContainerClient(containerName).NewBlockBlobClient(blobName)
+	_, err = blobClient.Delete(context.Background(), nil)
+	if err != nil {
+		log.Printf("Failed to delete blob: %v", err)
+		http.Error(w, "Failed to delete file from storage", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete versioned blobs using our helper.
+	versionPrefix := fmt.Sprintf("versions/%s/", documentId)
+	if err = deleteBlobsWithPrefix(context.Background(), client, containerName, versionPrefix); err != nil {
+		log.Printf("Error deleting version blobs: %v", err)
+		// Optionally, continue even if some versions fail to delete.
+	}
+
+	// Delete the document record from the database.
+	_, err = tx.Exec(`DELETE FROM rdm.documents WHERE id = $1`, documentId)
+	if err != nil {
+		http.Error(w, "Failed to delete document record", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+	committed = true
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(Response{
+		Success: true,
+		Message: "Document and all versions successfully deleted",
+	})
+}
+
+func deleteBlobsWithPrefix(ctx context.Context, client *azblob.Client, containerName, prefix string) error {
+	// Get a container client.
+	containerClient := client.ServiceClient().NewContainerClient(containerName)
+	// Create a pager using the container package's options.
+	pager := containerClient.NewListBlobsHierarchyPager("/", &container.ListBlobsHierarchyOptions{
+		Prefix: to.Ptr(prefix),
+	})
+
+	// Iterate over each page.
+	for pager.More() {
+		resp, err := pager.NextPage(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list blobs: %w", err)
+		}
+		// If there are virtual directories (blob prefixes), recursively delete them.
+		if resp.Segment.BlobPrefixes != nil {
+			for _, p := range resp.Segment.BlobPrefixes {
+				if p.Name != nil {
+					if err := deleteBlobsWithPrefix(ctx, client, containerName, *p.Name); err != nil {
+						// Log and continue.
+						log.Printf("error deleting blobs for prefix %s: %v", *p.Name, err)
+					}
+				}
+			}
+		}
+		// Delete each blob in this page.
+		for _, blobItem := range resp.Segment.BlobItems {
+			if blobItem.Name == nil {
+				continue
+			}
+			blobClient := containerClient.NewBlockBlobClient(*blobItem.Name)
+			_, err := blobClient.Delete(ctx, nil)
+			if err != nil {
+				log.Printf("failed to delete blob %s: %v", *blobItem.Name, err)
+			} else {
+				log.Printf("deleted blob %s", *blobItem.Name)
+			}
+		}
+	}
+	return nil
 }
 
 func handleDownloadDocument(w http.ResponseWriter, r *http.Request) {
@@ -2436,64 +2825,105 @@ func handleDownloadDocument(w http.ResponseWriter, r *http.Request) {
 
 	claims := r.Context().Value(claimsKey).(*Claims)
 
-	// Verify user has access to the document's organization
-	var authorized bool
+	// Get document info and verify access
+	var organizationId string
+	var blobUrl string
+	var fileName string
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1
-            FROM rdm.documents d
-            JOIN auth.organization_members om ON d.organization_id = om.organization_id
-            JOIN auth.users u ON om.user_id = u.id
-            WHERE d.id = $1 AND u.email = $2
-        )
-    `, documentId, claims.Username).Scan(&authorized)
-
-	if err != nil || !authorized {
-		http.Error(w, "Access denied to document", http.StatusForbidden)
-		return
-	}
-
-	// Get document information
-	var filePath, fileName string
-	err = db.QueryRow(`
-        SELECT file_path, name
+        SELECT organization_id, file_path, name
         FROM rdm.documents
         WHERE id = $1
-    `, documentId).Scan(&filePath, &fileName)
+    `, documentId).Scan(&organizationId, &blobUrl, &fileName)
 
 	if err == sql.ErrNoRows {
 		http.Error(w, "Document not found", http.StatusNotFound)
 		return
-	} else if err != nil {
-		http.Error(w, "Failed to fetch document", http.StatusInternalServerError)
+	}
+
+	var authorized bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1
+            FROM auth.organization_members om
+            JOIN auth.users u ON om.user_id = u.id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
 
-	// Open the file
-	file, err := os.Open(filePath)
+	// Get Azure client
+	client, containerName, err := getBlobClient(organizationId)
 	if err != nil {
-		http.Error(w, "Failed to open file", http.StatusInternalServerError)
+		http.Error(w, "Failed to initialize storage", http.StatusInternalServerError)
 		return
 	}
-	defer file.Close()
 
-	// Get file info
-	fileInfo, err := file.Stat()
+	// Parse URL to get blob name
+	parsedUrl, err := url.Parse(blobUrl)
 	if err != nil {
-		http.Error(w, "Failed to get file info", http.StatusInternalServerError)
+		http.Error(w, "Invalid blob URL", http.StatusInternalServerError)
+		return
+	}
+	blobName := strings.TrimPrefix(parsedUrl.Path, fmt.Sprintf("/%s/", containerName))
+
+	// Get blob client
+	blobClient := client.ServiceClient().NewContainerClient(containerName).NewBlockBlobClient(blobName)
+
+	// Download the blob
+	downloadResponse, err := blobClient.DownloadStream(context.Background(), nil)
+	if err != nil {
+		http.Error(w, "Failed to download blob", http.StatusInternalServerError)
 		return
 	}
 
-	// Set response headers
+	// Set headers for download
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", downloadResponse.ContentLength))
 
-	// Stream the file to the response
-	if _, err := io.Copy(w, file); err != nil {
-		log.Printf("Error streaming file: %v", err)
+	// Stream the blob content to response
+	reader := downloadResponse.Body
+	defer reader.Close()
+	if _, err := io.Copy(w, reader); err != nil {
+		log.Printf("Error streaming blob: %v", err)
 		return
 	}
+}
+
+func getBlobClient(organizationID string) (*azblob.Client, string, error) {
+	var storageAccount, storageKey string
+
+	if os.Getenv("ENVIRONMENT") == "production" {
+		storageAccount = os.Getenv("AZURE_STORAGE_ACCOUNT")
+		storageKey = os.Getenv("AZURE_STORAGE_KEY")
+	} else {
+		config, err := loadConfigIfDev()
+		if err != nil {
+			return nil, "", err
+		}
+		storageAccount = config.Azure.StorageAccount
+		storageKey = config.Azure.StorageKey
+	}
+
+	cred, err := azblob.NewSharedKeyCredential(storageAccount, storageKey)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Use the desired naming convention: "org-{organizationID}"
+	containerName := fmt.Sprintf("org-%s", organizationID)
+	serviceURL := fmt.Sprintf("https://%s.blob.core.windows.net", storageAccount)
+
+	client, err := azblob.NewClientWithSharedKeyCredential(serviceURL, cred, nil)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return client, containerName, nil
 }
 
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
@@ -2657,6 +3087,9 @@ func main() {
 	r.HandleFunc("/documents", authMiddleware(handleGetDocuments)).Methods("GET")
 	r.HandleFunc("/documents/upload", authMiddleware(handleUploadDocument)).Methods("POST")
 	r.HandleFunc("/documents/{id}/download", authMiddleware(handleDownloadDocument)).Methods("GET")
+	r.HandleFunc("/documents/{id}", authMiddleware(handleUpdateDocument)).Methods("PUT")
+	r.HandleFunc("/documents/{id}", authMiddleware(handleDeleteDocument)).Methods("DELETE")
+
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
 
