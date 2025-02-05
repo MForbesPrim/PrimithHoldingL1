@@ -2677,7 +2677,7 @@ func handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 	claimsVal := r.Context().Value(claimsKey)
 	claims, ok := claimsVal.(*Claims)
 	if !ok || claims == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized claim", http.StatusUnauthorized)
 		return
 	}
 
