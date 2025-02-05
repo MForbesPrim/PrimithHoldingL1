@@ -42,6 +42,8 @@ jobs:
         AZURE_AI_SEARCH_INDEX: ${{ secrets.AZURE_AI_SEARCH_INDEX }}
         AZURE_AI_SEARCH_ENDPOINT: ${{ secrets.AZURE_AI_SEARCH_ENDPOINT }}
         AZURE_AI_SEARCH_API_KEY: ${{ secrets.AZURE_AI_SEARCH_API_KEY }}
+        AZURE_STORAGE_ACCOUNT_NAME: ${{ secrets.AZURE_STORAGE_ACCOUNT_NAME }}
+        AZURE_STORAGE_ACCOUNT_KEY: ${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}
       with:
         app-name: 'primith-srv'
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
