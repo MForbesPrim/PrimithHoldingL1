@@ -9,6 +9,7 @@ import {
     SortingState,
     ColumnFiltersState,
     RowSelectionState,
+    VisibilityState
   } from "@tanstack/react-table"
   import {
     Table,
@@ -24,8 +25,14 @@ import {
   import { useEffect, useMemo, useState } from "react"
   import { DocumentMetadata, FolderMetadata, TableItem  } from "@/types/document"
   import { DataTablePagination } from "./dataTablePagination"
-  import { File, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus, Upload, Folder } from "lucide-react"
-  
+  import { File, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus, Upload, Folder, Settings2 } from "lucide-react"
+  import {
+    DropdownMenu,
+    DropdownMenuCheckboxItem,
+    DropdownMenuContent,
+    DropdownMenuTrigger,
+  } from "@/components/ui/dropdown-menu"
+
   interface DocumentsTableProps {
     documents: DocumentMetadata[];
     folders: FolderMetadata[];
@@ -50,6 +57,7 @@ import {
     const [sorting, setSorting] = useState<SortingState>([])
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
     const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+    const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
 
     const items = useMemo(() => [
         ...folders.map(folder => ({
@@ -106,6 +114,7 @@ import {
               />
             ),
             enableSorting: false,
+            enableHiding: false,
           },
         {
             accessorKey: "name",
@@ -132,6 +141,7 @@ import {
               )
             },
             enableSorting: true,
+            enableHiding: false,
           },
         {
           accessorKey: "type",
@@ -149,6 +159,7 @@ import {
             return formatFileSize(row.getValue("size"))
           },
           enableSorting: true,
+          enableHiding: true,
         },
         {
           accessorKey: "version",
@@ -162,21 +173,22 @@ import {
           cell: ({ getValue }) => new Date(getValue() as string).toLocaleDateString(),
           enableSorting: true,
         },
-      {
-        id: "actions",
-        cell: ({ row }) => {
-          if (!showDownloadButton) return null;
-          return (
-            <Button
-              variant="ghost"
-              className="p-0 h-2"
-              onClick={() => onDocumentDownload(row.original.id, row.original.name)}
-            >
-              Download
-            </Button>
-          );
-        },
-      },
+        {
+            id: "actions",
+            cell: ({ row }) => {
+              // Only show the download button if the row represents a document.
+              if (!showDownloadButton || row.original.type === 'folder') return null;
+              return (
+                <Button
+                  variant="ghost"
+                  className="p-0 h-2"
+                  onClick={() => onDocumentDownload(row.original.id, row.original.name)}
+                >
+                  Download
+                </Button>
+              );
+            },
+          },
     ];
   
     const table = useReactTable<TableItem>({ 
@@ -189,11 +201,12 @@ import {
         onSortingChange: setSorting,
         onColumnFiltersChange: setColumnFilters,
         onRowSelectionChange: setRowSelection,
-        enableRowSelection: true,
+        onColumnVisibilityChange: setColumnVisibility,
         state: {
           sorting,
           columnFilters,
           rowSelection,
+          columnVisibility,
         },
       })
 
@@ -221,14 +234,63 @@ import {
             <div className="flex items-center justify-between pb-4">
                 <div className="flex items-center gap-2">
                 <Input
-                    placeholder="Search..."
+                    placeholder="Search Name..."
                     value={(table.getColumn("name")?.getFilterValue() as string) ?? ""}
                     onChange={(event) =>
                     table.getColumn("name")?.setFilterValue(event.target.value)
                     }
                     className="max-w-sm text-xs"
                 />
-                </div>
+                <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="ml-2">
+                    <Settings2 className="h-4 w-4" />
+                    <span className="sr-only">Toggle columns</span>
+                </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                    {table
+                        .getAllColumns()
+                        .filter(column => column.getCanHide())
+                        .map(column => {
+                        // Get friendly name for the column
+                        const friendlyName = (() => {
+                            switch (column.id) {
+                            case "name":
+                                return "Name"
+                            case "type":
+                                return "Type"
+                            case "size":
+                                return "Size"
+                            case "version":
+                                return "Version"
+                            case "updatedAt":
+                                return "Last Modified"
+                            case "lastUpdatedBy":
+                                return "Last Updated By"
+                            case "fileCount":
+                                return "File Count"
+                            default:
+                                return column.id
+                            }
+                        })()
+
+                        return (
+                            <DropdownMenuCheckboxItem
+                            key={column.id}
+                            className="capitalize"
+                            checked={column.getIsVisible()}
+                            onCheckedChange={(value) =>
+                                column.toggleVisibility(!!value)
+                            }
+                            >
+                            {friendlyName}
+                            </DropdownMenuCheckboxItem>
+                        )
+                        })}
+                    </DropdownMenuContent>
+            </DropdownMenu>
+            </div>
                 <div className="flex items-center gap-2">
                     <Button 
                     size="sm" 

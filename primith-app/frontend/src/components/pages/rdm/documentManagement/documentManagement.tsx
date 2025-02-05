@@ -10,6 +10,7 @@ import { useOrganization } from "@/components/pages/rdm/context/organizationCont
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArrowLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { DashboardTable } from "@/components/pages/rdm/documentManagement/dmDashboardTable"
+import { DocumentsTable } from "@/components/pages/rdm/documentManagement/documentsTable"
 
 export function DocumentManagement() {
  const [documents, setDocuments] = useState<DocumentMetadata[]>([])
@@ -59,66 +60,36 @@ export function DocumentManagement() {
   async function loadFolderData(orgId: string) {
     try {
       const folderData = await documentService.getFolders(orgId)
+      console.log('Raw folder data:', folderData)
       setFolders(folderData ?? [])
-
-      // Process metadata only for root-level folders
-      const rootFolders = (folderData ?? []).filter(folder => folder.parentId === null)
-      const metadata = rootFolders.map(folder => ({
-        id: folder.id,
-        name: folder.name,
-        parentId: folder.parentId,
-        fileCount: folder.fileCount,
-        updatedAt: new Date(folder.updatedAt).toISOString(),
-        lastUpdatedBy: folder.lastUpdatedBy
-      }))
-
+  
+      const metadata = (folderData ?? []).map(folder => {
+        const folderMetadata = {
+          id: folder.id,
+          name: folder.name,
+          parentId: folder.parentId,
+          fileCount: folder.fileCount,
+          updatedAt: new Date(folder.updatedAt).toISOString(),
+          lastUpdatedBy: folder.lastUpdatedBy
+        }
+        console.log('Processing folder:', folderMetadata)
+        return folderMetadata
+      })
+  
+      console.log('Final folderMetadata:', metadata)
       setFolderMetadata(metadata)
     } catch (error) {
       console.error("Failed to load folder data:", error)
     }
   }
 
-
   async function loadDocuments(orgId: string, folderId: string | null) {
     try {
-      const [docs, folderData] = await Promise.all([
-        documentService.getDocuments(folderId, orgId),
-        documentService.getFolders(orgId)
-      ])
-  
+      const docs = await documentService.getDocuments(folderId, orgId)
       setDocuments(docs ?? [])
-  
-      // If we're in a folder, get its subfolders
-      if (folderId) {
-        const subfolders = (folderData ?? [])
-          .filter(folder => folder.parentId === folderId)
-          .map(folder => ({
-            id: folder.id,
-            name: folder.name,
-            parentId: folder.parentId,
-            fileCount: folder.fileCount,
-            updatedAt: new Date(folder.updatedAt).toISOString(),
-            lastUpdatedBy: folder.lastUpdatedBy
-          }))
-        setFolderMetadata(subfolders)
-      } else {
-        // Root level folders
-        const rootFolders = (folderData ?? [])
-          .filter(folder => folder.parentId === null)
-          .map(folder => ({
-            id: folder.id,
-            name: folder.name,
-            parentId: folder.parentId,
-            fileCount: folder.fileCount,
-            updatedAt: new Date(folder.updatedAt).toISOString(),
-            lastUpdatedBy: folder.lastUpdatedBy
-          }))
-        setFolderMetadata(rootFolders)
-      }
     } catch (error) {
       console.error("Failed to load documents:", error)
       setDocuments([])
-      setFolderMetadata([])
     }
   }
 
@@ -337,16 +308,11 @@ export function DocumentManagement() {
   
         {viewMode === "documents" ? (
           <div className="space-y-4">
-            <DashboardTable 
-              documents={documents}
-              folders={folderMetadata}
-              onDocumentDownload={handleDownload}
-              onDeleteDocuments={handleDeleteDocuments}
-              onDeleteFolders={handleDeleteFolders}
-              onFolderClick={handleFolderClick}
-              showDownloadButton={true}
-              onCreateFolder={() => handleCreateFolder(selectedFolderId, "New Folder")}
-            />
+          <DocumentsTable
+            documents={documents}
+            onDocumentDownload={handleDownload}
+            onDeleteDocuments={handleDeleteDocuments}
+          />
           </div>
         ) : viewMode === "overview" ? (
           <DocumentsOverview 
@@ -358,22 +324,23 @@ export function DocumentManagement() {
         ) : viewMode === "dashboard" ? (
           <div className="space-y-4">
             <DashboardTable 
-              documents={documents}
-              folders={folderMetadata.filter(f => f.parentId === null)}
-              onDocumentDownload={handleDownload}
-              onDeleteDocuments={handleDeleteDocuments}
-              onDeleteFolders={handleDeleteFolders}
-              onFolderClick={handleFolderClick}
-              showDownloadButton={false}
-              onCreateFolder={() => handleCreateFolder(null, "New Folder")}
+                documents={documents}
+                folders={folderMetadata.filter(f => f.parentId === null)}
+                onDocumentDownload={handleDownload}
+                onDeleteDocuments={handleDeleteDocuments}
+                onDeleteFolders={handleDeleteFolders}
+                onFolderClick={handleFolderClick}
+                showDownloadButton={false}
+                onCreateFolder={() => handleCreateFolder(null, "New Folder")}
             />
           </div>
         ) : viewMode === "folders" ? (
           <div className="space-y-4">
             <FoldersTable 
-              folders={folderMetadata}
-              onFolderClick={handleFolderClick}
-              onDeleteFolders={handleDeleteFolders}
+                folders={folderMetadata}
+                onFolderClick={handleFolderClick}
+                onDeleteFolders={handleDeleteFolders}
+                onCreateFolder={(parentId) => handleCreateFolder(parentId, "New Folder")}
             />
           </div>
         ) : null}
