@@ -228,6 +228,7 @@ export function DocumentManagement() {
     setFolderHistory(prev => [...prev, selectedFolderId].filter(Boolean) as string[])
     setSelectedFolderId(folderId)
     setViewMode("documents")
+    setDocuments([])
   }
 
   const handleBackClick = async () => {

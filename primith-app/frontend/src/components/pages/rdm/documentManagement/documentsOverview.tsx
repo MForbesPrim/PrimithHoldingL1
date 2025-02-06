@@ -1,7 +1,7 @@
 import { DocumentMetadata, FolderMetadata } from "@/types/document"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { File, Folder } from "lucide-react"
+import { Download, File, Folder } from "lucide-react"
 
 interface DocumentsDashboardProps {
   documents: DocumentMetadata[]
@@ -55,8 +55,9 @@ export function DocumentsOverview({
                   variant="ghost" 
                   size="sm"
                   onClick={() => onDownload(doc.id, doc.name)}
+                  title="Download"
                 >
-                  Download
+                  <Download className="h-4 w-4" />
                 </Button>
               </div>
             ))}

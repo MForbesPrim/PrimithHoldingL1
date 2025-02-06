@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { File, Settings2, Upload } from "lucide-react"
+import { Download, File, Settings2, Upload } from "lucide-react"
 import {
   ColumnDef,
   flexRender,
@@ -98,8 +98,9 @@ export const DocumentsTable = memo(function DocumentsTable({
           variant="ghost"
           className="p-0 h-8"
           onClick={() => onDocumentDownload(row.original.id, row.original.name)}
+          title="Download"
         >
-          Download
+          <Download className="h-4 w-4" />
         </Button>
       ),
     },

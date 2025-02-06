@@ -25,7 +25,7 @@ import {
   import { useEffect, useMemo, useState, useRef } from "react"
   import { DocumentMetadata, FolderMetadata, TableItem  } from "@/types/document"
   import { DataTablePagination } from "./dataTablePagination"
-  import { File, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus, Upload, Folder, Settings2 } from "lucide-react"
+  import { File, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus, Upload, Folder, Settings2, Download } from "lucide-react"
   import {
     DropdownMenu,
     DropdownMenuCheckboxItem,
@@ -204,7 +204,7 @@ import {
               className="p-0 h-2"
               onClick={() => onDocumentDownload(row.original.id, row.original.name)}
             >
-              Download
+              <Download className="h-4 w-4" />
             </Button>
           );
         },
