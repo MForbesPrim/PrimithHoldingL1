@@ -86,7 +86,7 @@ export const FoldersTable = memo(function FoldersTable({
         header: "Folder Name",
         cell: ({ row }) => (
           <div 
-            className="flex items-center gap-2 cursor-pointer"
+            className="flex items-center gap-2 cursor-pointer h-8"
             onClick={() => onFolderClick(row.original.id)}
           >
             <Folder className="h-4 w-4 text-muted-foreground" />

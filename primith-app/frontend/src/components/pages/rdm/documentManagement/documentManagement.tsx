@@ -392,7 +392,7 @@ export function DocumentManagement() {
             onDeleteDocuments={handleTrashDocuments}
             onDeleteFolders={handleTrashFolders}
             onFolderClick={handleFolderClickWrapper}
-            showDownloadButton={false}
+            showDownloadButton={true}
             onCreateFolder={handleCreateFolderWrapper}
             onFileUpload={handleFileUploadWrapper}
             />

@@ -214,12 +214,13 @@ import {
       {
         id: "actions",
         cell: ({ row }) => {
-          if (!showDownloadButton || row.original.type === 'folder') return null;
+          if (!showDownloadButton || row.original.type === 'folder') return <div className="h-8 w-8" />;;
           return (
             <Button
               variant="ghost"
-              className="p-0 h-2"
+              className="h-8 w-8 hover:bg-accent"
               onClick={() => onDocumentDownload(row.original.id, row.original.name)}
+              title="Download"
             >
               <Download className="h-4 w-4" />
             </Button>
@@ -452,7 +453,7 @@ import {
                 table.getRowModel().rows.map((row) => (
                   <TableRow
                     key={row.id}
-                    className="cursor-pointer hover:bg-accent"
+                    className="cursor-pointer"
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>

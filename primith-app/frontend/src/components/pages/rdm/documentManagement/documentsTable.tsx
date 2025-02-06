@@ -96,7 +96,7 @@ interface DocumentsTableProps {
       cell: ({ row }) => (
         <Button
           variant="ghost"
-          className="p-0 h-8"
+          className="h-8 w-8 hover:bg-accent"
           onClick={() => onDocumentDownload(row.original.id, row.original.name)}
           title="Download"
         >
