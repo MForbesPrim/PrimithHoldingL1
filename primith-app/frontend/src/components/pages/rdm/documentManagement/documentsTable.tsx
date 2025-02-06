@@ -28,12 +28,12 @@ import {
 import { memo } from 'react';
 
 interface DocumentsTableProps {
-  documents: DocumentMetadata[]
-  onDocumentDownload: (documentId: string, fileName: string) => void
-  onDeleteDocuments: (documentIds: string[]) => void
-}
+    documents: DocumentMetadata[];
+    onDocumentDownload: (documentId: string, fileName: string) => void;
+    onDeleteDocuments?: (documentIds: string[]) => Promise<void>;
+  }
 
-export const DocumentsTable = memo(function DocumentsTable({
+  export const DocumentsTable = memo(function DocumentsTable({
     documents,
     onDocumentDownload,
     onDeleteDocuments,
@@ -206,14 +206,14 @@ export const DocumentsTable = memo(function DocumentsTable({
               <Upload className="w-4 h-4" />
               Upload Document
             </Button>
-        {selectedDocumentIds.length > 0 && (
-          <Button
-            variant="destructive"
-            onClick={() => onDeleteDocuments(selectedDocumentIds)}
-          >
-            Delete Selected ({selectedDocumentIds.length})
-          </Button>
-        )}
+            {selectedDocumentIds.length > 0 && onDeleteDocuments && (
+            <Button
+                variant="destructive"
+                onClick={() => onDeleteDocuments(selectedDocumentIds)}
+            >
+                Delete Selected ({selectedDocumentIds.length})
+            </Button>
+            )}
       </div>
 
       <div className="rounded-md border mb-4">

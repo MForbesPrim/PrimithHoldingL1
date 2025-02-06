@@ -1,4 +1,4 @@
-import { DocumentMetadata, FolderNode } from '@/types/document'
+import { DocumentMetadata, FolderNode, TrashItem } from '@/types/document'
 import AuthService from '@/services/auth'
 
 export class DocumentService {
@@ -180,5 +180,55 @@ export class DocumentService {
       headers
     });
     if (!response.ok) throw new Error('Failed to delete document');
+  }
+
+  async trashItem(id: string, type: 'folder' | 'document', organizationId: string): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/${type}s/${id}/trash?organizationId=${organizationId}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error(`Failed to trash ${type}`);
+  }
+
+  async getTrashItems(organizationId: string): Promise<TrashItem[]> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/trash?organizationId=${organizationId}`, {
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) {
+      throw new Error('Failed to fetch trash items');
+    }
+    const text = await response.text();
+    console.log('Raw trash response:', text);
+    try {
+      const data = JSON.parse(text);
+      return data || [];
+    } catch (e) {
+      console.error('Error parsing JSON:', e);
+      throw e;
+    }
+  } 
+
+  async restoreItem(id: string, type: 'folder' | 'document', organizationId: string): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/${type}s/${id}/restore?organizationId=${organizationId}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error(`Failed to restore ${type}`);
+  }
+
+  async permanentlyDelete(id: string, type: 'folder' | 'document', organizationId: string): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/trash/${type}s/${id}?organizationId=${organizationId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error(`Failed to permanently delete ${type}`);
   }
 }

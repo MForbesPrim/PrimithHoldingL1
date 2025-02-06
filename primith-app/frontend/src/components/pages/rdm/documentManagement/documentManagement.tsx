@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArrowLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { DashboardTable } from "@/components/pages/rdm/documentManagement/dmDashboardTable"
 import { DocumentsTable } from "@/components/pages/rdm/documentManagement/documentsTable"
+import { TrashView } from '@/components/pages/rdm/documentManagement/dmTrashView';
 import { useCallback } from 'react';
 
 export function DocumentManagement() {
@@ -17,7 +18,7 @@ export function DocumentManagement() {
  const [folders, setFolders] = useState<FolderNode[]>([])
  const [folderMetadata, setFolderMetadata] = useState<FolderMetadata[]>([])
  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
- const [viewMode, setViewMode] = useState<"dashboard" | "documents" | "folders" | "overview">("dashboard")
+ const [viewMode, setViewMode] = useState<"dashboard" | "documents" | "folders" | "trash" | "overview">("dashboard");
  const [_isUploading, _setIsUploading] = useState(false)
  const [isSidebarVisible, setIsSidebarVisible] = useState(false)
  const [folderHistory, setFolderHistory] = useState<string[]>([])
@@ -43,19 +44,6 @@ export function DocumentManagement() {
      loadDocuments(selectedOrgId, selectedFolderId)
    }
  }, [selectedFolderId])
-
- async function handleDeleteDocuments(documentIds: string[]) {
-    if (!selectedOrgId) return
-    try {
-      await Promise.all(documentIds.map(id => 
-        documentService.deleteDocument(id, selectedOrgId)
-      ))
-      await loadFolderData(selectedOrgId)
-      await loadDocuments(selectedOrgId, selectedFolderId)
-    } catch (error) {
-      console.error("Failed to delete documents:", error)
-    }
-  }
 
   async function loadFolderData(orgId: string) {
     try {
@@ -90,6 +78,59 @@ export function DocumentManagement() {
     } catch (error) {
       console.error("Failed to load documents:", error)
       setDocuments([])
+    }
+  }
+
+  const handleTrashDocuments = useCallback(async (documentIds: string[]) => {
+    if (!selectedOrgId) return;
+    try {
+      await Promise.all(documentIds.map(id => handleTrashItem(id, 'document')));
+      await loadFolderData(selectedOrgId);
+      await loadDocuments(selectedOrgId, selectedFolderId);
+    } catch (error) {
+      console.error("Failed to trash documents:", error);
+    }
+  }, [selectedOrgId, handleTrashItem, loadFolderData, loadDocuments, selectedFolderId]);
+  
+  const handleTrashFolders = useCallback(async (folderIds: string[]) => {
+    if (!selectedOrgId) return;
+    try {
+      await Promise.all(folderIds.map(id => handleTrashItem(id, 'folder')));
+      await loadFolderData(selectedOrgId);
+      await loadDocuments(selectedOrgId, selectedFolderId);
+    } catch (error) {
+      console.error("Failed to trash folders:", error);
+    }
+  }, [selectedOrgId, handleTrashItem, loadFolderData, loadDocuments, selectedFolderId]);
+
+  async function handleTrashItem(id: string, type: 'folder' | 'document') {
+    if (!selectedOrgId) return;
+    try {
+      await documentService.trashItem(id, type, selectedOrgId);
+      await loadFolderData(selectedOrgId);
+      await loadDocuments(selectedOrgId, selectedFolderId);
+    } catch (error) {
+      console.error(`Failed to trash ${type}:`, error);
+    }
+  }
+  
+  async function handleRestoreItem(id: string, type: 'folder' | 'document') {
+    if (!selectedOrgId) return;
+    try {
+      await documentService.restoreItem(id, type, selectedOrgId);
+      await loadFolderData(selectedOrgId);
+      await loadDocuments(selectedOrgId, selectedFolderId);
+    } catch (error) {
+      console.error(`Failed to restore ${type}:`, error);
+    }
+  }
+  
+  async function handlePermanentDelete(id: string, type: 'folder' | 'document') {
+    if (!selectedOrgId) return;
+    try {
+      await documentService.permanentlyDelete(id, type, selectedOrgId);
+    } catch (error) {
+      console.error(`Failed to permanently delete ${type}:`, error);
     }
   }
 
@@ -262,11 +303,6 @@ export function DocumentManagement() {
     handleFolderClick(folderId);
   }, [handleFolderClick]);
 
-  const handleDeleteDocumentsWrapper = useCallback((documentIds: string[]) => 
-    handleDeleteDocuments(documentIds),
-    [handleDeleteDocuments]
-  );
-
   const handleDeleteFoldersWrapper = useCallback((folderIds: string[]) => 
     handleDeleteFolders(folderIds),
     [handleDeleteFolders]
@@ -321,13 +357,14 @@ export function DocumentManagement() {
               </>
             ) : (
               <>
-                <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "dashboard" | "documents" | "folders" | "overview")}>
-                  <TabsList>
+                <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "dashboard" | "documents" | "folders" | "trash" | "overview")}>
+                <TabsList>
                     <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
                     <TabsTrigger value="documents">Documents</TabsTrigger>
                     <TabsTrigger value="folders">Folders</TabsTrigger>
+                    <TabsTrigger value="trash">Trash</TabsTrigger>
                     <TabsTrigger value="overview">Overview</TabsTrigger>
-                  </TabsList>
+                </TabsList>
                 </Tabs>
               </>
             )}
@@ -335,36 +372,42 @@ export function DocumentManagement() {
         </div>
   
         {viewMode === "documents" ? (
-        <DocumentsTable
+            <DocumentsTable
             documents={documents}
             onDocumentDownload={handleDownloadWrapper}
-            onDeleteDocuments={handleDeleteDocumentsWrapper}
-        />
+            onDeleteDocuments={handleTrashDocuments}
+            />
         ) : viewMode === "overview" ? (
-        <DocumentsOverview 
+            <DocumentsOverview 
             documents={documents}
             folders={folderMetadata}
             onFolderClick={handleFolderClickWrapper}
             onDownload={handleDownloadWrapper}
         />
         ) : viewMode === "dashboard" ? (
-        <DashboardTable 
+            <DashboardTable 
             documents={documents}
             folders={folderMetadata.filter(f => f.parentId === null)}
             onDocumentDownload={handleDownloadWrapper}
-            onDeleteDocuments={handleDeleteDocumentsWrapper}
-            onDeleteFolders={handleDeleteFoldersWrapper}
+            onDeleteDocuments={handleTrashDocuments}
+            onDeleteFolders={handleTrashFolders}
             onFolderClick={handleFolderClickWrapper}
             showDownloadButton={false}
             onCreateFolder={handleCreateFolderWrapper}
             onFileUpload={handleFileUploadWrapper}
-        />
+            />
         ) : viewMode === "folders" ? (
         <FoldersTable 
             folders={folderMetadata}
             onFolderClick={handleFolderClickWrapper}
             onDeleteFolders={handleDeleteFoldersWrapper}
             onCreateFolder={handleCreateFolderWrapper}
+        />
+        ) : viewMode === "trash" && selectedOrgId ? (
+        <TrashView
+            organizationId={selectedOrgId}
+            onRestore={handleRestoreItem}
+            onPermanentDelete={handlePermanentDelete}
         />
         ) : null}
       </div>

@@ -1902,12 +1902,16 @@ func handleGetFolders(w http.ResponseWriter, r *http.Request) {
             f.parent_id, 
             f.organization_id,
             f.updated_at,
-            (SELECT COUNT(*) FROM rdm.documents d WHERE d.folder_id = f.id) as file_count,
-            (SELECT u.email FROM auth.users u WHERE u.id = f.updated_by) as last_updated_by,
+            (SELECT COUNT(*) FROM rdm.documents d 
+             WHERE d.folder_id = f.id 
+             AND d.deleted_at IS NULL) as file_count,
+            (SELECT u.email FROM auth.users u 
+             WHERE u.id = f.updated_by) as last_updated_by,
             ARRAY[f.name::text] as path
         FROM rdm.folders f
         WHERE f.parent_id IS NULL 
         AND f.organization_id = $1
+        AND f.deleted_at IS NULL
         
         UNION ALL
         
@@ -2255,18 +2259,19 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 
 	// Build the query based on whether a folder ID is provided
 	query := `
-        SELECT 
-            d.id,
-            d.name,
-            d.file_type,
-            d.file_size,
-            d.version,
-            d.updated_at,
-            d.folder_id,
-            d.organization_id
-        FROM rdm.documents d
-        WHERE d.organization_id = $1
-    `
+    SELECT 
+        d.id,
+        d.name,
+        d.file_type,
+        d.file_size,
+        d.version,
+        d.updated_at,
+        d.folder_id,
+        d.organization_id
+    FROM rdm.documents d
+    WHERE d.organization_id = $1
+    AND d.deleted_at IS NULL
+	`
 	args := []interface{}{organizationId}
 
 	if folderId != "" {
@@ -2914,6 +2919,435 @@ func handleDownloadDocument(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Handler for moving document to trash
+func handleTrashDocument(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	documentId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get user ID
+	var userId string
+	err := db.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Soft delete the document
+	_, err = db.Exec(`
+        UPDATE rdm.documents 
+        SET deleted_at = CURRENT_TIMESTAMP, 
+            deleted_by = $1 
+        WHERE id = $2
+    `, userId, documentId)
+
+	if err != nil {
+		http.Error(w, "Failed to trash document", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// Handler for restoring document from trash
+func handleRestoreDocument(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	documentId := vars["id"]
+
+	_, err := db.Exec(`
+        UPDATE rdm.documents 
+        SET deleted_at = NULL, 
+            deleted_by = NULL 
+        WHERE id = $1
+    `, documentId)
+
+	if err != nil {
+		http.Error(w, "Failed to restore document", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// Handler for moving folder to trash
+func handleTrashFolder(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	folderId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get user ID
+	var userId string
+	err := db.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Soft delete the folder and all its contents
+	_, err = tx.Exec(`
+        WITH RECURSIVE folder_tree AS (
+            SELECT id FROM rdm.folders WHERE id = $1
+            UNION ALL
+            SELECT f.id FROM rdm.folders f
+            INNER JOIN folder_tree ft ON f.parent_id = ft.id
+        )
+        UPDATE rdm.folders 
+        SET deleted_at = CURRENT_TIMESTAMP,
+            deleted_by = $2
+        WHERE id IN (SELECT id FROM folder_tree)
+    `, folderId, userId)
+
+	if err != nil {
+		http.Error(w, "Failed to trash folder", http.StatusInternalServerError)
+		return
+	}
+
+	// Soft delete all documents in the folder tree
+	_, err = tx.Exec(`
+        WITH RECURSIVE folder_tree AS (
+            SELECT id FROM rdm.folders WHERE id = $1
+            UNION ALL
+            SELECT f.id FROM rdm.folders f
+            INNER JOIN folder_tree ft ON f.parent_id = ft.id
+        )
+        UPDATE rdm.documents
+        SET deleted_at = CURRENT_TIMESTAMP,
+            deleted_by = $2
+        WHERE folder_id IN (SELECT id FROM folder_tree)
+    `, folderId, userId)
+
+	if err != nil {
+		http.Error(w, "Failed to trash folder contents", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// Handler for getting trash items
+func handleGetTrashItems(w http.ResponseWriter, r *http.Request) {
+	organizationId := r.URL.Query().Get("organizationId")
+
+	type TrashItem struct {
+		ID        string    `json:"id"`
+		Name      string    `json:"name"`
+		Type      string    `json:"type"`
+		DeletedAt time.Time `json:"deletedAt"`
+		DeletedBy string    `json:"deletedBy"`
+	}
+
+	var items []TrashItem
+
+	// Get trashed folders
+	rows, err := db.Query(`
+        SELECT f.id, f.name, 'folder' as type, f.deleted_at, u.email as deleted_by
+        FROM rdm.folders f
+        JOIN auth.users u ON f.deleted_by = u.id
+        WHERE f.organization_id = $1 
+        AND f.deleted_at IS NOT NULL
+        ORDER BY f.deleted_at DESC
+    `, organizationId)
+
+	if err != nil {
+		http.Error(w, "Failed to fetch trash items", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var item TrashItem
+		err := rows.Scan(&item.ID, &item.Name, &item.Type, &item.DeletedAt, &item.DeletedBy)
+		if err != nil {
+			continue
+		}
+		items = append(items, item)
+	}
+
+	// Get trashed documents
+	rows, err = db.Query(`
+        SELECT d.id, d.name, 'document' as type, d.deleted_at, u.email as deleted_by
+        FROM rdm.documents d
+        JOIN auth.users u ON d.deleted_by = u.id
+        WHERE d.organization_id = $1 
+        AND d.deleted_at IS NOT NULL
+        ORDER BY d.deleted_at DESC
+    `, organizationId)
+
+	if err != nil {
+		http.Error(w, "Failed to fetch trash items", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var item TrashItem
+		err := rows.Scan(&item.ID, &item.Name, &item.Type, &item.DeletedAt, &item.DeletedBy)
+		if err != nil {
+			continue
+		}
+		items = append(items, item)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
+}
+
+func deleteDocumentBlobs(client *azblob.Client, containerName string, docId string, blobUrl string) error {
+	// Parse the blob URL to get the blob name
+	parsedUrl, err := url.Parse(blobUrl)
+	if err != nil {
+		return fmt.Errorf("invalid blob URL: %v", err)
+	}
+
+	// Get blob name from URL
+	blobName := strings.TrimPrefix(parsedUrl.Path, fmt.Sprintf("/%s/", containerName))
+	if blobName == "" {
+		return fmt.Errorf("invalid blob name")
+	}
+
+	// Delete the main blob
+	blobClient := client.ServiceClient().NewContainerClient(containerName).NewBlockBlobClient(blobName)
+	_, err = blobClient.Delete(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to delete blob: %v", err)
+	}
+
+	// Delete versioned blobs
+	versionPrefix := fmt.Sprintf("versions/%s/", docId)
+	if err = deleteBlobsWithPrefix(context.Background(), client, containerName, versionPrefix); err != nil {
+		return fmt.Errorf("failed to delete version blobs: %v", err)
+	}
+
+	return nil
+}
+
+func handleRestoreFolder(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	folderId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+	organizationId := r.URL.Query().Get("organizationId")
+
+	if organizationId == "" {
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user has access
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Restore the folder and all its contents
+	_, err = tx.Exec(`
+        WITH RECURSIVE folder_tree AS (
+            SELECT id FROM rdm.folders WHERE id = $1
+            UNION ALL
+            SELECT f.id FROM rdm.folders f
+            INNER JOIN folder_tree ft ON f.parent_id = ft.id
+        )
+        UPDATE rdm.folders 
+        SET deleted_at = NULL,
+            deleted_by = NULL
+        WHERE id IN (SELECT id FROM folder_tree)
+    `, folderId)
+
+	if err != nil {
+		http.Error(w, "Failed to restore folder", http.StatusInternalServerError)
+		return
+	}
+
+	// Restore all documents in the folder tree
+	_, err = tx.Exec(`
+        WITH RECURSIVE folder_tree AS (
+            SELECT id FROM rdm.folders WHERE id = $1
+            UNION ALL
+            SELECT f.id FROM rdm.folders f
+            INNER JOIN folder_tree ft ON f.parent_id = ft.id
+        )
+        UPDATE rdm.documents
+        SET deleted_at = NULL,
+            deleted_by = NULL
+        WHERE folder_id IN (SELECT id FROM folder_tree)
+    `, folderId)
+
+	if err != nil {
+		http.Error(w, "Failed to restore folder contents", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	itemId := vars["id"]
+	itemType := vars["type"]
+	organizationId := r.URL.Query().Get("organizationId")
+
+	if organizationId == "" {
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	if itemType == "folder" {
+		// Delete all documents in the folder tree from blob storage
+		rows, err := tx.Query(`
+            WITH RECURSIVE folder_tree AS (
+                SELECT id FROM rdm.folders WHERE id = $1
+                UNION ALL
+                SELECT f.id FROM rdm.folders f
+                INNER JOIN folder_tree ft ON f.parent_id = ft.id
+            )
+            SELECT d.id, d.file_path 
+            FROM rdm.documents d
+            JOIN folder_tree ft ON d.folder_id = ft.id
+            WHERE d.deleted_at IS NOT NULL
+        `, itemId)
+
+		if err != nil {
+			http.Error(w, "Failed to get documents", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		// Delete blobs
+		client, containerName, err := getBlobClient(organizationId)
+		if err != nil {
+			http.Error(w, "Failed to initialize storage", http.StatusInternalServerError)
+			return
+		}
+
+		for rows.Next() {
+			var docId, blobUrl string
+			if err := rows.Scan(&docId, &blobUrl); err != nil {
+				continue
+			}
+			if err := deleteDocumentBlobs(client, containerName, docId, blobUrl); err != nil {
+				log.Printf("Error deleting blobs for document %s: %v", docId, err)
+			}
+		}
+
+		// Permanently delete the folder and its contents
+		_, err = tx.Exec(`
+            WITH RECURSIVE folder_tree AS (
+                SELECT id FROM rdm.folders WHERE id = $1
+                UNION ALL
+                SELECT f.id FROM rdm.folders f
+                INNER JOIN folder_tree ft ON f.parent_id = ft.id
+            )
+            DELETE FROM rdm.folders WHERE id IN (SELECT id FROM folder_tree)
+        `, itemId)
+
+		if err != nil {
+			http.Error(w, "Failed to delete folder", http.StatusInternalServerError)
+			return
+		}
+
+	} else {
+		// Delete document blob
+		var blobUrl string
+		err := tx.QueryRow(
+			"SELECT file_path FROM rdm.documents WHERE id = $1",
+			itemId,
+		).Scan(&blobUrl)
+		if err != nil {
+			http.Error(w, "Failed to get document", http.StatusInternalServerError)
+			return
+		}
+
+		client, containerName, err := getBlobClient(organizationId)
+		if err != nil {
+			http.Error(w, "Failed to initialize storage", http.StatusInternalServerError)
+			return
+		}
+
+		if err := deleteDocumentBlobs(client, containerName, itemId, blobUrl); err != nil {
+			log.Printf("Error deleting blobs for document %s: %v", itemId, err)
+		}
+
+		// Permanently delete the document
+		_, err = tx.Exec("DELETE FROM rdm.documents WHERE id = $1", itemId)
+		if err != nil {
+			http.Error(w, "Failed to delete document", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func getBlobClient(organizationID string) (*azblob.Client, string, error) {
 	var storageAccount, storageKey string
 
@@ -3109,6 +3543,12 @@ func main() {
 	r.HandleFunc("/documents/{id}/download", authMiddleware(handleDownloadDocument)).Methods("GET")
 	r.HandleFunc("/documents/{id}", authMiddleware(handleUpdateDocument)).Methods("PUT")
 	r.HandleFunc("/documents/{id}", authMiddleware(handleDeleteDocument)).Methods("DELETE")
+	r.HandleFunc("/documents/{id}/trash", authMiddleware(handleTrashDocument)).Methods("PUT")
+	r.HandleFunc("/documents/{id}/restore", authMiddleware(handleRestoreDocument)).Methods("PUT")
+	r.HandleFunc("/folders/{id}/trash", authMiddleware(handleTrashFolder)).Methods("PUT")
+	r.HandleFunc("/folders/{id}/restore", authMiddleware(handleRestoreFolder)).Methods("PUT")
+	r.HandleFunc("/trash", authMiddleware(handleGetTrashItems)).Methods("GET")
+	r.HandleFunc("/trash/{type}/{id}", authMiddleware(handlePermanentDelete)).Methods("DELETE")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

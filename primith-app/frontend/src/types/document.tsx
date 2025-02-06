@@ -56,3 +56,11 @@ export interface DocumentMetadata {
     updatedAt: string;
     lastUpdatedBy?: string;
   }
+
+  export interface TrashItem {
+    id: string;
+    name: string;
+    type: 'folder' | 'document';
+    deletedAt: string; // or Date if preferred
+    deletedBy: string;
+  }

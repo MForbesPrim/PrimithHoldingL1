@@ -12,6 +12,16 @@ import {
     VisibilityState
   } from "@tanstack/react-table"
   import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+  } from "@/components/ui/alert-dialog"
+  import {
     Table,
     TableBody,
     TableCell,
@@ -19,13 +29,14 @@ import {
     TableHeader,
     TableRow,
   } from "@/components/ui/table"
+  import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
   import { Input } from "@/components/ui/input"
   import { Button } from "@/components/ui/button"
   import { Checkbox } from "@/components/ui/checkbox"
   import { useEffect, useMemo, useState, useRef } from "react"
   import { DocumentMetadata, FolderMetadata, TableItem  } from "@/types/document"
   import { DataTablePagination } from "./dataTablePagination"
-  import { File, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus, Upload, Folder, Settings2, Download } from "lucide-react"
+  import { File, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus, Upload, Folder, Settings2, Download, Trash2 } from "lucide-react"
   import {
     DropdownMenu,
     DropdownMenuCheckboxItem,
@@ -38,8 +49,8 @@ import {
     documents: DocumentMetadata[];
     folders: FolderMetadata[];
     onDocumentDownload: (documentId: string, fileName: string) => void;
-    onDeleteDocuments?: (documentIds: string[]) => void;
-    onDeleteFolders?: (folderIds: string[]) => void;
+    onDeleteDocuments?: (documentIds: string[]) => Promise<void>;
+    onDeleteFolders?: (folderIds: string[]) => Promise<void>;
     onFolderClick: (folderId: string) => void;
     showDownloadButton?: boolean;
     onCreateFolder: () => void;
@@ -62,7 +73,13 @@ import {
     const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
     const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
     const fileInputRef = useRef<HTMLInputElement>(null)
-  
+    const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [itemsToDelete, setItemsToDelete] = useState<{
+      documents: string[];
+      folders: string[];
+    } | null>(null);
+
     const items = useMemo(() => [
       ...folders.map(folder => ({
         id: folder.id,
@@ -334,26 +351,62 @@ import {
               Upload Document
             </Button>
             {(selectedDocuments.length > 0 || selectedFolders.length > 0) && (
-              <div className="flex gap-2">
-                {selectedDocuments.length > 0 && onDeleteDocuments && (
-                  <Button
-                    size="sm" 
-                    variant="destructive"
-                    onClick={() => onDeleteDocuments(selectedDocuments)}
-                  >
-                    Delete Selected Documents ({selectedDocuments.length})
-                  </Button>
-                )}
-                {selectedFolders.length > 0 && onDeleteFolders && (
-                  <Button
-                    size="sm" 
-                    variant="destructive"
-                    onClick={() => onDeleteFolders(selectedFolders)}
-                  >
-                    Delete Selected Folders ({selectedFolders.length})
-                  </Button>
-                )}
-              </div>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            className="border border-gray-300"
+                            onClick={() => {
+                                setItemsToDelete({
+                                    documents: selectedDocuments,
+                                    folders: selectedFolders
+                                });
+                                setShowDeleteDialog(true);
+                            }}
+                        >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Delete selected items</TooltipContent>
+                </Tooltip>
+            )}
+            {showDeleteDialog && (
+            <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+                <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>Are you sure you want to delete?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                    {itemsToDelete?.folders.length ? 
+                        "This will delete the selected folders and all their contents (subfolders and files). " : ""}
+                    Please confirm.
+                    </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={async () => {
+                                setIsDeleting(true);
+                                try {
+                                    if (itemsToDelete?.documents.length && onDeleteDocuments) {
+                                        await onDeleteDocuments(itemsToDelete.documents);
+                                    }
+                                    if (itemsToDelete?.folders.length && onDeleteFolders) {
+                                        await onDeleteFolders(itemsToDelete.folders);
+                                    }
+                                } finally {
+                                    setIsDeleting(false);
+                                    setShowDeleteDialog(false);
+                                    setRowSelection({});
+                                }
+                            }}
+                            disabled={isDeleting}
+                            >
+                            Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
             )}
           </div>
         </div>
