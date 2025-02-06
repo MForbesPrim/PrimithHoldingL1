@@ -25,6 +25,7 @@ import {
   VisibilityState,
 } from "@tanstack/react-table"
 import { DataTablePagination } from "./dataTablePagination"
+import { memo } from 'react';
 
 interface FoldersTableProps {
   folders: FolderMetadata[]
@@ -33,7 +34,7 @@ interface FoldersTableProps {
   onCreateFolder: (parentId: string | null) => void 
 }
 
-export function FoldersTable({
+export const FoldersTable = memo(function FoldersTable({
     folders,
     onFolderClick,
     onDeleteFolders,
@@ -205,7 +206,8 @@ export function FoldersTable({
     
             <div className="flex items-center gap-2">
           <Button
-            onClick={() => onCreateFolder(null)}  // Add New Folder button
+            size="sm" 
+            onClick={() => onCreateFolder(null)}
             className="flex items-center gap-2"
           >
             <Plus className="h-4 w-4" />
@@ -273,4 +275,4 @@ export function FoldersTable({
       <DataTablePagination table={table} />
     </div>
   )
-}
+});

@@ -80,7 +80,7 @@ export class DocumentService {
     if (!response.ok) throw new Error('Failed to upload document')
     return response.json()
   }
-  
+
   async getFolders(organizationId: string): Promise<FolderNode[]> {
     const headers = await this.getAuthHeader();
     const url = `${this.baseUrl}/folders?organizationId=${organizationId}`;
@@ -149,12 +149,27 @@ export class DocumentService {
 
   async downloadDocument(documentId: string): Promise<Blob> {
     const headers = await this.getAuthHeader();
-    const response = await fetch(`${this.baseUrl}/documents/download/${documentId}`, {
-      credentials: 'include',
-      headers
-    });
-    if (!response.ok) throw new Error('Failed to download document');
-    return response.blob();
+    try {
+      const response = await fetch(`${this.baseUrl}/documents/${documentId}/download`, {
+        credentials: 'include',
+        headers,
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Download failed with status: ${response.status}`);
+      }
+      
+      // Read the entire response as a blob
+      const blob = await response.blob();
+      if (blob.size === 0) {
+        throw new Error('Downloaded file is empty');
+      }
+      
+      return blob;
+    } catch (error) {
+      console.error('Download error:', error);
+      throw error;
+    }
   }
 
   async deleteDocument(documentId: string, organizationId: string): Promise<void> {

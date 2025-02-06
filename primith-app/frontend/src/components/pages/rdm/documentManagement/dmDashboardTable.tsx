@@ -32,7 +32,8 @@ import {
     DropdownMenuContent,
     DropdownMenuTrigger,
   } from "@/components/ui/dropdown-menu"
-  
+  import { memo } from 'react';
+
   interface DocumentsTableProps {
     documents: DocumentMetadata[];
     folders: FolderMetadata[];
@@ -45,7 +46,7 @@ import {
     onFileUpload?: (file: File) => Promise<void>;
   }
   
-  export function DashboardTable({ 
+  export const DashboardTable = memo(function DashboardTable({ 
     documents, 
     folders,
     onDocumentDownload,
@@ -426,4 +427,4 @@ import {
         <DataTablePagination table={table} />
       </div>
     )
-  }
+})

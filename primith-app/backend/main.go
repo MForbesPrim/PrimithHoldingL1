@@ -2873,24 +2873,44 @@ func handleDownloadDocument(w http.ResponseWriter, r *http.Request) {
 	// Get blob client
 	blobClient := client.ServiceClient().NewContainerClient(containerName).NewBlockBlobClient(blobName)
 
+	// Get blob properties first to get content length and type
+	props, err := blobClient.GetProperties(context.Background(), nil)
+	if err != nil {
+		http.Error(w, "Failed to get blob properties", http.StatusInternalServerError)
+		return
+	}
+
 	// Download the blob
 	downloadResponse, err := blobClient.DownloadStream(context.Background(), nil)
 	if err != nil {
 		http.Error(w, "Failed to download blob", http.StatusInternalServerError)
 		return
 	}
+	defer downloadResponse.Body.Close()
 
-	// Set headers for download
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", downloadResponse.ContentLength))
+	// Set response headers with proper pointer dereferencing
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
+	if props.ContentType != nil {
+		w.Header().Set("Content-Type", *props.ContentType)
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+	if props.ContentLength != nil {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", *props.ContentLength))
+	}
+	w.Header().Set("Cache-Control", "no-cache")
 
-	// Stream the blob content to response
-	reader := downloadResponse.Body
-	defer reader.Close()
-	if _, err := io.Copy(w, reader); err != nil {
-		log.Printf("Error streaming blob: %v", err)
+	// Use io.Copy to stream the response
+	written, err := io.Copy(w, downloadResponse.Body)
+	if err != nil {
+		log.Printf("Error streaming blob (wrote %d bytes): %v", written, err)
+		// Note: Cannot send error response here as headers are already sent
 		return
+	}
+
+	if props.ContentLength != nil && written != *props.ContentLength {
+		log.Printf("Warning: Content length mismatch. Expected %d bytes, wrote %d bytes",
+			*props.ContentLength, written)
 	}
 }
 

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react"
 import { DocumentMetadata, FolderNode, FolderMetadata } from "@/types/document"
 import { DocumentService } from "@/services/documentService"
 import { Button } from "@/components/ui/button"
-//import { FileUploader } from "@/components/pages/rdm/documentManagement/fileUploader"
 import { FolderTree } from "@/components/pages/rdm/documentManagement/folderTree"
 import { FoldersTable } from "@/components/pages/rdm/documentManagement/foldersTable"
 import { DocumentsOverview } from "@/components/pages/rdm/documentManagement/documentsOverview"
@@ -11,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArrowLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { DashboardTable } from "@/components/pages/rdm/documentManagement/dmDashboardTable"
 import { DocumentsTable } from "@/components/pages/rdm/documentManagement/documentsTable"
+import { useCallback } from 'react';
 
 export function DocumentManagement() {
  const [documents, setDocuments] = useState<DocumentMetadata[]>([])
@@ -199,21 +199,25 @@ export function DocumentManagement() {
     }
   }
 
- async function handleDownload(documentId: string, fileName: string) {
-   try {
-     const blob = await documentService.downloadDocument(documentId)
-     const url = window.URL.createObjectURL(blob)
-     const a = document.createElement("a")
-     a.href = url
-     a.download = fileName
-     document.body.appendChild(a)
-     a.click()
-     window.URL.revokeObjectURL(url)
-     document.body.removeChild(a)
-   } catch (error) {
-     console.error("Download failed:", error)
-   }
- }
+  async function handleDownload(documentId: string, fileName: string) {
+    try {
+      const blob = await documentService.downloadDocument(documentId);
+      // Create a URL for the blob
+      const url = window.URL.createObjectURL(blob);
+      // Create a temporary anchor element
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName; // Use the original filename
+      // Append to document, click and cleanup
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error("Download failed:", error);
+      // Add error handling/notification here
+    }
+  }
 
  function getFolderName(folderId: string): string {
    const folder = folders.find((f) => f.id === folderId)
@@ -242,6 +246,35 @@ export function DocumentManagement() {
       }
     }
   }
+
+  const handleFileUploadWrapper = useCallback(async (file: File) => {
+    if (!selectedOrgId) return;
+    await handleFileUpload(file);
+  }, [selectedOrgId, handleFileUpload]);
+
+  const handleDownloadWrapper = useCallback((documentId: string, fileName: string) => 
+    handleDownload(documentId, fileName),
+    [handleDownload]
+  );
+
+  const handleFolderClickWrapper = useCallback((folderId: string) => {
+    handleFolderClick(folderId);
+  }, [handleFolderClick]);
+
+  const handleDeleteDocumentsWrapper = useCallback((documentIds: string[]) => 
+    handleDeleteDocuments(documentIds),
+    [handleDeleteDocuments]
+  );
+
+  const handleDeleteFoldersWrapper = useCallback((folderIds: string[]) => 
+    handleDeleteFolders(folderIds),
+    [handleDeleteFolders]
+  );
+
+  const handleCreateFolderWrapper = useCallback(() => 
+    handleCreateFolder(null, "New Folder"),
+    [handleCreateFolder]
+  );
 
  return (
     <div className="flex h-full">
@@ -301,43 +334,37 @@ export function DocumentManagement() {
         </div>
   
         {viewMode === "documents" ? (
-          <div className="space-y-4">
-          <DocumentsTable
+        <DocumentsTable
             documents={documents}
-            onDocumentDownload={handleDownload}
-            onDeleteDocuments={handleDeleteDocuments}
-          />
-          </div>
+            onDocumentDownload={handleDownloadWrapper}
+            onDeleteDocuments={handleDeleteDocumentsWrapper}
+        />
         ) : viewMode === "overview" ? (
-          <DocumentsOverview 
+        <DocumentsOverview 
             documents={documents}
             folders={folderMetadata}
-            onFolderClick={handleFolderClick}
-            onDownload={handleDownload}
-          />
+            onFolderClick={handleFolderClickWrapper}
+            onDownload={handleDownloadWrapper}
+        />
         ) : viewMode === "dashboard" ? (
-          <div className="space-y-4">
-            <DashboardTable 
+        <DashboardTable 
             documents={documents}
             folders={folderMetadata.filter(f => f.parentId === null)}
-            onDocumentDownload={handleDownload}
-            onDeleteDocuments={handleDeleteDocuments}
-            onDeleteFolders={handleDeleteFolders}
-            onFolderClick={handleFolderClick}
+            onDocumentDownload={handleDownloadWrapper}
+            onDeleteDocuments={handleDeleteDocumentsWrapper}
+            onDeleteFolders={handleDeleteFoldersWrapper}
+            onFolderClick={handleFolderClickWrapper}
             showDownloadButton={false}
-            onCreateFolder={() => handleCreateFolder(null, "New Folder")}
-            onFileUpload={handleFileUpload}
-            />
-          </div>
+            onCreateFolder={handleCreateFolderWrapper}
+            onFileUpload={handleFileUploadWrapper}
+        />
         ) : viewMode === "folders" ? (
-          <div className="space-y-4">
-            <FoldersTable 
-                folders={folderMetadata}
-                onFolderClick={handleFolderClick}
-                onDeleteFolders={handleDeleteFolders}
-                onCreateFolder={(parentId) => handleCreateFolder(parentId, "New Folder")}
-            />
-          </div>
+        <FoldersTable 
+            folders={folderMetadata}
+            onFolderClick={handleFolderClickWrapper}
+            onDeleteFolders={handleDeleteFoldersWrapper}
+            onCreateFolder={handleCreateFolderWrapper}
+        />
         ) : null}
       </div>
     </div>

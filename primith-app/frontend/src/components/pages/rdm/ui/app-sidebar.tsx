@@ -10,7 +10,7 @@ import {
     Lightbulb,
     Users,
     LockKeyhole,
-    StickyNote
+    FileText
 } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { useState } from "react"
@@ -51,7 +51,7 @@ const items = [
   {
     title: "Pages",
     url: "#",
-    icon: StickyNote,
+    icon: FileText,
   },
   {
     title: "Document Insights",

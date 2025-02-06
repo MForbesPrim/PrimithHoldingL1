@@ -1,10 +1,10 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { DocumentMetadata } from "@/types/document"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { File, Settings2 } from "lucide-react"
+import { File, Settings2, Upload } from "lucide-react"
 import {
   ColumnDef,
   flexRender,
@@ -25,6 +25,7 @@ import {
     DropdownMenuContent,
     DropdownMenuTrigger,
   } from "@/components/ui/dropdown-menu"
+import { memo } from 'react';
 
 interface DocumentsTableProps {
   documents: DocumentMetadata[]
@@ -32,7 +33,7 @@ interface DocumentsTableProps {
   onDeleteDocuments: (documentIds: string[]) => void
 }
 
-export function DocumentsTable({
+export const DocumentsTable = memo(function DocumentsTable({
     documents,
     onDocumentDownload,
     onDeleteDocuments,
@@ -41,6 +42,7 @@ export function DocumentsTable({
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
     const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
     const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
+    const fileInputRef = useRef<HTMLInputElement>(null)
 
   const columns: ColumnDef<DocumentMetadata>[] = [
     {
@@ -195,6 +197,14 @@ export function DocumentsTable({
                 </DropdownMenuContent>
           </DropdownMenu>
         </div>
+        <Button 
+              size="sm" 
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2"
+            >
+              <Upload className="w-4 h-4" />
+              Upload Document
+            </Button>
         {selectedDocumentIds.length > 0 && (
           <Button
             variant="destructive"
@@ -253,4 +263,4 @@ export function DocumentsTable({
       <DataTablePagination table={table} />
     </div>
   )
-}
+});
