@@ -1,4 +1,3 @@
-// src/components/FolderTree.tsx
 import { useState, useEffect } from 'react'
 import { 
   ChevronRight, 

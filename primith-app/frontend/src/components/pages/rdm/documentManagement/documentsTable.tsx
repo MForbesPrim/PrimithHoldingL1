@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Download, File, Settings2, Upload } from "lucide-react"
+import { ArrowUpDown, ChevronDown, ChevronUp, Download, File, Settings2, Upload, Trash2 } from "lucide-react"
 import {
   ColumnDef,
   flexRender,
@@ -18,6 +18,7 @@ import {
   RowSelectionState,
   VisibilityState
 } from "@tanstack/react-table"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { DataTablePagination } from "./dataTablePagination"
 import {
     DropdownMenu,
@@ -38,7 +39,9 @@ interface DocumentsTableProps {
     onDocumentDownload,
     onDeleteDocuments,
   }: DocumentsTableProps) {
-    const [sorting, setSorting] = useState<SortingState>([])
+    const [sorting, setSorting] = useState<SortingState>([
+        { id: "updatedAt", desc: true }
+      ])
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
     const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
     const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
@@ -198,22 +201,31 @@ interface DocumentsTableProps {
                 </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <Button 
-              size="sm" 
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2"
-            >
-              <Upload className="w-4 h-4" />
-              Upload Document
+        <div className="flex items-center gap-2">
+            <Button 
+                size="sm" 
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2"
+                >
+                <Upload className="w-4 h-4" />
+                Upload Document
             </Button>
-            {selectedDocumentIds.length > 0 && onDeleteDocuments && (
-            <Button
-                variant="destructive"
-                onClick={() => onDeleteDocuments(selectedDocumentIds)}
-            >
-                Delete Selected ({selectedDocumentIds.length})
-            </Button>
-            )}
+                {selectedDocumentIds.length > 0 && onDeleteDocuments && (
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                            size="sm"
+                            className="border border-gray-300"
+                            variant="ghost"
+                            onClick={() => onDeleteDocuments(selectedDocumentIds)}
+                        >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+            </TooltipTrigger>
+            <TooltipContent>Delete selected items</TooltipContent>
+            </Tooltip>
+                )}
+        </div>
       </div>
 
       <div className="rounded-md border mb-4">
@@ -222,14 +234,28 @@ interface DocumentsTableProps {
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
+                <TableHead 
+                key={header.id}
+                onClick={header.column.getToggleSortingHandler()}
+                className="cursor-pointer"
+                >
+                {header.isPlaceholder ? null : (
+                    <div className="flex items-center">
+                    {flexRender(header.column.columnDef.header, header.getContext())}
+                    {header.column.getCanSort() && (
+                        <span className="ml-2">
+                        {header.column.getIsSorted() === "asc" ? (
+                            <ChevronUp className="h-4 w-4" />
+                        ) : header.column.getIsSorted() === "desc" ? (
+                            <ChevronDown className="h-4 w-4" />
+                        ) : (
+                            <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
                         )}
-                  </TableHead>
+                        </span>
+                    )}
+                    </div>
+                )}
+                </TableHead>
                 ))}
               </TableRow>
             ))}

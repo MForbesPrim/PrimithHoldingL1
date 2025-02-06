@@ -10,7 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Folder, Plus, Settings2 } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ArrowUpDown, ChevronDown, ChevronUp, Folder, FolderPlus, Settings2, Trash2 } from "lucide-react"
 import {
   ColumnDef,
   flexRender,
@@ -40,7 +41,9 @@ export const FoldersTable = memo(function FoldersTable({
     onDeleteFolders,
     onCreateFolder
   }: FoldersTableProps) {
-    const [sorting, setSorting] = useState<SortingState>([])
+    const [sorting, setSorting] = useState<SortingState>([
+        { id: "updatedAt", desc: true }
+      ])
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
     const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
     const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
@@ -210,16 +213,23 @@ export const FoldersTable = memo(function FoldersTable({
             onClick={() => onCreateFolder(null)}
             className="flex items-center gap-2"
           >
-            <Plus className="h-4 w-4" />
+            <FolderPlus className="h-4 w-4" />
             New Folder
           </Button>
           {selectedFolderIds.length > 0 && (
-            <Button
-              variant="destructive"
-              onClick={() => onDeleteFolders(selectedFolderIds)}
-            >
-              Delete Selected ({selectedFolderIds.length})
-            </Button>
+            <Tooltip>
+            <TooltipTrigger asChild>
+                <Button
+                        size="sm"
+                        className="border border-gray-300"
+                        variant="ghost"
+                        onClick={() => onDeleteFolders(selectedFolderIds)}
+                    >
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+            </TooltipTrigger>
+            <TooltipContent>Delete selected items</TooltipContent>
+            </Tooltip>
           )}
           </div>
       </div>
@@ -230,14 +240,28 @@ export const FoldersTable = memo(function FoldersTable({
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
+                    <TableHead 
+                    key={header.id}
+                    onClick={header.column.getToggleSortingHandler()}
+                    className="cursor-pointer"
+                  >
+                    {header.isPlaceholder ? null : (
+                        <div className="flex items-center">
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                        {header.column.getCanSort() && (
+                            <span className="ml-2">
+                            {header.column.getIsSorted() === "asc" ? (
+                                <ChevronUp className="h-4 w-4" />
+                            ) : header.column.getIsSorted() === "desc" ? (
+                                <ChevronDown className="h-4 w-4" />
+                            ) : (
+                                <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+                            )}
+                            </span>
                         )}
-                  </TableHead>
+                        </div>
+                    )}
+                    </TableHead>
                 ))}
               </TableRow>
             ))}

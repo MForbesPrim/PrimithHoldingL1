@@ -68,7 +68,9 @@ import {
     onCreateFolder,
     onFileUpload,
   }: DocumentsTableProps) {
-    const [sorting, setSorting] = useState<SortingState>([])
+    const [sorting, setSorting] = useState<SortingState>([
+        { id: "updatedAt", desc: true }
+      ])
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
     const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
     const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
@@ -214,7 +216,7 @@ import {
       {
         id: "actions",
         cell: ({ row }) => {
-          if (!showDownloadButton || row.original.type === 'folder') return <div className="h-8 w-8" />;;
+          if (!showDownloadButton || row.original.type === 'folder') return <div className="h-8 w-8" />;
           return (
             <Button
               variant="ghost"
