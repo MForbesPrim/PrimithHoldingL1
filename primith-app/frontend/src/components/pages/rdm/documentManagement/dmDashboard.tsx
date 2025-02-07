@@ -2,7 +2,7 @@ import { DocumentManagement } from '@/components/pages/rdm/documentManagement/do
 
 export function DocumentManagementPage() {
   return (
-    <div className="p-6">
+    <div className="p-2">
       <DocumentManagement />
     </div>
   )
