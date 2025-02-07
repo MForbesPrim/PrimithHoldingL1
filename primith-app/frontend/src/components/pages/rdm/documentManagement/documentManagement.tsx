@@ -328,8 +328,8 @@ export function DocumentManagement() {
         />
       )}
       
-      {/* Main Content */}
-      <div className="flex-1 p-4">
+    {/* Main Content */}
+    <div className="flex-1 p-4">
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-2">
             <Button
@@ -342,32 +342,45 @@ export function DocumentManagement() {
             </Button>
             
             {selectedFolderId ? (
-              <>
+              <div className="flex items-center gap-2">
                 <Button 
                   variant="ghost" 
                   size="sm" 
                   onClick={handleBackClick}
-                  className="gap-2"
+                  className="gap-2 border border-gray-300"
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  Back
+                  Previous
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedFolderId(null);
+                    setViewMode("dashboard");
+                    setFolderHistory([]);
+                    if (selectedOrgId) {
+                      loadDocuments(selectedOrgId, null);
+                    }
+                  }}
+                  className="gap-2 border border-gray-300"
+                >
+                  Dashboard
                 </Button>
                 <h2 className="text-xl font-semibold">
                   {getFolderName(selectedFolderId)} Contents
                 </h2>
-              </>
+              </div>
             ) : (
-              <>
-                <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "dashboard" | "documents" | "folders" | "trash" | "overview")}>
+              <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as "dashboard" | "documents" | "folders" | "trash" | "overview")}>
                 <TabsList>
-                    <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-                    <TabsTrigger value="documents">Documents</TabsTrigger>
-                    <TabsTrigger value="folders">Folders</TabsTrigger>
-                    <TabsTrigger value="trash">Trash</TabsTrigger>
-                    <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+                  <TabsTrigger value="documents">Documents</TabsTrigger>
+                  <TabsTrigger value="folders">Folders</TabsTrigger>
+                  <TabsTrigger value="trash">Trash</TabsTrigger>
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
                 </TabsList>
-                </Tabs>
-              </>
+              </Tabs>
             )}
           </div>
         </div>

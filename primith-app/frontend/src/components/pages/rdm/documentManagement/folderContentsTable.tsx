@@ -37,10 +37,12 @@ export const FolderContentsTable = memo(function FolderContentsTable({
   onCreateFolder,
   onFileUpload
 }: FolderContentsTableProps) {
-  const [sorting, setSorting] = useState<SortingState>([])
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
-  const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
-  const fileInputRef = useRef<HTMLInputElement>(null)
+    const [sorting, setSorting] = useState<SortingState>([
+        { id: "updatedAt", desc: true }
+        ])
+    const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
+    const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+    const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Memoize the combined data
   const items = useMemo(() => [...folders, ...documents], [folders, documents]);
