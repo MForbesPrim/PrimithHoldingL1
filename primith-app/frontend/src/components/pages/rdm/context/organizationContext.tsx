@@ -1,4 +1,3 @@
-// src/context/OrganizationProvider.tsx
 import React, { createContext, useState, useContext, useEffect } from "react"
 import AuthService from "@/services/auth"
 import { Organization } from "@/types/document"

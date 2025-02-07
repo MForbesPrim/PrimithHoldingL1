@@ -1,16 +1,9 @@
 import { 
-    PanelsTopLeft,
-    Box,
-    Layers2,
     Grip,
     Handshake,
     Landmark,
     Sparkle,
     Pickaxe,
-    Lightbulb,
-    Users,
-    LockKeyhole,
-    FileText
 } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { useState } from "react"
@@ -29,55 +22,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Link } from 'react-router-dom'
-
-// Menu items.
-const items = [
-  {
-    title: "Dashboard",
-    url: "/rdm",
-    icon: PanelsTopLeft,
-  },
-  {
-    title: "Projects",
-    url: "/projects",
-    icon: Box,
-  },
-  {
-    title: "Document Management",
-    url: "/document-management",
-    icon: Layers2,
-  },
-  {
-    title: "Pages",
-    url: "#",
-    icon: FileText,
-  },
-  {
-    title: "Document Insights",
-    url: "#",
-    icon: Lightbulb,
-  },
-  {
-    title: "Collaborators",
-    url: "#",
-    icon: Users,
-  },
-  {
-    title: "Admin Console",
-    url: "#",
-    icon: LockKeyhole,
-  },
-]
+import { Link, useNavigate } from 'react-router-dom'
+import { useNavigation } from '@/components/pages/rdm/context/navigationContext'
+import { menuItems } from '../context/sidebarMenuItems'
 
 export function AppSidebar() {
   const [isOpen, setIsOpen] = useState(false)
-  const handleItemClick = (url: string) => {
+  const { setCurrentSection } = useNavigation()
+  const navigate = useNavigate()
+  const handleItemClick = (url: string, title: string) => {
     setIsOpen(false)
-    setTimeout(() => {
-      window.location.href = url
-    }, 200)
+    setCurrentSection(title)
+    navigate(url)
   }
+
   return (
     <Sidebar collapsible="offcanvas">
       <SidebarContent className="pt-2">
@@ -97,7 +55,7 @@ export function AppSidebar() {
                 </div>
                 <DropdownMenuItem
                   className="mt-.5 mb-1.5 cursor-pointer"
-                  onSelect={() => handleItemClick("/")}
+                  onSelect={() => handleItemClick("/", "Primith Portal")}
                 >
                   <Sparkle className="mr-2 h-4 w-4" />
                   <span className="text-xs">Primith Portal</span>
@@ -123,15 +81,15 @@ export function AppSidebar() {
           </div>
           <SidebarGroupContent>
             <SidebarMenu>
-              {items.map((item) => (
+            {menuItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <Link to={item.url}>
-                      <item.icon />
-                      <span className="font-bold text-xs">{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <Link to={item.url} onClick={() => handleItemClick(item.url, item.title)}>
+                    <item.icon />
+                    <span className="font-bold text-xs">{item.title}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               ))}
             </SidebarMenu>
           </SidebarGroupContent>

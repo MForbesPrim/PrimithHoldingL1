@@ -1,4 +1,3 @@
-// src/components/pages/rdm/layouts/protected-rdm-layout.tsx
 import { useEffect } from 'react'
 import { useNavigate, Outlet } from 'react-router-dom'
 import { useToast } from "@/hooks/use-toast"

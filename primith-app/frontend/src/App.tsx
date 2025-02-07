@@ -21,6 +21,7 @@ import { ServicesPage } from "@/components/pages/admin/servicesPage"
 import { NotFoundPage } from "@/components/pages/notFoundPage" 
 import { RdmHomePage } from "@/components/pages/rdm/rdmHomePage";
 import { ProjectsPage } from "@/components/pages/rdm/projects/projectsDashboard";
+import { PagesDashboard } from "@/components/pages/rdm/pages/pagesDashboard";
 import { DocumentManagementPage } from "@/components/pages/rdm/documentManagement/dmDashboard";
 import { ProtectedRdmLayout } from "@/components/pages/rdm/layouts/protected-rdm-layout";
 import { HelpPage } from "@/components/pages/helpCenterPage";
@@ -56,6 +57,7 @@ function App() {
                   <Route element={<ProtectedRdmLayout />}>
                     <Route path="/rdm" element={<RdmHomePage />} />
                     <Route path="/projects" element={<ProjectsPage />} />
+                    <Route path="/pages" element={<PagesDashboard />} />
                     <Route path="/document-management" element={<DocumentManagementPage />} />
                   </Route>
                   <Route path="/login" element={<LoginPage />} />

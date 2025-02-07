@@ -45,7 +45,7 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import { Organization } from "@/types/document"
 import { useOrganization } from '@/components/pages/rdm/context/organizationContext'
-
+import { useNavigation } from '@/components/pages/rdm/context/navigationContext'
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import {
@@ -132,6 +132,7 @@ export function RdmHeader() {
       const [showTooltip, setShowTooltip] = useState(false)
       const [isNotificationOpen, setIsNotificationOpen] = useState(false)
       const rdmAuth = AuthService.getRdmTokens()
+      const { currentSection } = useNavigation()
       const user = rdmAuth?.user
 
       useEffect(() => {
@@ -237,9 +238,9 @@ export function RdmHeader() {
           <BreadcrumbSeparator />
           <BreadcrumbItem>
             <BreadcrumbPage className="font-regular text-[#172B4D]">
-              Dashboard
+            {currentSection}
             </BreadcrumbPage>
-          </BreadcrumbItem>
+        </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
