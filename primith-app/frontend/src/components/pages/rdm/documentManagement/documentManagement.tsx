@@ -266,6 +266,16 @@ export function DocumentManagement() {
    return folder ? folder.name : ""
  }
 
+ async function handleRenameDocument(documentId: string, newName: string) {
+    if (!selectedOrgId) return;
+    try {
+      await documentService.renameDocument(documentId, newName, selectedOrgId);
+      await loadDocuments(selectedOrgId, selectedFolderId);
+    } catch (error) {
+      console.error("Failed to rename document:", error);
+    }
+  }
+
  const handleFolderClick = (folderId: string) => {
     setFolderHistory(prev => [...prev, selectedFolderId].filter(Boolean) as string[])
     setSelectedFolderId(folderId)
@@ -312,6 +322,11 @@ export function DocumentManagement() {
   const handleCreateFolderWrapper = useCallback(() => 
     handleCreateFolder(null, "New Folder"),
     [handleCreateFolder]
+  );
+
+  const handleRenameDocumentWrapper = useCallback((documentId: string, newName: string) => 
+    handleRenameDocument(documentId, newName),
+    [handleRenameDocument]
   );
 
  return (
@@ -390,7 +405,8 @@ export function DocumentManagement() {
             documents={documents}
             onDocumentDownload={handleDownloadWrapper}
             onDeleteDocuments={handleTrashDocuments}
-            />
+            onRenameDocument={handleRenameDocumentWrapper}
+        />
         ) : viewMode === "overview" ? (
             <DocumentsOverview 
             documents={documents}

@@ -2153,6 +2153,232 @@ func handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func handleRenameDocument(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Starting rename document handler")
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	documentId := vars["id"]
+
+	var req struct {
+		Name           string `json:"name"`
+		OrganizationID string `json:"organizationId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("Rename request received: documentId=%s, newName=%s, orgId=%s",
+		documentId, req.Name, req.OrganizationID)
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Get current document details
+	var currentBlobUrl string
+	var currentName string
+	var organizationId string
+	err = tx.QueryRow(`
+        SELECT file_path, name, organization_id
+        FROM rdm.documents 
+        WHERE id = $1
+        AND deleted_at IS NULL
+    `, documentId).Scan(&currentBlobUrl, &currentName, &organizationId)
+	if err != nil {
+		http.Error(w, "Document not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify user has access
+	var authorized bool
+	err = tx.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1
+            FROM rdm.documents d
+            JOIN auth.organization_members om ON d.organization_id = om.organization_id
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE d.id = $1 
+            AND d.organization_id = $2
+            AND u.email = $3
+            AND d.deleted_at IS NULL
+        )
+    `, documentId, req.OrganizationID, claims.Username).Scan(&authorized)
+	if err != nil || !authorized {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	// Validate and enforce file extension
+	currentExt := filepath.Ext(currentName)
+	proposedExt := filepath.Ext(req.Name)
+	if proposedExt != currentExt {
+		baseName := strings.TrimSuffix(req.Name, proposedExt)
+		req.Name = baseName + currentExt
+	}
+
+	// Check for duplicate names in the same folder
+	var duplicateExists bool
+	err = tx.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.documents 
+            WHERE folder_id = (
+                SELECT folder_id 
+                FROM rdm.documents 
+                WHERE id = $1
+            )
+            AND organization_id = $2
+            AND name = $3
+            AND id != $1
+            AND deleted_at IS NULL
+        )
+    `, documentId, req.OrganizationID, req.Name).Scan(&duplicateExists)
+	if err != nil {
+		http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
+		return
+	}
+	if duplicateExists {
+		http.Error(w, "A document with this name already exists in this folder", http.StatusConflict)
+		return
+	}
+
+	// Initialize Azure Blob client
+	client, containerName, err := getBlobClient(organizationId)
+	if err != nil {
+		http.Error(w, "Failed to initialize storage", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the current blob URL from the database.
+	// Expected format:
+	// "https://teststorage.blob.core.windows.net/container name/2025%2F02%2F01%2F70660b1d-a183-12w5-e89z-ff538f3218c8_view.pdf"
+	parsedUrl, err := url.Parse(currentBlobUrl)
+	if err != nil {
+		http.Error(w, "Invalid blob URL", http.StatusInternalServerError)
+		return
+	}
+
+	// Build the expected prefix (e.g. "/container name/")
+	expectedPrefix := fmt.Sprintf("/%s/", containerName)
+	if !strings.HasPrefix(parsedUrl.Path, expectedPrefix) {
+		log.Printf("Blob URL path '%s' does not have expected prefix '%s'", parsedUrl.Path, expectedPrefix)
+		http.Error(w, "Invalid blob URL structure", http.StatusInternalServerError)
+		return
+	}
+
+	// Remove the container name prefix.
+	// For example, if parsedUrl.Path is:
+	// "/container name/2025%2F02%2F01%2F70660b1d-a183-12w5-e89z-ff538f3218c8_view.pdf"
+	// this yields "2025%2F02%2F01%2F70660b1d-a183-12w5-e89z-ff538f3218c8_view.pdf"
+	encodedBlobName := strings.TrimPrefix(parsedUrl.Path, expectedPrefix)
+
+	// Decode the URL-encoded blob name to get the proper subdirectory structure.
+	decodedBlobName, err := url.PathUnescape(encodedBlobName)
+	if err != nil {
+		log.Printf("Failed to decode blob name '%s': %v", encodedBlobName, err)
+		http.Error(w, "Failed to decode blob name", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Decoded blob name: %s", decodedBlobName)
+
+	// Split the decoded blob name into its parts.
+	// Expected format: "YYYY/MM/DD/filename"
+	pathParts := strings.Split(decodedBlobName, "/")
+	if len(pathParts) != 4 {
+		log.Printf("Unexpected blob path structure: %s", decodedBlobName)
+		timestamp := time.Now()
+		pathParts = []string{
+			fmt.Sprintf("%d", timestamp.Year()),
+			fmt.Sprintf("%02d", timestamp.Month()),
+			fmt.Sprintf("%02d", timestamp.Day()),
+			fmt.Sprintf("%s_%s", uuid.New().String(), req.Name),
+		}
+	} else {
+		// Replace only the filename (the 4th element) with a new unique name.
+		pathParts[3] = fmt.Sprintf("%s_%s", uuid.New().String(), req.Name)
+	}
+	newBlobPath := strings.Join(pathParts, "/")
+	log.Printf("New blob path: %s", newBlobPath)
+
+	// Get container client
+	containerClient := client.ServiceClient().NewContainerClient(containerName)
+
+	// Create blob clients for the source and destination.
+	// Note: The source blob name remains URL-encoded.
+	sourceBlobClient := containerClient.NewBlobClient(encodedBlobName)
+	destBlobClient := containerClient.NewBlobClient(newBlobPath)
+
+	// Copy the blob to the new location.
+	_, err = destBlobClient.StartCopyFromURL(context.Background(), sourceBlobClient.URL(), nil)
+	if err != nil {
+		http.Error(w, "Failed to copy blob", http.StatusInternalServerError)
+		return
+	}
+
+	// Wait for the copy operation to complete.
+	for {
+		props, err := destBlobClient.GetProperties(context.Background(), nil)
+		if err != nil {
+			http.Error(w, "Failed to get blob properties", http.StatusInternalServerError)
+			return
+		}
+		if props.CopyStatus != nil && *props.CopyStatus == "success" {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+
+	// Delete the old blob.
+	_, err = sourceBlobClient.Delete(context.Background(), nil)
+	if err != nil {
+		log.Printf("Warning: Failed to delete old blob: %v", err)
+	}
+
+	// Update the document record in the database.
+	res, err := tx.Exec(`
+    UPDATE rdm.documents 
+    SET name = $1,
+        file_path = $2,
+        updated_at = CURRENT_TIMESTAMP,
+        updated_by = (SELECT id FROM auth.users WHERE email = $3)
+    WHERE id = $4
+	`, req.Name, destBlobClient.URL(), claims.Username, documentId)
+	if err != nil {
+		log.Printf("Failed to update document record: %v", err)
+		http.Error(w, "Failed to update document record", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		log.Printf("Error getting rows affected: %v", err)
+	}
+	if rowsAffected == 0 {
+		log.Printf("No rows updated for document id %s", documentId)
+		http.Error(w, "Document update did not affect any rows", http.StatusInternalServerError)
+		return
+	}
+
+	// Commit the transaction.
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Document renamed successfully",
+		"newUrl":  destBlobClient.URL(),
+	})
+}
+
 func handleMoveFolderStructure(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
 	vars := mux.Vars(r)
@@ -3545,6 +3771,7 @@ func main() {
 	r.HandleFunc("/documents/{id}", authMiddleware(handleDeleteDocument)).Methods("DELETE")
 	r.HandleFunc("/documents/{id}/trash", authMiddleware(handleTrashDocument)).Methods("PUT")
 	r.HandleFunc("/documents/{id}/restore", authMiddleware(handleRestoreDocument)).Methods("PUT")
+	r.HandleFunc("/documents/{id}/rename", authMiddleware(handleRenameDocument)).Methods("PUT")
 	r.HandleFunc("/folders/{id}/trash", authMiddleware(handleTrashFolder)).Methods("PUT")
 	r.HandleFunc("/folders/{id}/restore", authMiddleware(handleRestoreFolder)).Methods("PUT")
 	r.HandleFunc("/trash", authMiddleware(handleGetTrashItems)).Methods("GET")

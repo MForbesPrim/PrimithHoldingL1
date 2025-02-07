@@ -231,4 +231,37 @@ export class DocumentService {
     });
     if (!response.ok) throw new Error(`Failed to permanently delete ${type}`);
   }
+
+  async renameDocument(documentId: string, newName: string, organizationId: string): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const payload = { 
+        name: newName,
+        organizationId 
+    };
+    
+    console.log('Rename request:', {
+        url: `${this.baseUrl}/documents/${documentId}/rename`,
+        payload
+    });
+
+    const response = await fetch(`${this.baseUrl}/documents/${documentId}/rename`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: {
+            ...headers,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        const text = await response.text();
+        console.error('Rename failed:', {
+            status: response.status,
+            statusText: response.statusText,
+            body: text
+        });
+        throw new Error(`Failed to rename document: ${text}`);
+    }
+}
 }
