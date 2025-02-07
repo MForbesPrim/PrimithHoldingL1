@@ -19,7 +19,7 @@ export function DocumentManagement() {
  const [folders, setFolders] = useState<FolderNode[]>([])
  const [folderMetadata, setFolderMetadata] = useState<FolderMetadata[]>([])
  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
- const [viewMode, setViewMode] = useState<"dashboard" | "documents" | "folders" | "trash" | "overview" | "folderContents">("dashboard");
+ const [viewMode, setViewMode] = useState<"dashboard" | "documents" | "folders" | "trash" | "folderContents" | "overview">("dashboard");
  const [_isUploading, _setIsUploading] = useState(false)
  const [isSidebarVisible, setIsSidebarVisible] = useState(false)
  const [folderHistory, setFolderHistory] = useState<string[]>([])
@@ -267,36 +267,28 @@ export function DocumentManagement() {
  }
 
  const handleFolderClick = (folderId: string) => {
-    if (!selectedOrgId) return;
-    
-    // Immediately load the new folder's documents
-    loadDocuments(selectedOrgId, folderId).then(() => {
-      // Only update the other states after documents are loaded
-      setFolderHistory(prev => [...prev, selectedFolderId].filter(Boolean) as string[]);
-      setSelectedFolderId(folderId);
-      setViewMode("documents");
-    });
-  };
-
-const handleBackClick = async () => {
-  if (!selectedOrgId) return;
-
-  if (folderHistory.length > 0) {
-    const previousFolder = folderHistory[folderHistory.length - 1];
-    // Load documents first
-    await loadDocuments(selectedOrgId, previousFolder);
-    // Then update states
-    setFolderHistory(prev => prev.slice(0, -1));
-    setSelectedFolderId(previousFolder);
-    setViewMode("documents");
-  } else {
-    // Load documents first
-    await loadDocuments(selectedOrgId, null);
-    // Then update states
-    setSelectedFolderId(null);
-    setViewMode("dashboard");
+    setFolderHistory(prev => [...prev, selectedFolderId].filter(Boolean) as string[])
+    setSelectedFolderId(folderId)
+    setViewMode("folderContents")
+    setDocuments([])
   }
-};
+
+  const handleBackClick = async () => {
+    if (folderHistory.length > 0) {
+      const previousFolder = folderHistory[folderHistory.length - 1]
+      setFolderHistory(prev => prev.slice(0, -1))
+      setSelectedFolderId(previousFolder)
+      if (selectedOrgId) {
+        await loadDocuments(selectedOrgId, previousFolder)
+      }
+    } else {
+      setSelectedFolderId(null)
+      setViewMode("dashboard")
+      if (selectedOrgId) {
+        await loadDocuments(selectedOrgId, null)
+      }
+    }
+  }
 
   const handleFileUploadWrapper = useCallback(async (file: File) => {
     if (!selectedOrgId) return;
@@ -380,65 +372,62 @@ const handleBackClick = async () => {
           </div>
         </div>
   
-        {!selectedFolderId ? (
-            // Show main views when no folder is selected
-            viewMode === "documents" ? (
-                <DocumentsTable
-                documents={documents}
-                onDocumentDownload={handleDownloadWrapper}
-                onDeleteDocuments={handleTrashDocuments}
-                />
-            ) : viewMode === "overview" ? (
-                <DocumentsOverview 
-                documents={documents}
-                folders={folderMetadata}
-                onFolderClick={handleFolderClickWrapper}
-                onDownload={handleDownloadWrapper}
-                />
-            ) : viewMode === "dashboard" ? (
-                <DashboardTable 
-                documents={documents}
-                folders={folderMetadata.filter(f => f.parentId === null)}
-                onDocumentDownload={handleDownloadWrapper}
-                onDeleteDocuments={handleTrashDocuments}
-                onDeleteFolders={handleTrashFolders}
-                onFolderClick={handleFolderClickWrapper}
-                showDownloadButton={true}
-                onCreateFolder={handleCreateFolderWrapper}
-                onFileUpload={handleFileUploadWrapper}
-                />
-            ) : viewMode === "folders" ? (
-                <FoldersTable 
-                folders={folderMetadata}
-                onFolderClick={handleFolderClickWrapper}
-                onDeleteFolders={handleDeleteFoldersWrapper}
-                onCreateFolder={handleCreateFolderWrapper}
-                />
-            ) : viewMode === "trash" && selectedOrgId ? (
-                <TrashView
-                organizationId={selectedOrgId}
-                onRestore={handleRestoreItem}
-                onPermanentDelete={handlePermanentDelete}
-                />
-            ) : null
-            ) : (
-            // Show folder contents when a folder is selected
-            <FolderContentsTable
-                documents={documents}
-                folders={folderMetadata.filter(f => f.parentId === selectedFolderId)}
-                onDocumentDownload={handleDownloadWrapper}
-                onFolderClick={handleFolderClickWrapper}
-                onCreateFolder={() => handleCreateFolder(selectedFolderId, "New Folder")}
-                onFileUpload={handleFileUploadWrapper}
-                onDeleteItems={async (itemIds, type) => {
-                if (type === 'document') {
-                    await handleTrashDocuments(itemIds);
-                } else {
-                    await handleTrashFolders(itemIds);
-                }
-                }}
+        {viewMode === "documents" ? (
+            <DocumentsTable
+            documents={documents}
+            onDocumentDownload={handleDownloadWrapper}
+            onDeleteDocuments={handleTrashDocuments}
             />
-            )}
+        ) : viewMode === "overview" ? (
+            <DocumentsOverview 
+            documents={documents}
+            folders={folderMetadata}
+            onFolderClick={handleFolderClickWrapper}
+            onDownload={handleDownloadWrapper}
+        />
+        ) : viewMode === "dashboard" ? (
+            <DashboardTable 
+            documents={documents}
+            folders={folderMetadata.filter(f => f.parentId === null)}
+            onDocumentDownload={handleDownloadWrapper}
+            onDeleteDocuments={handleTrashDocuments}
+            onDeleteFolders={handleTrashFolders}
+            onFolderClick={handleFolderClickWrapper}
+            showDownloadButton={true}
+            onCreateFolder={handleCreateFolderWrapper}
+            onFileUpload={handleFileUploadWrapper}
+            />
+        ) : viewMode === "folders" ? (
+        <FoldersTable 
+            folders={folderMetadata}
+            onFolderClick={handleFolderClickWrapper}
+            onDeleteFolders={handleDeleteFoldersWrapper}
+            onCreateFolder={handleCreateFolderWrapper}
+        />
+        ) : viewMode === "trash" && selectedOrgId ? (
+        <TrashView
+            organizationId={selectedOrgId}
+            onRestore={handleRestoreItem}
+            onPermanentDelete={handlePermanentDelete}
+        />
+        ) : 
+        viewMode === "folderContents" ? (
+            <FolderContentsTable
+              documents={documents}
+              folders={folderMetadata.filter(f => f.parentId === selectedFolderId)}
+              onDocumentDownload={handleDownloadWrapper}
+              onFolderClick={handleFolderClickWrapper}
+              onCreateFolder={() => handleCreateFolder(selectedFolderId, "New Folder")}
+              onFileUpload={handleFileUploadWrapper}
+              onDeleteItems={async (itemIds, type) => {
+                if (type === 'document') {
+                  await handleTrashDocuments(itemIds);
+                } else {
+                  await handleTrashFolders(itemIds);
+                }
+              }}
+            />
+          ) : null}
       </div>
     </div>
   )
