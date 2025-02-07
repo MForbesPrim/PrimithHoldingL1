@@ -425,36 +425,41 @@ export function DocumentManagement() {
             showDownloadButton={true}
             onCreateFolder={handleCreateFolderWrapper}
             onFileUpload={handleFileUploadWrapper}
-            />
+            onRenameDocument={handleRenameDocumentWrapper}
+            onRenameFolder={handleRenameFolder}
+        />
         ) : viewMode === "folders" ? (
-        <FoldersTable 
-            folders={folderMetadata}
-            onFolderClick={handleFolderClickWrapper}
-            onDeleteFolders={handleDeleteFoldersWrapper}
-            onCreateFolder={handleCreateFolderWrapper}
-        />
+            <FoldersTable 
+                folders={folderMetadata}
+                onFolderClick={handleFolderClickWrapper}
+                onDeleteFolders={handleDeleteFoldersWrapper}
+                onCreateFolder={handleCreateFolderWrapper}
+                onRenameFolder={handleRenameFolder}
+            />
         ) : viewMode === "trash" && selectedOrgId ? (
-        <TrashView
-            organizationId={selectedOrgId}
-            onRestore={handleRestoreItem}
-            onPermanentDelete={handlePermanentDelete}
-        />
+            <TrashView
+                organizationId={selectedOrgId}
+                onRestore={handleRestoreItem}
+                onPermanentDelete={handlePermanentDelete}
+            />
         ) : 
         viewMode === "folderContents" ? (
             <FolderContentsTable
-              documents={documents}
-              folders={folderMetadata.filter(f => f.parentId === selectedFolderId)}
-              onDocumentDownload={handleDownloadWrapper}
-              onFolderClick={handleFolderClickWrapper}
-              onCreateFolder={() => handleCreateFolder(selectedFolderId, "New Folder")}
-              onFileUpload={handleFileUploadWrapper}
-              onDeleteItems={async (itemIds, type) => {
-                if (type === 'document') {
-                  await handleTrashDocuments(itemIds);
-                } else {
-                  await handleTrashFolders(itemIds);
-                }
-              }}
+                documents={documents}
+                folders={folderMetadata.filter(f => f.parentId === selectedFolderId)}
+                onDocumentDownload={handleDownloadWrapper}
+                onFolderClick={handleFolderClickWrapper}
+                onCreateFolder={() => handleCreateFolder(selectedFolderId, "New Folder")}
+                onFileUpload={handleFileUploadWrapper}
+                onDeleteItems={async (itemIds, type) => {
+                    if (type === 'document') {
+                        await handleTrashDocuments(itemIds);
+                    } else {
+                        await handleTrashFolders(itemIds);
+                    }
+                }}
+                onRenameDocument={handleRenameDocumentWrapper}
+                onRenameFolder={handleRenameFolder}
             />
           ) : null}
       </div>
