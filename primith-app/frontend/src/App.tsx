@@ -56,9 +56,9 @@ function App() {
                   </Route>
                   <Route element={<ProtectedRdmLayout />}>
                     <Route path="/rdm" element={<RdmHomePage />} />
-                    <Route path="/projects" element={<ProjectsPage />} />
-                    <Route path="/pages" element={<PagesDashboard />} />
-                    <Route path="/document-management" element={<DocumentManagementPage />} />
+                    <Route path="/rdm/projects" element={<ProjectsPage />} />
+                    <Route path="/rdm/pages" element={<PagesDashboard />} />
+                    <Route path="/rdm/document-management" element={<DocumentManagementPage />} />
                   </Route>
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/auth-redirect" element={<AuthRedirect />} />

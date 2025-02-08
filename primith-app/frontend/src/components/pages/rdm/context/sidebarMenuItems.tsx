@@ -16,17 +16,17 @@ export const menuItems = [
   },
   {
     title: "Projects",
-    url: "/projects",
+    url: "/rdm/projects",
     icon: Box,
   },
   {
     title: "Document Management",
-    url: "/document-management",
+    url: "/rdm/document-management",
     icon: Layers2,
   },
   {
     title: "Pages",
-    url: "/pages",
+    url: "/rdm/pages",
     icon: FileText,
   },
   {
