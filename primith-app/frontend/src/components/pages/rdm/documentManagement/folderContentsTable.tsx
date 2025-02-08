@@ -39,7 +39,7 @@ interface FolderContentsTableProps {
  folders: FolderMetadata[];
  onDocumentDownload: (documentId: string, fileName: string) => void;
  onFolderClick: (folderId: string) => void;
- onCreateFolder: () => void;
+ onCreateFolder: (name: string) => void;
  onFileUpload: (file: File) => Promise<void>;
  onDeleteItems?: (itemIds: string[], type: 'folder' | 'document') => Promise<void>;
  onRenameDocument?: (documentId: string, newName: string) => Promise<void>;
@@ -66,6 +66,8 @@ export const FolderContentsTable = memo(function FolderContentsTable({
    const [showRenameDialog, setShowRenameDialog] = useState(false)
    const [itemToRename, setItemToRename] = useState<{id: string, name: string, type: 'document' | 'folder'} | null>(null)
    const [newName, setNewName] = useState('')
+   const [showNewFolderDialog, setShowNewFolderDialog] = useState(false)
+   const [newFolderName, setNewFolderName] = useState("")
 
    const items = useMemo(() => [
        ...folders.map(folder => ({
@@ -263,10 +265,10 @@ export const FolderContentsTable = memo(function FolderContentsTable({
                    className="max-w-sm"
                />
                <div className="flex items-center gap-2">
-                   <Button size="sm" onClick={onCreateFolder} className="flex items-center gap-2">
-                       <Plus className="h-4 w-4 mr-2" />
-                       New Folder
-                   </Button>
+                <Button size="sm" onClick={() => setShowNewFolderDialog(true)} className="flex items-center gap-2">
+                    <Plus className="h-4 w-4 mr-2" />
+                    New Folder
+                </Button>
                    <Button size="sm" onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2">
                        <Upload className="h-4 w-4 mr-2" />
                        Upload Document
@@ -387,6 +389,47 @@ export const FolderContentsTable = memo(function FolderContentsTable({
                    </DialogFooter>
                </DialogContent>
            </Dialog>
+           {/* New Folder Dialog */}
+            <Dialog open={showNewFolderDialog} onOpenChange={setShowNewFolderDialog}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Create New Folder</DialogTitle>
+                        <DialogDescription>
+                            Enter a name for the new folder.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <Input
+                            value={newFolderName}
+                            onChange={(e) => setNewFolderName(e.target.value)}
+                            placeholder="Enter folder name"
+                            autoFocus
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button 
+                            variant="outline" 
+                            onClick={() => {
+                                setShowNewFolderDialog(false)
+                                setNewFolderName("")
+                            }}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                if (newFolderName.trim()) {
+                                    onCreateFolder(newFolderName.trim())
+                                    setShowNewFolderDialog(false)
+                                    setNewFolderName("")
+                                }
+                            }}
+                        >
+                            Create Folder
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
        </div>
    )
 })

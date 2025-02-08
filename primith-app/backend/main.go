@@ -1765,14 +1765,15 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	// Check for duplicate names at the same level
 	var duplicateExists bool
 	err = tx.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.folders 
-            WHERE parent_id IS NOT DISTINCT FROM $1
-            AND organization_id = $2
-            AND name ILIKE $3
-        )
-    `, req.ParentID, req.OrganizationID, name).Scan(&duplicateExists)
+		SELECT EXISTS (
+			SELECT 1 
+			FROM rdm.folders 
+			WHERE parent_id IS NOT DISTINCT FROM $1
+			AND organization_id = $2
+			AND name ILIKE $3
+			AND deleted_at IS NULL  -- Only check against non-deleted folders
+		)
+	`, req.ParentID, req.OrganizationID, name).Scan(&duplicateExists)
 
 	if err != nil {
 		http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
@@ -1786,14 +1787,15 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		for duplicateExists {
 			name = fmt.Sprintf("%s (%d)", baseName, counter)
 			err = tx.QueryRow(`
-                SELECT EXISTS (
-                    SELECT 1 
-                    FROM rdm.folders 
-                    WHERE parent_id IS NOT DISTINCT FROM $1
-                    AND organization_id = $2
-                    AND LOWER(name) = LOWER($3)
-                )
-            `, req.ParentID, req.OrganizationID, name).Scan(&duplicateExists)
+				SELECT EXISTS (
+					SELECT 1 
+					FROM rdm.folders 
+					WHERE parent_id IS NOT DISTINCT FROM $1
+					AND organization_id = $2
+					AND LOWER(name) = LOWER($3)
+					AND deleted_at IS NULL  -- Only check against non-deleted folders
+				)
+			`, req.ParentID, req.OrganizationID, name).Scan(&duplicateExists)
 
 			if err != nil {
 				http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)

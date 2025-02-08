@@ -319,10 +319,10 @@ export function DocumentManagement() {
     [handleDeleteFolders]
   );
 
-  const handleCreateFolderWrapper = useCallback(() => 
-    handleCreateFolder(null, "New Folder"),
+  const handleCreateFolderWrapper = useCallback((parentId: string | null, name: string) => 
+    handleCreateFolder(parentId, name),
     [handleCreateFolder]
-  );
+    );
 
   const handleRenameDocumentWrapper = useCallback((documentId: string, newName: string) => 
     handleRenameDocument(documentId, newName),
@@ -423,7 +423,7 @@ export function DocumentManagement() {
             onDeleteFolders={handleTrashFolders}
             onFolderClick={handleFolderClickWrapper}
             showDownloadButton={true}
-            onCreateFolder={handleCreateFolderWrapper}
+            onCreateFolder={(name) => handleCreateFolder(selectedFolderId, name)}
             onFileUpload={handleFileUploadWrapper}
             onRenameDocument={handleRenameDocumentWrapper}
             onRenameFolder={handleRenameFolder}
@@ -449,7 +449,7 @@ export function DocumentManagement() {
                 folders={folderMetadata.filter(f => f.parentId === selectedFolderId)}
                 onDocumentDownload={handleDownloadWrapper}
                 onFolderClick={handleFolderClickWrapper}
-                onCreateFolder={() => handleCreateFolder(selectedFolderId, "New Folder")}
+                onCreateFolder={(name) => handleCreateFolder(selectedFolderId, name)}
                 onFileUpload={handleFileUploadWrapper}
                 onDeleteItems={async (itemIds, type) => {
                     if (type === 'document') {

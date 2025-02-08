@@ -49,7 +49,7 @@ if (pages.length === 0) {
             Welcome to Pages
           </h2>
           <p className="text-muted-foreground text-sm">
-            No pages yet. Create your first page to get started.
+            No pages yet! Create your first page to get started.
           </p>
           <Button 
             onClick={() => handleCreatePage(null, "New Page")}

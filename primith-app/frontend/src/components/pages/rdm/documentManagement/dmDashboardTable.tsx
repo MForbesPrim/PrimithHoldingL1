@@ -63,7 +63,7 @@ interface DocumentsTableProps {
     onDeleteFolders?: (folderIds: string[]) => Promise<void>;
     onFolderClick: (folderId: string) => void;
     showDownloadButton?: boolean;
-    onCreateFolder: () => void;
+    onCreateFolder: (name: string) => void;
     onFileUpload?: (file: File) => Promise<void>;
     onRenameDocument?: (documentId: string, newName: string) => Promise<void>;
     onRenameFolder?: (folderId: string, newName: string) => Promise<void>;
@@ -94,6 +94,8 @@ export const DashboardTable = memo(function DashboardTable({
     const [showRenameDialog, setShowRenameDialog] = useState(false)
     const [itemToRename, setItemToRename] = useState<{id: string, name: string, type: 'document' | 'folder'} | null>(null)
     const [newName, setNewName] = useState('')
+    const [showNewFolderDialog, setShowNewFolderDialog] = useState(false)
+    const [newFolderName, setNewFolderName] = useState("")
     const [itemsToDelete, setItemsToDelete] = useState<{
         documents: string[];
         folders: string[];
@@ -458,7 +460,7 @@ export const DashboardTable = memo(function DashboardTable({
                 <div className="flex items-center gap-2">
                     <Button 
                         size="sm" 
-                        onClick={onCreateFolder}
+                        onClick={() => setShowNewFolderDialog(true)}
                         className="flex items-center gap-2"
                     >
                         <FolderPlus className="h-4 w-4" />
@@ -649,6 +651,47 @@ export const DashboardTable = memo(function DashboardTable({
                             }}
                         >
                             Save Changes
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+            {/* New Folder Dialog */}
+            <Dialog open={showNewFolderDialog} onOpenChange={setShowNewFolderDialog}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Create New Folder</DialogTitle>
+                        <DialogDescription>
+                            Enter a name for the new folder.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <Input
+                            value={newFolderName}
+                            onChange={(e) => setNewFolderName(e.target.value)}
+                            placeholder="Enter folder name"
+                            autoFocus
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button 
+                            variant="outline" 
+                            onClick={() => {
+                                setShowNewFolderDialog(false)
+                                setNewFolderName("")
+                            }}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                if (newFolderName.trim()) {
+                                    onCreateFolder(newFolderName.trim())
+                                    setShowNewFolderDialog(false)
+                                    setNewFolderName("")
+                                }
+                            }}
+                        >
+                            Create Folder
                         </Button>
                     </DialogFooter>
                 </DialogContent>
