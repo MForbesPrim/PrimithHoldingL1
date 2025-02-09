@@ -47,7 +47,7 @@ export function PageTree({
   selectedPageId
 }: {
   pages: PageNode[];
-  onCreatePage: (parentId: string | null, title: string) => void;
+  onCreatePage: (parentId: string | null) => void;
   onDeletePage: (id: string) => void;
   onRenamePage: (id: string, newTitle: string) => void;
   onMovePage: (pageId: string, newParentId: string | null) => void;
@@ -224,10 +224,10 @@ export function PageTree({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-40">
-              <DropdownMenuItem onClick={() => onCreatePage(page.id, "New Page")}>
+            <DropdownMenuItem onClick={() => onCreatePage(page.id)}>
                 <Plus className="h-4 w-4 mr-2" />
                 New Subpage
-              </DropdownMenuItem>
+                </DropdownMenuItem>
               <DropdownMenuItem onClick={handleStartRename}>
                 <Pencil className="h-4 w-4 mr-2" />
                 Rename
@@ -255,12 +255,12 @@ export function PageTree({
         No pages yet. Create your first page to get started.
       </div>
       <Button
-        onClick={() => onCreatePage(null, "New Page")}
+        onClick={() => onCreatePage(null)}
         className="flex items-center"
-      >
+        >
         <Plus className="h-4 w-4 mr-2" />
         Create Page
-      </Button>
+        </Button>
     </div>
   );
 
@@ -277,11 +277,11 @@ export function PageTree({
       <div className="flex items-center justify-between mb-4 ml-2">
         <h3 className="font-semibold">Pages</h3>
         <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onCreatePage(null, "New Page")}
-        >
-          <Plus className="h-4 w-4" />
+            variant="ghost"
+            size="sm"
+            onClick={() => onCreatePage(null)}
+            >
+            <Plus className="h-4 w-4" />
         </Button>
       </div>
       <DndContext
