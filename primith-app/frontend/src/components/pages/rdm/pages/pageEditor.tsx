@@ -189,7 +189,7 @@ const PageEditor = ({ page, onSave }: PageEditorProps) => {
         Underline,
         TextStyle,
         Color.configure({
-          types: ['textStyle']
+          types: ['textStyle', 'bold'],
         }),
         Highlight,
         PageBreak,
@@ -580,7 +580,7 @@ const PageEditor = ({ page, onSave }: PageEditorProps) => {
 
       <EditorContent 
         editor={editor} 
-        className="prose max-w-none min-h-[700px] overflow-y-auto p-5 [&.ProseMirror-focused]:outline-none [&.ProseMirror-focused]:border-none [&.ProseMirror-focused]:shadow-none"
+        className="prose prose-strong:text-inherit max-w-none min-h-[700px] overflow-y-auto p-5 [&.ProseMirror-focused]:outline-none [&.ProseMirror-focused]:border-none [&.ProseMirror-focused]:shadow-none"
         />
 
       <input
