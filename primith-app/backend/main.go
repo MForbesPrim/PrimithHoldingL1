@@ -3608,6 +3608,461 @@ func getBlobClient(organizationID string) (*azblob.Client, string, error) {
 	return client, containerName, nil
 }
 
+// Handler for getting all pages
+func handleGetPages(w http.ResponseWriter, r *http.Request) {
+	organizationId := r.URL.Query().Get("organizationId")
+	if organizationId == "" {
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	rows, err := db.Query(`
+        SELECT 
+            pc.id, 
+            pc.parent_id,
+            pc.title,
+            COALESCE(pc.content, '') as content,
+            pc.status,
+            cb.email as created_by,
+            ub.email as updated_by,
+            db.email as deleted_by,
+            pc.created_at,
+            pc.updated_at,
+            pc.deleted_at
+        FROM pages.pages_content pc
+        LEFT JOIN auth.users cb ON pc.created_by = cb.id
+        LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+        LEFT JOIN auth.users db ON pc.deleted_by = db.id
+        WHERE pc.organization_id = $1
+        AND pc.deleted_at IS NULL
+        ORDER BY pc.created_at DESC
+    `, organizationId)
+
+	if err != nil {
+		log.Printf("Error fetching pages: %v", err)
+		http.Error(w, "Failed to fetch pages", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var pages []map[string]interface{}
+	for rows.Next() {
+		var page struct {
+			ID        string
+			ParentID  sql.NullString
+			Title     string
+			Content   string // Changed from sql.NullString since we use COALESCE
+			Status    string
+			CreatedBy string
+			UpdatedBy string
+			DeletedBy sql.NullString
+			CreatedAt time.Time
+			UpdatedAt time.Time
+			DeletedAt sql.NullTime
+		}
+
+		if err := rows.Scan(
+			&page.ID,
+			&page.ParentID,
+			&page.Title,
+			&page.Content,
+			&page.Status,
+			&page.CreatedBy,
+			&page.UpdatedBy,
+			&page.DeletedBy,
+			&page.CreatedAt,
+			&page.UpdatedAt,
+			&page.DeletedAt,
+		); err != nil {
+			log.Printf("Error scanning page row: %v", err)
+			continue
+		}
+
+		pageMap := map[string]interface{}{
+			"id":        page.ID,
+			"parentId":  page.ParentID.String,
+			"title":     page.Title,
+			"content":   page.Content,
+			"status":    page.Status,
+			"createdBy": page.CreatedBy,
+			"updatedBy": page.UpdatedBy,
+			"deletedBy": page.DeletedBy.String,
+			"createdAt": page.CreatedAt,
+			"updatedAt": page.UpdatedAt,
+			"deletedAt": page.DeletedAt.Time,
+		}
+
+		pages = append(pages, pageMap)
+	}
+
+	log.Printf("Returning %d pages", len(pages)) // Add logging
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(pages)
+}
+
+// Handler for creating a new page
+func handleCreatePage(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var req struct {
+		Title          string  `json:"title"`
+		ParentID       *string `json:"parentId"`
+		OrganizationID string  `json:"organizationId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, req.OrganizationID).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Unauthorized access to organization", http.StatusForbidden)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Get user ID
+	var userId string
+	err = tx.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Create the page
+	var pageId string
+	var createdAt, updatedAt time.Time
+	err = db.QueryRow(`
+        INSERT INTO pages.pages_content (
+            title,
+            parent_id,
+            organization_id,
+            content,
+            status,
+            created_by,
+            updated_by
+        ) VALUES ($1, $2, $3, '', 'active', $4, $4)
+        RETURNING id, created_at, updated_at
+    `, req.Title, req.ParentID, req.OrganizationID, userId).Scan(&pageId, &createdAt, &updatedAt)
+
+	if err != nil {
+		log.Printf("Error creating page: %v", err)
+		http.Error(w, "Failed to create page", http.StatusInternalServerError)
+		return
+	}
+
+	// Return all the page fields
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":        pageId,
+		"title":     req.Title,
+		"parentId":  req.ParentID,
+		"content":   "",
+		"status":    "active",
+		"createdBy": claims.Username,
+		"updatedBy": claims.Username,
+		"createdAt": createdAt,
+		"updatedAt": updatedAt,
+	})
+}
+
+// Handler for updating a page
+func handleUpdatePage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	pageId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var req struct {
+		Content        string `json:"content"`
+		OrganizationID string `json:"organizationId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Get user ID
+	var userId string
+	err = tx.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Verify user has access and update the page
+	result, err := tx.Exec(`
+        UPDATE pages.pages_content 
+        SET 
+            content = $1,
+            updated_by = $2,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        AND organization_id = $4
+        AND EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            WHERE om.organization_id = $4
+            AND om.user_id = $2
+        )
+    `, req.Content, userId, pageId, req.OrganizationID)
+
+	if err != nil {
+		http.Error(w, "Failed to update page", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Page not found or access denied", http.StatusNotFound)
+		return
+	}
+
+	// Create version record
+	_, err = tx.Exec(`
+        INSERT INTO pages.pages_versions (
+            page_id,
+            version,
+            content,
+            created_by
+        ) SELECT 
+            id,
+            COALESCE((
+                SELECT MAX(version) + 1
+                FROM pages.pages_versions
+                WHERE page_id = $1
+            ), 1),
+            $2,
+            $3
+        FROM pages.pages_content
+        WHERE id = $1
+    `, pageId, req.Content, userId)
+
+	if err != nil {
+		http.Error(w, "Failed to create version record", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// Handler for deleting a page
+func handleDeletePage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	pageId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	organizationId := r.URL.Query().Get("organizationId")
+	if organizationId == "" {
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err := db.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	result, err := db.Exec(`
+        UPDATE pages.pages_content 
+        SET 
+            deleted_at = CURRENT_TIMESTAMP,
+            deleted_by = $1
+        WHERE id = $2
+        AND organization_id = $3
+        AND EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            WHERE om.organization_id = $3
+            AND om.user_id = $1
+        )
+    `, userId, pageId, organizationId)
+
+	if err != nil {
+		http.Error(w, "Failed to delete page", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Page not found or access denied", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// Handler for renaming a page
+func handleRenamePage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	pageId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var req struct {
+		Title          string `json:"title"`
+		OrganizationID string `json:"organizationId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err := db.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	result, err := db.Exec(`
+        UPDATE pages.pages_content 
+        SET 
+            title = $1,
+            updated_by = $2,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        AND organization_id = $4
+        AND EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            WHERE om.organization_id = $4
+            AND om.user_id = $2
+        )
+    `, req.Title, userId, pageId, req.OrganizationID)
+
+	if err != nil {
+		http.Error(w, "Failed to rename page", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Page not found or access denied", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// Handler for moving a page
+func handleMovePage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	pageId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var req struct {
+		NewParentID    *string `json:"newParentId"`
+		OrganizationID string  `json:"organizationId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err := db.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	result, err := db.Exec(`
+        UPDATE pages.pages_content 
+        SET 
+            parent_id = $1,
+            updated_by = $2,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        AND organization_id = $4
+        AND EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            WHERE om.organization_id = $4
+            AND om.user_id = $2
+        )
+    `, req.NewParentID, userId, pageId, req.OrganizationID)
+
+	if err != nil {
+		http.Error(w, "Failed to move page", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Page not found or access denied", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -3778,6 +4233,14 @@ func main() {
 	r.HandleFunc("/folders/{id}/restore", authMiddleware(handleRestoreFolder)).Methods("PUT")
 	r.HandleFunc("/trash", authMiddleware(handleGetTrashItems)).Methods("GET")
 	r.HandleFunc("/trash/{type}/{id}", authMiddleware(handlePermanentDelete)).Methods("DELETE")
+
+	// Pages routes
+	r.HandleFunc("/pages", authMiddleware(handleGetPages)).Methods("GET")
+	r.HandleFunc("/pages", authMiddleware(handleCreatePage)).Methods("POST")
+	r.HandleFunc("/pages/{id}", authMiddleware(handleUpdatePage)).Methods("PUT")
+	r.HandleFunc("/pages/{id}", authMiddleware(handleDeletePage)).Methods("DELETE")
+	r.HandleFunc("/pages/{id}/rename", authMiddleware(handleRenamePage)).Methods("PUT")
+	r.HandleFunc("/pages/{id}/move", authMiddleware(handleMovePage)).Methods("POST")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

@@ -274,7 +274,7 @@ export function PageTree({
 
   return (
     <div className="min-w-[200px] border-r pr-4 pt-4 pb-4">
-      <div className="flex items-center justify-between mb-4 ml-2">
+      <div className="flex items-center justify-between mb-4 ml-6">
         <h3 className="font-semibold">Pages</h3>
         <Button
             variant="ghost"

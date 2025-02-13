@@ -65,7 +65,7 @@ export function ProtectedRdmLayout() {
   if (!rdmAuth?.user) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-6 w-6 border-2 border-current border-t-transparent" />
+        <div className="animate-spin rounded-full h-6 w-6 border-4 border-gray-900 border-t-transparent"/>
       </div>
     )
   }

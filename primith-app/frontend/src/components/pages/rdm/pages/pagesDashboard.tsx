@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PageTree } from './pagesTree';
 import { PageNode } from "@/types/pages";
-import  PageEditor from './pageEditor';
+import PageEditor from './pageEditor';
 import { Button } from '@/components/ui/button';
-import { Plus } from 'lucide-react';
+import { Plus, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react';
 import {
     Dialog,
     DialogContent,
@@ -13,159 +13,228 @@ import {
     DialogDescription
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PagesService } from '@/services/pagesService';
+import { useOrganization } from "@/components/pages/rdm/context/organizationContext"
+import { PagesTable } from './pagesTable';
 
 export function PagesDashboard() {
     const [pages, setPages] = useState<PageNode[]>([]);
+    const [loading, setLoading] = useState(true);
     const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
     const [showNewPageDialog, setShowNewPageDialog] = useState(false);
     const [newPageName, setNewPageName] = useState("");
     const [newPageParentId, setNewPageParentId] = useState<string | null>(null);
-  
+    const [isPageTreeVisible, setIsPageTreeVisible] = useState(false);
+
+    const { selectedOrgId } = useOrganization();
+    const pagesService = new PagesService();
+
+    useEffect(() => {
+      if (selectedOrgId) {
+          loadPages();
+      }
+    }, [selectedOrgId]);
+
+    const loadPages = async () => {
+      if (!selectedOrgId) return;
+      try {
+          setLoading(true);
+          const fetchedPages = await pagesService.getPages(selectedOrgId);
+          console.log('Fetched pages in Dashboard:', fetchedPages); // Debug log
+          setPages(fetchedPages);
+      } catch (error) {
+          console.error('Failed to load pages:', error);
+      } finally {
+          setLoading(false);
+      }
+  };
+
     const handleCreatePageClick = (parentId: string | null) => {
-      setNewPageParentId(parentId);
-      setNewPageName("");
-      setShowNewPageDialog(true);
+        setNewPageParentId(parentId);
+        setNewPageName("");
+        setShowNewPageDialog(true);
+    };
+
+    const handleCreatePage = async (parentId: string | null, title: string) => {
+      if (!selectedOrgId) return;
+      try {
+          const newPage = await pagesService.createPage(title, parentId, selectedOrgId);
+          setPages(currentPages => [...currentPages, newPage]);
+          setShowNewPageDialog(false);
+          setNewPageName("");
+          // Select the new page to open it in the editor
+          setSelectedPageId(newPage.id);
+      } catch (error) {
+          console.error('Failed to create page:', error);
+      }
+    };
+
+    const handleDeletePage = async (id: string) => {
+      if (!selectedOrgId) return;
+      try {
+        // Call the backend API to delete the page.
+        await pagesService.deletePage(id, selectedOrgId);
+        
+        // Update the local state to remove the deleted page.
+        setPages(pages.filter((page) => page.id !== id));
+      } catch (error) {
+        console.error('Failed to delete page:', error);
+      }
     };
   
-    const handleCreatePage = (parentId: string | null, title: string) => {
-      const newPage: PageNode = {
-        id: crypto.randomUUID(),
-        parentId,
-        title,
-        content: '',
-      };
-      setPages([...pages, newPage]);
-      setShowNewPageDialog(false);
-      setNewPageName("");
+    const handleRenamePage = async (id: string, newTitle: string) => {
+      if (!selectedOrgId) return;
+      try {
+        // Call the backend API to rename the page.
+        await pagesService.renamePage(id, newTitle, selectedOrgId);
+        
+        // Update the local state to reflect the new title.
+        setPages(
+          pages.map((page) =>
+            page.id === id ? { ...page, title: newTitle } : page
+          )
+        );
+      } catch (error) {
+        console.error('Failed to rename page:', error);
+      }
     };
-  
-    const handleDeletePage = (id: string) => {
-      setPages(pages.filter((page) => page.id !== id));
-    };
-  
-    const handleRenamePage = (id: string, newTitle: string) => {
-      setPages(
-        pages.map((page) =>
-          page.id === id ? { ...page, title: newTitle } : page
-        )
-      );
-    };
-  
+
     const handleMovePage = (pageId: string, newParentId: string | null) => {
-      setPages(
-        pages.map((page) =>
-          page.id === pageId ? { ...page, parentId: newParentId } : page
-        )
-      );
+        setPages(
+            pages.map((page) =>
+                page.id === pageId ? { ...page, parentId: newParentId } : page
+            )
+        );
     };
   
-    const handleSavePage = (id: string, content: string) => {
-      setPages(
-        pages.map((page) =>
-          page.id === id ? { ...page, content } : page
-        )
-      );
+    const handleSavePage = async (id: string, content: string) => {
+        if (!selectedOrgId) return;
+        try {
+            await pagesService.updatePage(id, content, selectedOrgId);
+            setPages(pages.map(page =>
+                page.id === id ? { ...page, content } : page
+            ));
+        } catch (error) {
+            console.error('Failed to save page:', error);
+        }
     };
+
+    if (loading) {
+        return (
+          <div className="flex items-center justify-center h-screen">
+            <div className="animate-spin rounded-full h-6 w-6 border-4 border-gray-900 border-t-transparent"/>
+          </div>
+        );
+    }
   
     return (
-      <>
-        {pages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-[calc(100vh-100px)]">
-            <div className="text-center max-w-[500px] space-y-6">
-              <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-                Welcome to Pages
-              </h2>
-              <p className="text-muted-foreground text-sm">
-                No pages yet! Create your first page to get started.
-              </p>
-              <Button
-                onClick={() => handleCreatePageClick(null)}
-                className="px-6 py-2"
-              >
-                <Plus className="h-5 w-5 mr-2" />
-                Create Page
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex h-full">
-            <PageTree
-              pages={pages}
-              onCreatePage={handleCreatePageClick}
-              onDeletePage={handleDeletePage}
-              onRenamePage={handleRenamePage}
-              onMovePage={handleMovePage}
-              onSelect={setSelectedPageId}
-              selectedPageId={selectedPageId}
-            />
-            <div className="flex-1 p-8 flex items-center justify-center">
-              {selectedPageId ? (
-                <PageEditor
-                  page={pages.find((p) => p.id === selectedPageId)!}
-                  onSave={handleSavePage}
-                />
-              ) : (
-                <div className="text-center max-w-[500px] space-y-4">
-                  <h3 className="text-xl font-medium text-gray-900 dark:text-gray-100">
-                    Select a page to edit
-                  </h3>
-                  <p className="text-muted-foreground">
-                    Choose a page from the sidebar or create a new one to get started.
-                  </p>
-                  <Button
-                    variant="outline"
-                    onClick={() => handleCreatePageClick(null)}
-                    className="mt-4"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create New Page
-                  </Button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-  
-        {/* Always render the Dialog */}
-        <Dialog open={showNewPageDialog} onOpenChange={setShowNewPageDialog}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New Page</DialogTitle>
-              <DialogDescription>
-                Enter a name for the new page.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="py-4">
-              <Input
-                value={newPageName}
-                onChange={(e) => setNewPageName(e.target.value)}
-                placeholder="Enter page name"
-                autoFocus
+      <div className="flex h-full">
+          {/* Show PageTree only when a page is selected */}
+          {selectedPageId && isPageTreeVisible && (
+              <PageTree
+                  pages={pages}
+                  onCreatePage={handleCreatePageClick}
+                  onDeletePage={handleDeletePage}
+                  onRenamePage={handleRenamePage}
+                  onMovePage={handleMovePage}
+                  onSelect={setSelectedPageId}
+                  selectedPageId={selectedPageId}
               />
-            </div>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowNewPageDialog(false);
-                  setNewPageName("");
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  if (newPageName.trim()) {
-                    handleCreatePage(newPageParentId, newPageName.trim());
-                  }
-                }}
-              >
-                Create Page
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </>
+          )}
+          
+          <div className="flex-1 p-4">
+              {selectedPageId ? (
+                  // Show Page Editor when a page is selected
+                  <div>
+                      <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2">
+                              <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => setIsPageTreeVisible(!isPageTreeVisible)}
+                                  className="mr-2"
+                              >
+                                  {isPageTreeVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
+                              </Button>
+                          </div>
+                          <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSelectedPageId(null)}
+                          >
+                              <X className="h-4 w-4 mr-2" />
+                              Close
+                          </Button>
+                      </div>
+                      <PageEditor
+                          page={pages.find(p => p.id === selectedPageId)!}
+                          onSave={handleSavePage}
+                          onRename={handleRenamePage}
+                      />
+                  </div>
+              ) : (
+                  // Show Pages Dashboard when no page is selected
+                  <div className="mx-4">
+                      <div className="flex justify-between items-center mb-4">
+                          <h1 className="text-2xl font-bold">Pages</h1>
+                          <Button
+                              onClick={() => handleCreatePageClick(null)}
+                              className="px-4"
+                          >
+                              <Plus className="h-4 w-4 mr-2" />
+                              Create Page
+                          </Button>
+                      </div>
+                      <PagesTable 
+                          pages={pages}
+                          onPageClick={setSelectedPageId}
+                          onCreatePage={handleCreatePageClick}
+                          onDeletePage={handleDeletePage}
+                          onRenamePage={handleRenamePage}
+                      />
+                  </div>
+              )}
+          </div>
+
+          {/* New Page Dialog */}
+          <Dialog open={showNewPageDialog} onOpenChange={setShowNewPageDialog}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Create New Page</DialogTitle>
+                        <DialogDescription>
+                            Enter a name for the new page.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <Input
+                            value={newPageName}
+                            onChange={(e) => setNewPageName(e.target.value)}
+                            placeholder="Enter page name"
+                            autoFocus
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                setShowNewPageDialog(false);
+                                setNewPageName("");
+                            }}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                if (newPageName.trim()) {
+                                    handleCreatePage(newPageParentId, newPageName.trim());
+                                }
+                            }}
+                        >
+                            Create Page
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </div>
     );
-  }
-  
+}

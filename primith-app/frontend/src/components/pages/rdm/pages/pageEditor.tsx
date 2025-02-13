@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useEditor, EditorContent, Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import TextStyle from '@tiptap/extension-text-style';
@@ -44,6 +44,16 @@ import { PageBreak } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/Pa
 import { Indent as IndentExtension } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/Indent';
 import SearchAndReplace from '@/components/pages/rdm/pages/TipTapExtensionsExtra/SearchAndReplace';
 import SearchReplaceMenu from '@/components/pages/rdm/pages/TipTapExtensionsExtra/SearchReplaceMenu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Button } from '@/components/ui/button';
 
 interface PageEditorProps {
     page: PageNode;
@@ -176,8 +186,8 @@ const TableOptions: React.FC<TableOptionsProps> = ({ editor }) => {
   );
 };
 
-const PageEditor = ({ page, onSave }: PageEditorProps) => {
-    const editor = useEditor({
+const PageEditor = ({ page, onSave, onRename }: PageEditorProps & { onRename: (id: string, title: string) => void }) => {
+      const editor = useEditor({
       extensions: [
         StarterKit,
         Placeholder.configure({
@@ -213,11 +223,17 @@ const PageEditor = ({ page, onSave }: PageEditorProps) => {
             disableRegex: true,
           }),
       ],
-      content: page.content,
+      content: page.content || '', 
       onUpdate: ({ editor }) => {
         onSave(page.id, editor.getHTML());
       },
     });  
+
+    useEffect(() => {
+      if (editor && page) {
+          editor.commands.setContent(page.content || '');
+      }
+    }, [page.id, editor]);
   
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -226,6 +242,8 @@ const PageEditor = ({ page, onSave }: PageEditorProps) => {
     const [_isColorPickerOpen, setIsColorPickerOpen] = useState(false);
     const colorInputRef = useRef<HTMLInputElement>(null);
     const [isSearchMenuOpen, setIsSearchMenuOpen] = useState(false);
+    const [isRenaming, setIsRenaming] = useState(false);
+    const [newName, setNewName] = useState(page.title);
 
     const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
@@ -339,7 +357,19 @@ const PageEditor = ({ page, onSave }: PageEditorProps) => {
             }
         `}
         </style>
-      <div className="w-[90%] mx-auto my-5 border border-gray-200 rounded-lg" onClick={closeAllMenus}>
+        <div className="w-[90%] mx-auto mb-5 mt-1">
+    <div className="flex justify-between items-start mb-4">
+        <h1 className="text-2xl font-bold text-gray-900">{page.title}</h1>
+        <div className="text-right">
+            <div className="text-sm text-gray-600">
+                Created by {page.createdBy}
+            </div>
+            <div className="text-xs text-gray-400">
+                Last updated: {new Date(page.updatedAt).toLocaleString()}
+            </div>
+        </div>
+    </div>
+      <div className="border border-gray-200 rounded-lg" onClick={closeAllMenus}>
         <div className="p-2.5 border-b border-gray-200 flex flex-wrap items-center gap-1 sticky top-0 bg-white z-10 rounded-t-lg">
           <TooltipButton 
             title="Undo" 
@@ -583,6 +613,40 @@ const PageEditor = ({ page, onSave }: PageEditorProps) => {
         className="prose prose-strong:text-inherit max-w-none min-h-[700px] overflow-y-auto p-5 [&.ProseMirror-focused]:outline-none [&.ProseMirror-focused]:border-none [&.ProseMirror-focused]:shadow-none"
         />
 
+      <Dialog open={isRenaming} onOpenChange={setIsRenaming}>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Rename Page</DialogTitle>
+                    <DialogDescription>
+                        Enter a new name for the page.
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="py-4">
+                    <Input
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        placeholder="Enter page name"
+                        autoFocus
+                    />
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsRenaming(false)}>
+                        Cancel
+                    </Button>
+                    <Button
+                        onClick={() => {
+                            if (newName.trim()) {
+                                onRename(page.id, newName.trim());
+                                setIsRenaming(false);
+                            }
+                        }}
+                    >
+                        Save
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
       <input
         type="file"
         ref={fileInputRef}
@@ -590,6 +654,7 @@ const PageEditor = ({ page, onSave }: PageEditorProps) => {
         accept="image/*"
         className="hidden"
       />
+    </div>
     </div>
     </>
   );
