@@ -14,7 +14,11 @@ import TableHeader from '@tiptap/extension-table-header';
 import TextAlign from '@tiptap/extension-text-align';
 import { useToast } from "@/hooks/use-toast";
 import Placeholder from '@tiptap/extension-placeholder';
-
+import { Divider } from './TipTapExtensionsExtra/Divider';
+import { InfoPanel } from './TipTapExtensionsExtra/InfoPanel';
+import { DateNode } from './TipTapExtensionsExtra/DateNode';
+import { Expand } from './TipTapExtensionsExtra/Expand';
+import { MoreHorizontal, Minus, Info, Calendar, ChevronRight } from 'lucide-react';
 import {
   Undo2,
   Redo2,
@@ -264,6 +268,10 @@ const PageEditor = ({
         searchResultClass: 'search-highlight',
         disableRegex: true,
       }),
+      Divider,
+      InfoPanel,
+      DateNode,
+      Expand,
     ],
     content: page.content || '',
     onUpdate: ({ editor }) => {
@@ -273,6 +281,84 @@ const PageEditor = ({
       }
     },
   });
+
+  const MoreElementsMenu = ({ editor }: { editor: Editor }) => {
+    if (!editor) return null;
+  
+    return (
+      <div className="absolute top-full right-0 bg-white border border-gray-200 rounded-lg shadow-lg p-2 min-w-[175px] z-50">
+        <ul className="space-y-1">
+          <li
+            className="flex items-center px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+            onClick={() => {
+              editor.chain()
+                .focus()
+                .insertContent([
+                  { type: 'horizontalRule' },
+                  { type: 'paragraph', content: [] }
+                ])
+                .run()
+            }}
+          >
+            <Minus className="w-4 h-4 mr-2" />
+            <span>Divider</span>
+          </li>
+          <li
+            className="flex items-center px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+            onClick={() => {
+              editor.chain()
+                .focus()
+                .insertContent([
+                  {
+                    type: 'infoPanel',
+                    content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Add information here' }] }]
+                  },
+                  { type: 'paragraph', content: [] }
+                ])
+                .run()
+            }}
+          >
+            <Info className="w-4 h-4 mr-2" />
+            <span>Info Panel</span>
+          </li>
+          <li
+            className="flex items-center px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+            onClick={() => {
+              editor.chain()
+                .focus()
+                .insertContent([
+                  { type: 'dateNode' },
+                  { type: 'paragraph', content: [] }
+                ])
+                .run()
+            }}
+          >
+            <Calendar className="w-4 h-4 mr-2" />
+            <span>Insert Date</span>
+          </li>
+          <li
+            className="flex items-center px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+            onClick={() => {
+              editor.chain()
+                .focus()
+                .insertContent([
+                  {
+                    type: 'expand',
+                    attrs: { title: 'Click to expand', isOpen: false },
+                    content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Expandable content here' }] }]
+                  },
+                  { type: 'paragraph', content: [] }
+                ])
+                .run()
+            }}
+          >
+            <ChevronRight className="w-4 h-4 mr-2" />
+            <span>Expand</span>
+          </li>
+        </ul>
+      </div>
+    );
+  };
 
   // 3. Set content again if page changes
   useEffect(() => {
@@ -631,7 +717,28 @@ const PageEditor = ({
                   editor
                     .chain()
                     .focus()
-                    .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+                    .insertContent([
+                      {
+                        type: 'table',
+                        content: [
+                          {
+                            type: 'tableRow',
+                            content: Array(3).fill({
+                              type: 'tableHeader',
+                              content: [{ type: 'paragraph', content: [] }]
+                            })
+                          },
+                          ...Array(2).fill({
+                            type: 'tableRow',
+                            content: Array(3).fill({
+                              type: 'tableCell',
+                              content: [{ type: 'paragraph', content: [] }]
+                            })
+                          })
+                        ]
+                      },
+                      { type: 'paragraph', content: [] }
+                    ])
                     .run()
                 }
               >
@@ -662,6 +769,24 @@ const PageEditor = ({
                 </div>
               )}
             </div>
+
+            <div className="relative">
+            <TooltipButton
+              title="More Elements"
+              onClick={(event?: React.MouseEvent) => {
+                if (!event) return;
+                event.stopPropagation();
+                setOpenMenu(openMenu === 'moreElements' ? null : 'moreElements');
+              }}
+              className={openMenu === 'moreElements' ? 'bg-gray-200' : ''}
+            >
+              <div className="flex items-center gap-1">
+                <MoreHorizontal className="w-4 h-4 text-gray-600" />
+                <ChevronDown className="w-3 h-3 text-gray-600" />
+              </div>
+            </TooltipButton>
+            {openMenu === 'moreElements' && <MoreElementsMenu editor={editor} />}
+          </div>
 
             {/* Manual Save if autoSave is false */}
             {!autoSave && (

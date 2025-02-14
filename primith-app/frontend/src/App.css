@@ -57,6 +57,11 @@
   margin-top: 0.5rem !important;
 }
 
+.ProseMirror [data-type="info-panel"] p {
+  margin-bottom: 0 !important;
+  margin-top: 0.1rem !important;
+}
+
 .ProseMirror th {
   background-color: #f1f3f5;
   font-weight: bold;
@@ -103,4 +108,16 @@
 .search-replace-menu-item:hover {
   background-color: #f3f4f6;
   border-radius: 0.375rem;
+}
+
+.editor-block {
+  cursor: text;
+}
+
+.editor-block > div {
+  cursor: default;
+}
+
+.editor-block [contenteditable="true"] {
+  cursor: text;
 }

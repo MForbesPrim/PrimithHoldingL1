@@ -96,6 +96,8 @@ module.exports = {
                         },
                         hr: {
                             borderColor: 'hsl(var(--border))',
+                            marginTop: '1rem',
+                            marginBottom: '1rem',
                         },
                         table: {
                             borderCollapse: 'collapse',
