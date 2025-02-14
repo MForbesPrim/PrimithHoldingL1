@@ -52,6 +52,8 @@ import { PageBreak } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/Pa
 import { Indent as IndentExtension } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/Indent';
 import SearchAndReplace from '@/components/pages/rdm/pages/TipTapExtensionsExtra/SearchAndReplace';
 import SearchReplaceMenu from '@/components/pages/rdm/pages/TipTapExtensionsExtra/SearchReplaceMenu';
+import { GapCursorExtension } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/GapCursor'
+
 
 import {
   Dialog,
@@ -272,15 +274,33 @@ const PageEditor = ({
       InfoPanel,
       DateNode,
       Expand,
+      GapCursorExtension,
     ],
     content: page.content || '',
     onUpdate: ({ editor }) => {
-      // 2. Only save automatically if autoSave is true
+      // Only save automatically if autoSave is true
       if (autoSave) {
-        onSave(page.id, editor.getHTML());
+        onSave(page.id, editor.getHTML())
       }
     },
-  });
+    editorProps: {
+      handleKeyDown: (view, event) => {
+        // Prevent multiple empty paragraphs
+        if (event.key === 'Enter') {
+          const { $anchor } = view.state.selection
+          const currentNode = $anchor.parent
+          const nextNode = $anchor.nodeAfter
+          
+          if (currentNode.type.name === 'paragraph' && 
+              currentNode.content.size === 0 && 
+              nextNode?.type.name === 'paragraph') {
+            return true
+          }
+        }
+        return false
+      }
+    }
+  })  
 
   const MoreElementsMenu = ({ editor }: { editor: Editor }) => {
     if (!editor) return null;
@@ -306,16 +326,11 @@ const PageEditor = ({
           <li
             className="flex items-center px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
             onClick={() => {
-              editor.chain()
-                .focus()
-                .insertContent([
-                  {
-                    type: 'infoPanel',
-                    content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Add information here' }] }]
-                  },
-                  { type: 'paragraph', content: [] }
-                ])
-                .run()
+              editor.chain().focus().insertContent({
+                type: 'infoPanel',
+                attrs: { text: 'Add information here' }
+              }).run()
+            
             }}
           >
             <Info className="w-4 h-4 mr-2" />
