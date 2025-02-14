@@ -20,7 +20,7 @@ export const InfoPanel = Node.create({
             'leading-none',
             'text-sm',
             'my-1',
-            'rounded-r-md', // Add rounded corners on the right side
+            'rounded-r-sm',
             '[&_p]:!my-0'
           ].join(' ')
         },

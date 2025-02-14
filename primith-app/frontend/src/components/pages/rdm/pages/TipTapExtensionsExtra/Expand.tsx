@@ -69,7 +69,7 @@ const ExpandNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => 
   
     return (
       <NodeViewWrapper className="my-4">
-        <div className="border rounded-lg">
+        <div className="border rounded-sm">
           <div
             className="flex items-center gap-2 p-3 hover:bg-gray-50"
             contentEditable={false}
