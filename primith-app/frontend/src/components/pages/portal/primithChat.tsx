@@ -68,7 +68,7 @@ export function ChatBot({ isOpen, setIsOpen }: ChatBotProps) {
             toast({
                 title: "Code copied!",
                 description: "The code has been copied to your clipboard.",
-                duration: 2000
+                duration: 5000
             })
         }
     }

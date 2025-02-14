@@ -36,6 +36,7 @@ export function OrganizationsPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to fetch organizations",
+        duration: 5000,
       })
     } finally {
       setLoading(false)
@@ -53,6 +54,7 @@ export function OrganizationsPage() {
       toast({
         title: "Success",
         description: "Organization created successfully",
+        duration: 5000,
       })
     } catch (error) {
       console.error('Failed to add organization:', error)
@@ -60,6 +62,7 @@ export function OrganizationsPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to create organization",
+        duration: 5000,
       })
       throw error
     }
@@ -78,6 +81,7 @@ export function OrganizationsPage() {
         toast({
           title: "Success",
           description: "Organization updated successfully",
+          duration: 5000,
         })
       } else {
         // If no valid data returned, refresh the whole list
@@ -85,6 +89,7 @@ export function OrganizationsPage() {
         toast({
           title: "Success",
           description: "Organization updated successfully",
+          duration: 5000,
         })
       }
     } catch (error) {
@@ -93,6 +98,7 @@ export function OrganizationsPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to update organization",
+        duration: 5000,
       })
       throw error
     }
@@ -107,6 +113,7 @@ export function OrganizationsPage() {
       toast({
         title: "Success",
         description: "Organization deleted successfully",
+        duration: 5000,
       })
     } catch (error) {
       console.error('Failed to delete organization:', error)
@@ -114,6 +121,7 @@ export function OrganizationsPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to delete organization",
+        duration: 5000,
       })
     }
   }

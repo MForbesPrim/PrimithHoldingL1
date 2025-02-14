@@ -36,6 +36,7 @@ export function UsersPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to fetch users",
+        duration: 5000,
       })
     } finally {
       setLoading(false)
@@ -53,6 +54,7 @@ export function UsersPage() {
       toast({
         title: "Success",
         description: "User created successfully",
+        duration: 5000,
       })
     } catch (error) {
       console.error('Failed to add user:', error)
@@ -60,6 +62,7 @@ export function UsersPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to create user",
+        duration: 5000,
       })
       throw error
     }
@@ -75,6 +78,7 @@ export function UsersPage() {
       toast({
         title: "Success",
         description: "User updated successfully",
+        duration: 5000,
       })
     } catch (error) {
       console.error('Failed to update user:', error)
@@ -82,6 +86,7 @@ export function UsersPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to update user",
+        duration: 5000,
       })
       throw error
     }
@@ -96,6 +101,7 @@ export function UsersPage() {
       toast({
         title: "Success",
         description: "User deleted successfully",
+        duration: 5000,
       })
     } catch (error) {
       console.error('Failed to delete user:', error)
@@ -103,6 +109,7 @@ export function UsersPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to delete user",
+        duration: 5000,
       })
     }
   }

@@ -48,6 +48,7 @@ export function RolesPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to fetch data",
+        duration: 5000,
       })
     } finally {
       setLoading(false)
@@ -65,6 +66,7 @@ export function RolesPage() {
       toast({
         title: "Success",
         description: "Role created successfully",
+        duration: 5000,
       })
     } catch (error) {
       console.error('Failed to add role:', error)
@@ -72,6 +74,7 @@ export function RolesPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to create role",
+        duration: 5000,
       })
       throw error
     }
@@ -94,6 +97,7 @@ export function RolesPage() {
       toast({
         title: "Success",
         description: "Role updated successfully",
+        duration: 5000,
       })
     } catch (error) {
       console.error('Failed to update role:', error)
@@ -101,6 +105,7 @@ export function RolesPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to update role",
+        duration: 5000,
       })
       throw error
     }
@@ -115,6 +120,7 @@ export function RolesPage() {
       toast({
         title: "Success",
         description: "Role deleted successfully",
+        duration: 5000,
       })
     } catch (error) {
       console.error('Failed to delete role:', error)
@@ -122,6 +128,7 @@ export function RolesPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to delete role",
+        duration: 5000,
       })
     }
   }
@@ -189,7 +196,8 @@ export function RolesPage() {
                         toast({
                             variant: "destructive",
                             title: "Error",
-                            description: "Super Admin role cannot be deleted"
+                            description: "Super Admin role cannot be deleted",
+                            duration: 5000,
                         })
                         }
                     }}

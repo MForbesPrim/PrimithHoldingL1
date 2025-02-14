@@ -44,6 +44,7 @@ export function ServicesPage() {
           variant: "destructive",
           title: "Error",
           description: "Failed to fetch data",
+          duration: 5000,
         })
       } finally {
         setLoading(false)
@@ -64,6 +65,7 @@ export function ServicesPage() {
       toast({
         title: "Success",
         description: "Organization added to service successfully",
+        duration: 5000,
       })
     } catch (error) {
       console.error('Failed to add organization to service:', error)
@@ -71,6 +73,7 @@ export function ServicesPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to add organization to service",
+        duration: 5000,
       })
     }
   }
@@ -84,6 +87,7 @@ export function ServicesPage() {
       toast({
         title: "Success",
         description: "Organization removed from service successfully",
+        duration: 5000,
       })
     } catch (error) {
       console.error('Failed to remove organization from service:', error)
@@ -91,6 +95,7 @@ export function ServicesPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to remove organization from service",
+        duration: 5000,
       })
     }
   }
