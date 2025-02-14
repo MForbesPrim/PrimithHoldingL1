@@ -113,9 +113,16 @@ class AuthService {
   }
 
   static async refreshAccessToken(): Promise<AuthTokens | null> {
+    console.log('Attempting to refresh portal access token');
     const refreshToken = localStorage.getItem(this.REFRESH_TOKEN_KEY);
-    if (!refreshToken) return null;
-
+    
+    if (!refreshToken) {
+      console.log('No refresh token found, redirecting to login');
+      this.clearAll();
+      window.location.href = '/login';
+      return null;
+    }
+  
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL}/refresh`, {
         method: 'POST',
@@ -124,10 +131,13 @@ class AuthService {
           'X-Refresh-Token': refreshToken
         }
       });
-
+  
+      console.log('Refresh token response status:', response.status);
+  
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.token && data.refreshToken) {
+          console.log('Successfully refreshed portal tokens');
           const tokens = {
             token: data.token,
             refreshToken: data.refreshToken
@@ -136,12 +146,18 @@ class AuthService {
           return tokens;
         }
       }
+      
+      console.log('Failed to refresh portal tokens, redirecting to login');
+      this.clearAll();
+      window.location.href = '/login';
       return null;
     } catch (error) {
-      console.error('Error refreshing tokens:', error);
+      console.error('Error refreshing portal tokens:', error);
+      this.clearAll();
+      window.location.href = '/login';
       return null;
     }
-  }
+  }  
 
   // New admin-related methods
   static async isSuperAdmin(): Promise<boolean> {
@@ -643,8 +659,15 @@ static async verifyAndNavigateToRdm(navigate: (path: string) => void) {
 } 
 
 static async refreshRdmAccessToken(): Promise<AuthTokens | null> {
+  console.log('Attempting to refresh RDM access token');
   const refreshToken = localStorage.getItem(this.RDM_REFRESH_TOKEN_KEY);
-  if (!refreshToken) return null;
+  
+  if (!refreshToken) {
+    console.log('No RDM refresh token found, redirecting to login');
+    this.clearRdmTokens();
+    window.location.href = '/login';
+    return null;
+  }
 
   try {
     const response = await fetch(`${import.meta.env.VITE_API_URL}/rdm/refresh`, {
@@ -655,23 +678,32 @@ static async refreshRdmAccessToken(): Promise<AuthTokens | null> {
       }
     });
 
+    console.log('RDM refresh token response status:', response.status);
+
     if (response.ok) {
       const data = await response.json();
       if (data.success && data.token && data.refreshToken) {
+        console.log('Successfully refreshed RDM tokens');
         const tokens = {
           token: data.token,
           refreshToken: data.refreshToken
         };
-        const user = this.getUser(); // Get current user
+        const user = this.getUser();
         if (user) {
           this.setRdmTokens(tokens, user);
         }
         return tokens;
       }
     }
+
+    console.log('Failed to refresh RDM tokens, redirecting to login');
+    this.clearRdmTokens();
+    window.location.href = '/login';
     return null;
   } catch (error) {
     console.error('Error refreshing RDM tokens:', error);
+    this.clearRdmTokens();
+    window.location.href = '/login';
     return null;
   }
 }

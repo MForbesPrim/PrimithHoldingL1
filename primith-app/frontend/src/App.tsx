@@ -2,6 +2,7 @@ import "./App.css"
 import { Routes, Route } from "react-router-dom"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/toaster";
+import { useTokenRefresh } from './hooks/useTokenRefresh';
 
 import { HomePage } from "@/components/pages/homePage"
 import { LoginPage } from "@/components/pages/loginPage"
@@ -27,6 +28,8 @@ import { ProtectedRdmLayout } from "@/components/pages/rdm/layouts/protected-rdm
 import { HelpPage } from "@/components/pages/helpCenterPage";
 
 function App() {
+  useTokenRefresh();
+
   const domain = window.location.hostname
   const isPortal = domain === 'portal.primith.com' || domain === 'portal.localhost'
   const isSupport = domain === 'support.primith.com' || domain === 'support.localhost'
