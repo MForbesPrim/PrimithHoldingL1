@@ -75,11 +75,38 @@ export function PagesDashboard() {
 
   const handleDeletePage = async (id: string) => {
     if (!selectedOrgId) return;
+    
+    // Get all child pages recursively
+    const getChildPages = (pageId: string): string[] => {
+      const children = pages
+        .filter(page => page.parentId === pageId)
+        .map(page => page.id);
+      
+      return children.concat(
+        children.flatMap(childId => getChildPages(childId))
+      );
+    };
+  
+    const childPages = getChildPages(id);
+    console.log('Deleting page and children:', [id, ...childPages]);
+  
     try {
+      // Delete children first
+      for (const childId of childPages) {
+        await pagesService.deletePage(childId, selectedOrgId);
+      }
+      // Then delete the parent
       await pagesService.deletePage(id, selectedOrgId);
-      setPages(pages.filter((page) => page.id !== id));
+      
+      // Update state to remove all deleted pages
+      setPages(prevPages => 
+        prevPages.filter(page => 
+          !childPages.includes(page.id) && page.id !== id
+        )
+      );
     } catch (error) {
-      console.error('Failed to delete page:', error);
+      console.error('Delete operation failed:', error);
+      throw error;
     }
   };
 

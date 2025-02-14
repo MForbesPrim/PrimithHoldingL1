@@ -64,6 +64,8 @@ export function PagesTable({
   // New state for deletion confirmation
   const [pageToDelete, setPageToDelete] = useState<string | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDeleting, _setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Helper function to check if a page has children.
   const hasChildren = (pageId: string) =>
@@ -165,14 +167,15 @@ export function PagesTable({
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {
-                  // Instead of deleting immediately, open the delete confirmation dialog.
-                  setPageToDelete(row.original.id);
-                  setIsDeleteDialogOpen(true);
+                    setTimeout(() => {
+                    setPageToDelete(row.original.id);
+                    setIsDeleteDialogOpen(true);
+                    }, 0);
                 }}
                 className="text-red-600"
-              >
+                >
                 Delete
-              </DropdownMenuItem>
+                </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         ),
@@ -185,51 +188,72 @@ export function PagesTable({
   const data = useMemo(() => {
     const organized = organizePages(pages);
     return organized.filter((page) => {
-      if (!page.parentId) return true;
-      let currentPage = page;
-      while (currentPage.parentId) {
-        const parent = pages.find((p) => p.id === currentPage.parentId);
-        if (!parent || !expandedRows.has(parent.id)) {
-          return false;
+        if (!page.parentId) return true;
+        let currentPage = page;
+        const visitedWhileLoop = new Set<string>();
+      
+        while (currentPage.parentId) {
+          // Check for loops here
+          if (visitedWhileLoop.has(currentPage.id)) {
+            console.warn(
+              "Cycle detected in while loop. Page:", currentPage.id
+            );
+            return false; // or break, or do something else safe
+          }
+          visitedWhileLoop.add(currentPage.id);
+      
+          const parent = pages.find((p) => p.id === currentPage.parentId);
+          if (!parent || !expandedRows.has(parent.id)) {
+            return false;
+          }
+          currentPage = parent;
         }
-        currentPage = parent;
-      }
-      return true;
-    });
+        return true;
+      });
+      
   }, [pages, expandedRows]);
 
-  const table = useReactTable({
-    data,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    onSortingChange: setSorting,
-    state: { sorting },
-  });
+    const table = useReactTable({
+        data,
+        columns,
+        getCoreRowModel: getCoreRowModel(),
+        getSortedRowModel: getSortedRowModel(),
+        onSortingChange: setSorting,
+        state: { sorting },
+    });
 
   // Controlled dialog for renaming.
-  const handleRenameDialogOpenChange = (open: boolean) => {
-    console.log('Rename Dialog onOpenChange:', open);
-    setIsRenameDialogOpen(open);
-    if (!open) {
-      setRenamePageId(null);
-      setNewName('');
-    }
-  };
+    const handleRenameDialogOpenChange = (open: boolean) => {
+        console.log('Rename Dialog onOpenChange:', open);
+        setIsRenameDialogOpen(open);
+        if (!open) {
+        setRenamePageId(null);
+        setNewName('');
+        }
+    };  
+
+    const handleDeleteDialogOpenChange = (open: boolean) => {
+        setIsDeleteDialogOpen(open);
+        if (!open) {
+          setPageToDelete(null);
+          setDeleteError(null);
+        }
+      };
 
   // Delete confirmation handler.
-  const confirmDelete = async () => {
-    if (pageToDelete) {
-      try {
+    const confirmDelete = async () => {
+        if (!pageToDelete) return;
+        
+        try {
         await onDeletePage(pageToDelete);
-      } catch (error) {
+        // Only close the dialog after successful deletion
+        setIsDeleteDialogOpen(false);
+        setPageToDelete(null);
+        } catch (error) {
         console.error('Failed to delete page:', error);
-      }
-    }
-    // Close the dialog and clear deletion state.
-    setIsDeleteDialogOpen(false);
-    setPageToDelete(null);
-  };
+        setDeleteError(error instanceof Error ? error.message : 'Failed to delete page');
+        }
+    };
 
   return (
     <>
@@ -320,61 +344,67 @@ export function PagesTable({
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+        </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog
-        open={isDeleteDialogOpen}
-        onOpenChange={(open) => {
-          setIsDeleteDialogOpen(open);
-          if (!open) setPageToDelete(null);
-        }}
-      >
+      <Dialog open={isDeleteDialogOpen} onOpenChange={handleDeleteDialogOpenChange}>
         <DialogContent>
-          <DialogHeader>
+            <DialogHeader>
             <DialogTitle>Confirm Deletion</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this page? This action cannot be undone.
+                Are you sure you want to delete this page? This action cannot be undone.
             </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
+            </DialogHeader>
+            {deleteError && (
+            <div className="text-red-500 text-sm">{deleteError}</div>
+            )}
+            <DialogFooter>
             <Button
-              variant="outline"
-              onClick={() => {
-                setIsDeleteDialogOpen(false);
-                setPageToDelete(null);
-              }}
+                variant="outline"
+                onClick={() => handleDeleteDialogOpenChange(false)}
+                disabled={isDeleting}
             >
-              Cancel
+                Cancel
             </Button>
-            <Button onClick={confirmDelete}>
-              Confirm
+            <Button 
+                onClick={confirmDelete}
+                disabled={isDeleting}
+            >
+                {isDeleting ? 'Deleting...' : 'Confirm'}
             </Button>
-          </DialogFooter>
+            </DialogFooter>
         </DialogContent>
-      </Dialog>
+        </Dialog>
     </>
   );
 }
 
 // Helper function to organize pages hierarchically.
 function organizePages(pages: PageNode[]): PageNode[] {
-  if (!Array.isArray(pages)) {
-    console.error('Pages is not an array:', pages);
-    return [];
+    const organized: PageNode[] = [];
+    const visited = new Set<string>();
+  
+    function addPage(page: PageNode, depth: number) {
+      // If we’ve already visited this page, we have a cycle
+      if (visited.has(page.id)) {
+        console.warn(`Circular reference detected. Page ID: ${page.id}`);
+        return;
+      }
+      visited.add(page.id);
+  
+      organized.push(page);
+  
+      const children = pages.filter(p => p.parentId === page.id);
+      children.sort((a, b) => a.title.localeCompare(b.title));
+      children.forEach(child => addPage(child, depth + 1));
+    }
+  
+    const rootPages = pages.filter(p => !p.parentId);
+    rootPages.sort((a, b) => a.title.localeCompare(b.title));
+    rootPages.forEach(page => addPage(page, 0));
+  
+    return organized;
   }
-  const organized: PageNode[] = [];
-  const addPage = (page: PageNode, depth: number) => {
-    organized.push(page);
-    const children = pages.filter((p) => p.parentId === page.id);
-    children.sort((a, b) => a.title.localeCompare(b.title));
-    children.forEach((child) => addPage(child, depth + 1));
-  };
-  const rootPages = pages.filter((p) => !p.parentId);
-  rootPages.sort((a, b) => a.title.localeCompare(b.title));
-  rootPages.forEach((page) => addPage(page, 0));
-  return organized;
-}
 
 // Helper function to determine a page's depth in the hierarchy.
 function getPageDepth(pageId: string, pages: PageNode[]): number {
