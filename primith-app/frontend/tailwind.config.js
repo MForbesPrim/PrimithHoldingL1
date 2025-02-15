@@ -96,10 +96,12 @@ module.exports = {
                         },
                         hr: {
                             borderColor: 'hsl(var(--border))',
-                            marginTop: '1rem',
-                            marginBottom: '1rem',
+                            marginTop: '.25rem',
+                            marginBottom: '.25rem',
                         },
                         table: {
+                            marginTop: '.5rem',
+                            marginBottom: '.5rem',
                             borderCollapse: 'collapse',
                             width: '100%',
                             thead: {

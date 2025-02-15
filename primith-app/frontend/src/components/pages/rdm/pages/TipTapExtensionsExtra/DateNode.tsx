@@ -19,11 +19,11 @@ declare module '@tiptap/core' {
   }
 }
 
-const DateNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => {
+const DateNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => { 
     const date = node.attrs.datetime ? new Date(node.attrs.datetime) : new Date()
   
     return (
-      <NodeViewWrapper className="react-component-date-node inline-block"> {/* Added inline-block */}
+      <NodeViewWrapper className="react-component-date-node inline-block my-2"> {/* Added inline-block */}
         <Popover>
           <PopoverTrigger asChild>
             <button 

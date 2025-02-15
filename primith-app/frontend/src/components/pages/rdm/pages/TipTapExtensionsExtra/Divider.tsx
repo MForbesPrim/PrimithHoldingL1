@@ -7,6 +7,6 @@ export const Divider = Node.create({
     return [{ tag: 'hr' }]
   },
   renderHTML() {
-    return ['hr', { class: 'my-4 border-t border-[--border]' }] 
+    return ['hr', { class: 'my-2 border-t border-[--border]' }] 
   },
 })

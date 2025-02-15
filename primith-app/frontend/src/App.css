@@ -121,3 +121,7 @@
 .editor-block [contenteditable="true"] {
   cursor: text;
 }
+
+.ProseMirror table {
+  @apply mt-1 mb-4 w-full border-collapse;
+}
