@@ -91,4 +91,66 @@ export class PagesService {
     });
     if (!response.ok) throw new Error('Failed to move page');
   }
+
+  async uploadImage(file: File, pageId: string, organizationId: string): Promise<{id: string, url: string, name: string}> {
+    const authHeader = await this.getAuthHeader();
+    
+    const formData = new FormData();
+    formData.append('image', file);
+    formData.append('pageId', pageId);
+    formData.append('organizationId', organizationId);
+
+    console.log('Uploading image with headers:', authHeader); // Add this for debugging
+    console.log('FormData:', {
+      pageId,
+      organizationId,
+      fileName: file.name
+    }); // Add this for debugging
+
+    const response = await fetch(`${this.baseUrl}/pages/images/upload`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+            'Authorization': authHeader.Authorization
+            // Remove Content-Type header - let browser set it for FormData
+        },
+        body: formData
+    });
+
+    if (!response.ok) {
+        console.error('Upload failed with status:', response.status);
+        console.error('Response:', await response.text()); // Add this for debugging
+        throw new Error('Failed to upload image');
+    }
+    return response.json();
+}
+
+async refreshImageTokens(pageId: string, organizationId: string): Promise<{images: {id: string, url: string}[]}> {
+    const headers = await this.getAuthHeader();
+    console.log(organizationId)
+    const response = await fetch(
+        `${this.baseUrl}/pages/images/refresh-tokens?pageId=${pageId}&organizationId=${organizationId}`,
+        {
+            credentials: 'include',
+            headers
+        }
+    );
+
+    if (!response.ok) throw new Error('Failed to refresh image tokens');
+    return response.json();
+}
+
+async deleteImage(imageId: string, organizationId: string): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(
+      `${this.baseUrl}/pages/images/${imageId}?organizationId=${organizationId}`,
+      {
+        method: 'DELETE',
+        credentials: 'include',
+        headers
+      }
+    );
+  
+    if (!response.ok) throw new Error('Failed to delete image');
+  }
 }

@@ -10,4 +10,5 @@ export interface PageNode {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
+  organizationId: string; 
 }

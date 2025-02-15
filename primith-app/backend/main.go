@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -23,6 +24,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/sas"
 	"github.com/clerk/clerk-sdk-go/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -2291,19 +2293,22 @@ func handleRenameDocument(w http.ResponseWriter, r *http.Request) {
 
 	// Split the decoded blob name into its parts.
 	// Expected format: "YYYY/MM/DD/filename"
+	// Split the decoded blob name into its parts.
+	// Expected format: "documents/YYYY/MM/DD/filename"
 	pathParts := strings.Split(decodedBlobName, "/")
-	if len(pathParts) != 4 {
+	if len(pathParts) != 5 || pathParts[0] != "documents" {
 		log.Printf("Unexpected blob path structure: %s", decodedBlobName)
 		timestamp := time.Now()
 		pathParts = []string{
+			"documents",
 			fmt.Sprintf("%d", timestamp.Year()),
 			fmt.Sprintf("%02d", timestamp.Month()),
 			fmt.Sprintf("%02d", timestamp.Day()),
 			fmt.Sprintf("%s_%s", uuid.New().String(), req.Name),
 		}
 	} else {
-		// Replace only the filename (the 4th element) with a new unique name.
-		pathParts[3] = fmt.Sprintf("%s_%s", uuid.New().String(), req.Name)
+		// Replace only the filename (the 5th element) with a new unique name.
+		pathParts[4] = fmt.Sprintf("%s_%s", uuid.New().String(), req.Name)
 	}
 	newBlobPath := strings.Join(pathParts, "/")
 	log.Printf("New blob path: %s", newBlobPath)
@@ -2631,7 +2636,11 @@ func handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 
 	// Build the blob name.
 	timestamp := time.Now().Format("2006/01/02")
-	blobName := fmt.Sprintf("%s/%s_%s", timestamp, uuid.New().String(), header.Filename)
+	blobName := fmt.Sprintf("documents/%s/%s_%s",
+		timestamp,
+		uuid.New().String(),
+		header.Filename,
+	)
 	log.Printf("Uploading file %s to blob %s in container %s", header.Filename, blobName, containerName)
 
 	// Get a BlockBlobClient.
@@ -2799,7 +2808,7 @@ func handleUpdateDocument(w http.ResponseWriter, r *http.Request) {
 	}
 
 	timestamp := time.Now().Format("2006/01/02")
-	newBlobName := fmt.Sprintf("%s/%s_%s",
+	newBlobName := fmt.Sprintf("documents/%s/%s_%s",
 		timestamp,
 		uuid.New().String(),
 		header.Filename)
@@ -2969,8 +2978,9 @@ func handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	// Assume blobUrl is in format: "https://<account>.blob.core.windows.net/container/blobName"
 	blobName := strings.TrimPrefix(parsedUrl.Path, fmt.Sprintf("/%s/", containerName))
-	if blobName == "" {
-		http.Error(w, "Invalid blob name", http.StatusInternalServerError)
+	if !strings.HasPrefix(blobName, "documents/") {
+		log.Printf("Blob name '%s' does not have expected 'documents/' prefix", blobName)
+		http.Error(w, "Invalid blob name format", http.StatusInternalServerError)
 		return
 	}
 
@@ -3102,6 +3112,11 @@ func handleDownloadDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	blobName := strings.TrimPrefix(parsedUrl.Path, fmt.Sprintf("/%s/", containerName))
+	if !strings.HasPrefix(blobName, "documents/") {
+		log.Printf("Blob name '%s' does not have expected 'documents/' prefix", blobName)
+		http.Error(w, "Invalid blob name format", http.StatusInternalServerError)
+		return
+	}
 
 	// Get blob client
 	blobClient := client.ServiceClient().NewContainerClient(containerName).NewBlockBlobClient(blobName)
@@ -3455,7 +3470,10 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
 	itemType := vars["type"]
 	organizationId := r.URL.Query().Get("organizationId")
 
+	log.Printf("[PermanentDelete] Received request: type=%s, id=%s, organizationId=%s, user=%s", itemType, itemId, organizationId, claims.Username)
+
 	if organizationId == "" {
+		log.Printf("[PermanentDelete] Organization ID missing in query parameters")
 		http.Error(w, "Organization ID is required", http.StatusBadRequest)
 		return
 	}
@@ -3470,21 +3488,29 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
             WHERE u.email = $1 AND om.organization_id = $2
         )
     `, claims.Username, organizationId).Scan(&authorized)
-
-	if err != nil || !authorized {
+	if err != nil {
+		log.Printf("[PermanentDelete] Error checking organization membership: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !authorized {
+		log.Printf("[PermanentDelete] User %s is not authorized for organization %s", claims.Username, organizationId)
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
 		return
 	}
+	log.Printf("[PermanentDelete] User %s is authorized for organization %s", claims.Username, organizationId)
 
 	// Start transaction
 	tx, err := db.Begin()
 	if err != nil {
+		log.Printf("[PermanentDelete] Failed to start transaction: %v", err)
 		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
 		return
 	}
 	defer tx.Rollback()
 
 	if itemType == "folder" {
+		log.Printf("[PermanentDelete] Processing permanent deletion for folder id=%s", itemId)
 		// Delete all documents in the folder tree from blob storage
 		rows, err := tx.Query(`
             WITH RECURSIVE folder_tree AS (
@@ -3498,32 +3524,42 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
             JOIN folder_tree ft ON d.folder_id = ft.id
             WHERE d.deleted_at IS NOT NULL
         `, itemId)
-
 		if err != nil {
+			log.Printf("[PermanentDelete] Failed to query documents for folder %s: %v", itemId, err)
 			http.Error(w, "Failed to get documents", http.StatusInternalServerError)
 			return
 		}
 		defer rows.Close()
 
-		// Delete blobs
+		// Initialize blob client
 		client, containerName, err := getBlobClient(organizationId)
 		if err != nil {
+			log.Printf("[PermanentDelete] Failed to initialize blob storage client: %v", err)
 			http.Error(w, "Failed to initialize storage", http.StatusInternalServerError)
 			return
 		}
 
+		// Loop over each document in the folder tree and delete its blobs
 		for rows.Next() {
 			var docId, blobUrl string
 			if err := rows.Scan(&docId, &blobUrl); err != nil {
+				log.Printf("[PermanentDelete] Error scanning document row: %v", err)
 				continue
 			}
+			log.Printf("[PermanentDelete] Attempting to delete blob(s) for document id=%s, blobUrl=%s", docId, blobUrl)
 			if err := deleteDocumentBlobs(client, containerName, docId, blobUrl); err != nil {
-				log.Printf("Error deleting blobs for document %s: %v", docId, err)
+				log.Printf("[PermanentDelete] Error deleting blobs for document %s: %v", docId, err)
+			} else {
+				log.Printf("[PermanentDelete] Successfully deleted blobs for document %s", docId)
 			}
 		}
+		if err = rows.Err(); err != nil {
+			log.Printf("[PermanentDelete] Row iteration error: %v", err)
+		}
 
-		// Permanently delete the folder and its contents
-		_, err = tx.Exec(`
+		// Permanently delete the folder and its children
+		log.Printf("[PermanentDelete] Attempting to permanently delete folder and its subtree for folder id=%s", itemId)
+		res, err := tx.Exec(`
             WITH RECURSIVE folder_tree AS (
                 SELECT id FROM rdm.folders WHERE id = $1
                 UNION ALL
@@ -3532,13 +3568,15 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
             )
             DELETE FROM rdm.folders WHERE id IN (SELECT id FROM folder_tree)
         `, itemId)
-
 		if err != nil {
+			log.Printf("[PermanentDelete] Failed to delete folder: %v", err)
 			http.Error(w, "Failed to delete folder", http.StatusInternalServerError)
 			return
 		}
-
+		affected, _ := res.RowsAffected()
+		log.Printf("[PermanentDelete] Deleted %d folder rows", affected)
 	} else {
+		log.Printf("[PermanentDelete] Processing permanent deletion for document id=%s", itemId)
 		// Delete document blob
 		var blobUrl string
 		err := tx.QueryRow(
@@ -3546,33 +3584,42 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
 			itemId,
 		).Scan(&blobUrl)
 		if err != nil {
+			log.Printf("[PermanentDelete] Failed to get document blob URL for document %s: %v", itemId, err)
 			http.Error(w, "Failed to get document", http.StatusInternalServerError)
 			return
 		}
-
+		log.Printf("[PermanentDelete] Retrieved blob URL for document %s: %s", itemId, blobUrl)
 		client, containerName, err := getBlobClient(organizationId)
 		if err != nil {
+			log.Printf("[PermanentDelete] Failed to initialize blob storage client: %v", err)
 			http.Error(w, "Failed to initialize storage", http.StatusInternalServerError)
 			return
 		}
-
 		if err := deleteDocumentBlobs(client, containerName, itemId, blobUrl); err != nil {
-			log.Printf("Error deleting blobs for document %s: %v", itemId, err)
+			log.Printf("[PermanentDelete] Error deleting blobs for document %s: %v", itemId, err)
+		} else {
+			log.Printf("[PermanentDelete] Successfully deleted blobs for document %s", itemId)
 		}
 
 		// Permanently delete the document
-		_, err = tx.Exec("DELETE FROM rdm.documents WHERE id = $1", itemId)
+		log.Printf("[PermanentDelete] Attempting to permanently delete document record id=%s", itemId)
+		res, err := tx.Exec("DELETE FROM rdm.documents WHERE id = $1", itemId)
 		if err != nil {
+			log.Printf("[PermanentDelete] Failed to delete document record for id=%s: %v", itemId, err)
 			http.Error(w, "Failed to delete document", http.StatusInternalServerError)
 			return
 		}
+		affected, _ := res.RowsAffected()
+		log.Printf("[PermanentDelete] Deleted %d document row(s)", affected)
 	}
 
 	if err = tx.Commit(); err != nil {
+		log.Printf("[PermanentDelete] Failed to commit transaction: %v", err)
 		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("[PermanentDelete] Permanent deletion succeeded for %s id=%s", itemType, itemId)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -4063,6 +4110,457 @@ func handleMovePage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func getBlobSasUrl(containerName string, blobName string) (string, error) {
+	var storageAccount, storageKey string
+
+	if os.Getenv("ENVIRONMENT") == "production" {
+		storageAccount = os.Getenv("AZURE_STORAGE_ACCOUNT_NAME")
+		storageKey = os.Getenv("AZURE_STORAGE_ACCOUNT_KEY")
+	} else {
+		config, err := loadConfigIfDev()
+		if err != nil {
+			return "", err
+		}
+		storageAccount = config.Azure.StorageAccount
+		storageKey = config.Azure.StorageKey
+	}
+
+	credential, err := azblob.NewSharedKeyCredential(storageAccount, storageKey)
+	if err != nil {
+		return "", err
+	}
+
+	permissions := (&sas.BlobPermissions{Read: true}).String()
+
+	// Set expiry time to 1 hour from now
+	signatureValues := sas.BlobSignatureValues{
+		Protocol:      sas.ProtocolHTTPS,
+		StartTime:     time.Now().UTC(),
+		ExpiryTime:    time.Now().UTC().Add(1 * time.Hour),
+		ContainerName: containerName,
+		BlobName:      blobName,
+		Permissions:   permissions,
+	}
+
+	sasQueryParams, err := signatureValues.SignWithSharedKey(credential)
+	if err != nil {
+		return "", err
+	}
+
+	blobUrl := fmt.Sprintf("https://%s.blob.core.windows.net/%s/%s?%s",
+		storageAccount,
+		containerName,
+		blobName,
+		sasQueryParams.Encode())
+
+	return blobUrl, nil
+}
+
+func getUserIdFromEmail(email string) (string, error) {
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", email).Scan(&userId)
+	return userId, err
+}
+
+func handleUploadPageImage(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Starting image upload handler")
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+	pageId := r.FormValue("pageId")
+	organizationId := r.FormValue("organizationId")
+
+	log.Printf("Received upload request - pageId: %s, organizationId: %s", pageId, organizationId)
+
+	if organizationId == "" {
+		log.Printf("Organization ID is missing")
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err := db.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		log.Printf("Error getting user ID: %v", err)
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Verify user has access to the organization
+	var authorized bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil || !authorized {
+		log.Printf("User %s not authorized for organization %s", claims.Username, organizationId)
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		log.Printf("Error getting file: %v", err)
+		http.Error(w, "Failed to get image file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Upload to blob storage
+	client, containerName, err := getBlobClient(organizationId)
+	if err != nil {
+		log.Printf("Error getting blob client: %v", err)
+		http.Error(w, "Failed to initialize storage", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate blob name/path
+	timestamp := time.Now().Format("2006/01/02")
+	blobName := fmt.Sprintf("pages/images/%s/%s/%s_%s",
+		pageId,
+		timestamp,
+		uuid.New().String(),
+		header.Filename,
+	)
+
+	containerClient := client.ServiceClient().NewContainerClient(containerName)
+	blobClient := containerClient.NewBlockBlobClient(blobName)
+
+	// Ensure container exists
+	_, err = containerClient.Create(context.Background(), nil)
+	if err != nil {
+		var stgErr *azcore.ResponseError
+		if errors.As(err, &stgErr) && stgErr.ErrorCode == "ContainerAlreadyExists" {
+			// Ignore this error
+		} else {
+			log.Printf("Error creating container: %v", err)
+			http.Error(w, "Failed to ensure container exists", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Upload the file
+	_, err = blobClient.Upload(context.Background(), file, nil)
+	if err != nil {
+		log.Printf("Error uploading to blob storage: %v", err)
+		http.Error(w, "Failed to upload image", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate SAS URL
+	sasUrl, err := getBlobSasUrl(containerName, blobName)
+	if err != nil {
+		log.Printf("Error generating SAS URL: %v", err)
+		http.Error(w, "Failed to generate access URL", http.StatusInternalServerError)
+		return
+	}
+
+	// Store the blob path (without SAS token) in the database
+	blobPath := fmt.Sprintf("/%s/%s", containerName, blobName)
+
+	var imageId string
+	err = tx.QueryRow(`
+        INSERT INTO pages.pages_images (
+            page_id,
+            file_name,
+            file_path,
+            file_size,
+            mime_type,
+            created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id
+    `,
+		pageId,
+		header.Filename,
+		blobPath,
+		header.Size,
+		header.Header.Get("Content-Type"),
+		userId,
+	).Scan(&imageId)
+
+	if err != nil {
+		log.Printf("Error inserting into database: %v", err)
+		http.Error(w, "Failed to save image metadata", http.StatusInternalServerError)
+		return
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Error committing transaction: %v", err)
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Successfully uploaded image: id=%s, path=%s", imageId, blobPath)
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":   imageId,
+		"url":  sasUrl,
+		"name": header.Filename,
+	})
+}
+
+func getStorageCredentials() (string, string, error) {
+	var storageAccount, storageKey string
+	if os.Getenv("ENVIRONMENT") == "production" {
+		storageAccount = os.Getenv("AZURE_STORAGE_ACCOUNT_NAME")
+		storageKey = os.Getenv("AZURE_STORAGE_ACCOUNT_KEY")
+	} else {
+		config, err := loadConfigIfDev()
+		if err != nil {
+			return "", "", err
+		}
+		storageAccount = config.Azure.StorageAccount
+		storageKey = config.Azure.StorageKey
+	}
+	if storageAccount == "" || storageKey == "" {
+		return "", "", fmt.Errorf("missing storage account or key")
+	}
+	return storageAccount, storageKey, nil
+}
+
+func handleRefreshImageSasTokens(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+	pageId := r.URL.Query().Get("pageId")
+	organizationId := r.URL.Query().Get("organizationId")
+
+	log.Printf("[RefreshImageSasTokens] Received request: pageId=%s, organizationId=%s", pageId, organizationId)
+
+	// Verify access
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+	if err != nil {
+		log.Printf("[RefreshImageSasTokens] Error checking access: %v", err)
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	if !authorized {
+		log.Printf("[RefreshImageSasTokens] Unauthorized access for user %s to organization %s", claims.Username, organizationId)
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	log.Printf("[RefreshImageSasTokens] Access verified for user %s", claims.Username)
+
+	// Get the blob client and container name using your helper.
+	client, containerName, err := getBlobClient(organizationId)
+	if err != nil {
+		log.Printf("[RefreshImageSasTokens] Error in getBlobClient: %v", err)
+		http.Error(w, "Failed to initialize storage", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[RefreshImageSasTokens] Blob client obtained; containerName=%s", containerName)
+
+	// Retrieve storage credentials.
+	accountName, storageKey, err := getStorageCredentials()
+	if err != nil {
+		log.Printf("[RefreshImageSasTokens] Error retrieving storage credentials: %v", err)
+		http.Error(w, "Storage credentials not configured", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[RefreshImageSasTokens] Retrieved storage credentials; accountName=%s", accountName)
+
+	// Query the images for the page.
+	rows, err := db.Query(`
+        SELECT id, file_path
+        FROM pages.pages_images
+        WHERE page_id = $1
+        AND deleted_at IS NULL
+    `, pageId)
+	if err != nil {
+		log.Printf("[RefreshImageSasTokens] Error querying images: %v", err)
+		http.Error(w, "Failed to fetch images", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var images []map[string]interface{}
+	for rows.Next() {
+		var id, filePath string
+		if err := rows.Scan(&id, &filePath); err != nil {
+			log.Printf("[RefreshImageSasTokens] Error scanning row: %v", err)
+			continue
+		}
+		log.Printf("[RefreshImageSasTokens] Processing image id=%s, filePath=%s", id, filePath)
+
+		// Extract blob name from file path.
+		parsedURL, err := url.Parse(filePath)
+		if err != nil {
+			log.Printf("[RefreshImageSasTokens] Error parsing URL (%s): %v", filePath, err)
+			continue
+		}
+		blobName := strings.TrimPrefix(parsedURL.Path, fmt.Sprintf("/%s/", containerName))
+		log.Printf("[RefreshImageSasTokens] Extracted blobName=%s", blobName)
+
+		// Create a blob client for this blob.
+		containerClient := client.ServiceClient().NewContainerClient(containerName)
+		blobClient := containerClient.NewBlockBlobClient(blobName)
+
+		// Create a shared key credential.
+		cred, err := azblob.NewSharedKeyCredential(accountName, storageKey)
+		if err != nil {
+			log.Printf("[RefreshImageSasTokens] Error creating shared key credential: %v", err)
+			continue
+		}
+
+		now := time.Now().UTC()
+		expiryTime := now.Add(24 * time.Hour)
+		// Permissions.String() must be called on a pointer.
+		permissions := (&sas.BlobPermissions{Read: true}).String()
+		log.Printf("[RefreshImageSasTokens] Using permissions: %s", permissions)
+
+		sasValues := sas.BlobSignatureValues{
+			Protocol:      sas.ProtocolHTTPS,
+			StartTime:     now,
+			ExpiryTime:    expiryTime,
+			ContainerName: containerName,
+			BlobName:      blobName,
+			Permissions:   permissions,
+			Version:       "2020-12-06",
+		}
+		log.Printf("[RefreshImageSasTokens] Built SAS values: %+v", sasValues)
+
+		// Generate SAS query parameters.
+		queryParams, err := sasValues.SignWithSharedKey(cred)
+		if err != nil {
+			log.Printf("[RefreshImageSasTokens] Error signing SAS values for blob %s: %v", blobName, err)
+			continue
+		}
+
+		// Build the SAS URL.
+		sasURL := fmt.Sprintf("%s?%s", blobClient.URL(), queryParams.Encode())
+		log.Printf("[RefreshImageSasTokens] Generated SAS URL for image id=%s: %s", id, sasURL)
+
+		images = append(images, map[string]interface{}{
+			"id":  id,
+			"url": sasURL,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("[RefreshImageSasTokens] Error iterating rows: %v", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"images": images,
+	}); err != nil {
+		log.Printf("[RefreshImageSasTokens] Error encoding JSON response: %v", err)
+	}
+}
+
+func handleDeletePageImage(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	imageId := vars["id"]
+	organizationId := r.URL.Query().Get("organizationId")
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Get user ID
+	userId, err := getUserIdFromEmail(claims.Username)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Get image details and verify access
+	var filePath string
+	err = tx.QueryRow(`
+        SELECT i.file_path
+        FROM pages.pages_images i
+        JOIN pages.pages_content p ON i.page_id = p.id
+        JOIN auth.organization_members om ON p.organization_id = om.organization_id
+        JOIN auth.users u ON om.user_id = u.id
+        WHERE i.id = $1 
+        AND p.organization_id = $2
+        AND u.email = $3
+        AND i.deleted_at IS NULL
+    `, imageId, organizationId, claims.Username).Scan(&filePath)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Image not found or access denied", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	// Initialize Azure client
+	client, containerName, err := getBlobClient(organizationId)
+	if err != nil {
+		http.Error(w, "Failed to initialize storage", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the blob URL to get the blob name
+	parsedUrl, err := url.Parse(filePath)
+	if err != nil {
+		http.Error(w, "Invalid blob URL", http.StatusInternalServerError)
+		return
+	}
+	blobName := strings.TrimPrefix(parsedUrl.Path, fmt.Sprintf("/%s/", containerName))
+
+	// Delete the blob
+	blobClient := client.ServiceClient().NewContainerClient(containerName).NewBlockBlobClient(blobName)
+	_, err = blobClient.Delete(context.Background(), nil)
+	if err != nil {
+		log.Printf("Warning: Failed to delete blob: %v", err)
+	}
+
+	// Mark the image as deleted in the database
+	_, err = tx.Exec(`
+        UPDATE pages.pages_images 
+        SET deleted_at = CURRENT_TIMESTAMP,
+            deleted_by = $1
+        WHERE id = $2
+    `, userId, imageId)
+
+	if err != nil {
+		http.Error(w, "Failed to update image record", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -4241,6 +4739,9 @@ func main() {
 	r.HandleFunc("/pages/{id}", authMiddleware(handleDeletePage)).Methods("DELETE")
 	r.HandleFunc("/pages/{id}/rename", authMiddleware(handleRenamePage)).Methods("PUT")
 	r.HandleFunc("/pages/{id}/move", authMiddleware(handleMovePage)).Methods("POST")
+	r.HandleFunc("/pages/images/upload", authMiddleware(handleUploadPageImage)).Methods("POST")
+	r.HandleFunc("/pages/images/refresh-tokens", authMiddleware(handleRefreshImageSasTokens)).Methods("GET")
+	r.HandleFunc("/pages/images/{id}", authMiddleware(handleDeletePageImage)).Methods("DELETE")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

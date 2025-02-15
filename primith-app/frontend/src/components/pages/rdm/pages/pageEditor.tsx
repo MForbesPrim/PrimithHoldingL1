@@ -21,6 +21,9 @@ import { Divider } from './TipTapExtensionsExtra/Divider';
 import { InfoPanel } from './TipTapExtensionsExtra/InfoPanel';
 import { DateNode } from './TipTapExtensionsExtra/DateNode';
 import { Expand } from './TipTapExtensionsExtra/Expand';
+import { EditorView } from 'prosemirror-view';
+import { Plugin } from 'prosemirror-state';
+import { MouseEvent } from 'react';
 import { MoreHorizontal, Minus, Info, Calendar, ChevronRight } from 'lucide-react';
 import {
   Undo2,
@@ -49,14 +52,19 @@ import {
   Save,
   CheckSquare,
 } from 'lucide-react';
-
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+} from "@/components/ui/context-menu";
 import { PageNode } from "@/types/pages";
 import { PageBreak } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/PageBreak';
 import { Indent as IndentExtension } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/Indent';
 import SearchAndReplace from '@/components/pages/rdm/pages/TipTapExtensionsExtra/SearchAndReplace';
 import SearchReplaceMenu from '@/components/pages/rdm/pages/TipTapExtensionsExtra/SearchReplaceMenu';
 import { GapCursorExtension } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/GapCursor'
-
+import { PagesService } from '@/services/pagesService';
+import { useOrganization } from "@/components/pages/rdm/context/organizationContext";
 
 import {
   Dialog,
@@ -84,6 +92,13 @@ interface TableOptionsProps {
   editor: Editor | null;
 }
 
+interface ImageContextMenuState {
+  visible: boolean;
+  x: number;
+  y: number;
+  imageId: string;
+}
+
 interface TooltipButtonProps {
   title: string;
   onClick?: (event?: React.MouseEvent) => void;
@@ -92,6 +107,28 @@ interface TooltipButtonProps {
   className?: string;
   asDiv?: boolean;
   hideTooltip?: boolean;
+}
+
+interface CustomImageOptions {
+  inline?: boolean;
+  allowBase64?: boolean;
+  HTMLAttributes?: Record<string, any>;
+}
+
+// Define the extended attributes type
+interface CustomImageAttributes {
+  src: string;
+  alt?: string;
+  title?: string;
+  'data-id'?: string;
+}
+
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    customImage: {
+      setCustomImage: (options: CustomImageAttributes) => ReturnType;
+    };
+  }
 }
 
 const TooltipButton: React.FC<TooltipButtonProps> = ({
@@ -261,18 +298,132 @@ const PageEditor = ({
   autoSave = false, // Default to false if not provided
 }: PageEditorProps) => {
   const { toast } = useToast();
+  const pagesService = new PagesService();
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [isLinkActive, setIsLinkActive] = useState(false);
+  const [imageContextMenu, setImageContextMenu] = useState<ImageContextMenuState>({
+    visible: false,
+    x: 0,
+    y: 0,
+    imageId: '',
+  });
+  const CustomImage = Image.extend<CustomImageOptions>({
+    name: 'image',
+  
+    addOptions() {
+      return {
+        ...this.parent?.(),
+        inline: false,
+        allowBase64: false,
+        HTMLAttributes: {},
+      }
+    },
+  
+    addAttributes() {
+      return {
+        src: {
+          default: null,
+          renderHTML: attributes => ({
+            src: attributes.src,
+          }),
+          parseHTML: element => element.getAttribute('src'),
+        },
+        alt: {
+          default: null,
+          renderHTML: attributes => ({
+            alt: attributes.alt,
+          }),
+          parseHTML: element => element.getAttribute('alt'),
+        },
+        title: {
+          default: null,
+          renderHTML: attributes => ({
+            title: attributes.title,
+          }),
+          parseHTML: element => element.getAttribute('title'),
+        },
+        'data-id': {
+          default: null,
+          renderHTML: attributes => ({
+            'data-id': attributes['data-id'],
+          }),
+          parseHTML: element => element.getAttribute('data-id'),
+        },
+      }
+    },
+  
+    addCommands() {
+      return {
+        setCustomImage: (options: CustomImageAttributes) => ({ commands }) => {
+          return commands.insertContent({
+            type: this.name,
+            attrs: options,
+          })
+        },
+      }
+    },
+  
+    addProseMirrorPlugins() {
+      const uploadImage = async (file: File, view: EditorView) => {
+        try {
+          const result = await pagesService.uploadImage(file, page.id, page.organizationId);
+          if (result?.url) {
+            const node = view.state.schema.nodes.image.create({
+              src: result.url,
+              'data-id': result.id,
+            });
+            const transaction = view.state.tr.replaceSelectionWith(node);
+            view.dispatch(transaction);
+          }
+        } catch (error) {
+          console.error('Error uploading dropped image:', error);
+          toast({
+            title: 'Error',
+            description: 'Failed to upload image',
+            variant: 'destructive',
+          });
+        }
+      };
+  
+      return [
+        new Plugin({
+          props: {
+            handleDrop(view, event) {
+              const items = Array.from(event.dataTransfer?.files || []);
+              const images = items.filter((item): item is File => 
+                item instanceof File && item.type.startsWith('image/')
+              );
+              
+              if (images.length === 0) return false;
+              
+              event.preventDefault();
+              
+              images.forEach(image => {
+                uploadImage(image, view);
+              });
+              
+              return true;
+            }
+          }
+        })
+      ]
+    }
+  });
+
   // 1. Initialize the editor
   const editor = useEditor({
     extensions: [
       StarterKit,
       Placeholder.configure({
         placeholder: 'Start typing...',
-        emptyEditorClass: 'is-editor-empty',
       }),
-      Image,
+      CustomImage.configure({
+        allowBase64: false,
+        HTMLAttributes: {
+          class: 'rounded-md max-w-full cursor-pointer',
+        },
+      }),
       ImageResize,
       Link,
       Underline,
@@ -426,7 +577,32 @@ const PageEditor = ({
     }
   }, [page.id, editor]);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (editor && page) {
+      pagesService.refreshImageTokens(page.id, selectedOrgId)
+        .then(({ images }) => {
+          // Ensure images is an array even if null is returned from the backend.
+          const validImages = images ?? [];
+          validImages.forEach(({ id, url }) => {
+            const imageNodes: Array<{ node: any; pos: number }> = [];
+            editor.state.doc.descendants((node, pos) => {
+              if (node.type.name === 'image' && node.attrs.id === id) {
+                imageNodes.push({ node, pos });
+              }
+            });
+            imageNodes.forEach(({ pos }) => {
+              editor.chain()
+                .setNodeSelection(pos)
+                .updateAttributes('image', { src: url })
+                .run();
+            });
+          });
+        })
+        .catch(console.error);
+    }
+  }, [page.id, editor]);
+  
+
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [currentColor, setCurrentColor] = useState('#000000');
@@ -435,43 +611,134 @@ const PageEditor = ({
   const [isSearchMenuOpen, setIsSearchMenuOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [newName, setNewName] = useState(page.title);
+  const { selectedOrgId } = useOrganization();
+  const [_isContextMenuOpen, setIsContextMenuOpen] = useState(false);
 
-  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !editor) return;
-
-    try {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        if (typeof e.target?.result === 'string') {
-          editor.chain().focus().setImage({ src: e.target.result }).run();
-
-          // Optionally adjust the newly inserted image style
-          setTimeout(() => {
-            const images = editor.view.dom.querySelectorAll('img');
-            if (images && images.length > 0) {
-              const lastImage = images[images.length - 1];
-              const newStyle = "width: 500px; height: auto; cursor: pointer;";
-              lastImage.setAttribute('style', newStyle);
-
-              const parentDiv = lastImage.closest('div');
-              if (parentDiv) {
-                parentDiv.setAttribute('style', newStyle);
-              }
-            }
-          }, 0);
+  useEffect(() => {
+    if (editor && page) {
+      const refreshImages = async () => {
+        try {
+          const { images } = await pagesService.refreshImageTokens(page.id, page.organizationId);
+          if (images) {
+            images.forEach(({ id, url }) => {
+              editor.state.doc.descendants((node, pos) => {
+                if (node.type.name === 'image' && node.attrs.id === id) {
+                  editor.chain()
+                    .setNodeSelection(pos)
+                    .updateAttributes('image', { src: url })
+                    .run();
+                }
+              });
+            });
+          }
+        } catch (error) {
+          console.error('Error refreshing image tokens:', error);
         }
       };
-      reader.readAsDataURL(file);
+  
+      refreshImages();
+      const interval = setInterval(refreshImages, 1000 * 60 * 60);
+      return () => clearInterval(interval);
+    }
+  }, [editor, page.id, page.organizationId]);
+
+  const handleImageDelete = async (imageId: string) => {
+    try {
+      await pagesService.deleteImage(imageId, page.organizationId);
+      // Remove the image from the editor
+      editor?.chain().focus().deleteSelection().run();
+      toast({
+        title: 'Success',
+        description: 'Image deleted successfully',
+      });
     } catch (error) {
-      console.error('Error uploading image:', error);
+      console.error('Error deleting image:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete image',
+        variant: 'destructive',
+      });
     }
   };
+  
+  const handleImageContextMenu = (event: MouseEvent<HTMLElement>, imageId: string) => {
+    console.log("handleImageContextMenu called");
+    event.preventDefault();
+    // Set the context menu state with the cursor coordinates and the image id
+    setImageContextMenu({
+      visible: true,
+      x: event.clientX,
+      y: event.clientY,
+      imageId,
+    });
+    setIsContextMenuOpen(true);
 
-  const triggerImageUpload = () => {
-    fileInputRef.current?.click();
+    console.log("Updated imageContextMenu state:", {
+      visible: true,
+      x: event.clientX,
+      y: event.clientY,
+      imageId,
+    });
   };
 
+
+  const triggerImageUpload = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async () => {
+      if (input.files?.length) {
+        try {
+          const result = await pagesService.uploadImage(input.files[0], page.id, selectedOrgId);
+          if (result?.url) {
+            // Insert the image node
+            editor?.chain().focus().setCustomImage({
+              src: result.url,
+              'data-id': result.id,
+              alt: 'Uploaded image'
+            }).run();
+  
+            // Wait a tick, then update the style attributes
+            setTimeout(() => {
+              const images = editor?.view.dom.querySelectorAll('img');
+              if (images && images.length > 0) {
+                const lastImage = images[images.length - 1];
+                
+                // Remove any unwanted inline styles
+                lastImage.removeAttribute('style');
+                lastImage.removeAttribute('width');
+                lastImage.removeAttribute('height');
+                
+                // If the image is wrapped in a container, update that too
+                const parentDiv = lastImage.closest('div');
+                const newStyle = "width: 400px; height: auto; cursor: pointer;";
+                lastImage.setAttribute('style', newStyle);
+                if (parentDiv) {
+                  parentDiv.setAttribute('style', newStyle);
+                }
+                
+                // Update the node in the editor's schema as well
+                if (editor) {
+                  editor.commands.setMeta('addToHistory', false);
+                  editor.commands.updateAttributes('image', { style: newStyle });
+                  editor.commands.setMeta('addToHistory', true);
+                }
+              }
+            }, 0);
+          }
+        } catch (error) {
+          console.error('Error uploading image:', error);
+          toast({
+            title: 'Error',
+            description: 'Failed to upload image',
+            variant: 'destructive',
+          });
+        }
+      }
+    };
+    input.click();
+  };
+  
   const handleGeneratePDF = async () => {
     if (!editor) return;
     setIsGeneratingPDF(true);
@@ -922,17 +1189,14 @@ const PageEditor = ({
             )}
 
             {/* PDF Generation Button */}
-            <div className="ml-auto">
-              <button
-                onClick={handleGeneratePDF}
-                className="px-3 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm font-medium flex items-center gap-2"
-              >
+            <div className="ml-auto rounded">
+              <TooltipButton title="Create PDF" onClick={handleGeneratePDF} className="bg-gray-500 hover:bg-gray-600">
                 {isGeneratingPDF ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <div className="w-4 h-4 text-white border-t-transparent rounded-full animate-spin" />
                 ) : (
-                  <FileDown className="w-4 h-4" />
+                  <FileDown className="w-4 h-4 text-white" />
                 )}
-              </button>
+              </TooltipButton>
             </div>
           </div>
 
@@ -943,7 +1207,56 @@ const PageEditor = ({
                        [&.ProseMirror-focused]:outline-none
                        [&.ProseMirror-focused]:border-none
                        [&.ProseMirror-focused]:shadow-none"
-          />
+            onContextMenu={(event: React.MouseEvent<HTMLDivElement>) => {
+                        const { clientX, clientY } = event;            
+                        const pos = editor.view.posAtCoords({ left: clientX, top: clientY });
+                        console.log("Contextmenu event, pos:", pos);
+                        if (pos) {
+                          const node = editor.view.state.doc.nodeAt(pos.pos);
+                          console.log("Node at pos:", node);
+                          if (node?.type.name === 'image') {
+                            const imageId = node.attrs['data-id'];
+                            console.log("Image id:", imageId);
+                            if (imageId) {
+                              event.preventDefault();
+                              handleImageContextMenu(event as unknown as React.MouseEvent<HTMLElement>, imageId);
+                              return true;
+                            }
+                          }
+                        }
+                        return false;
+                      }
+                    }
+            />
+
+          {imageContextMenu.visible && (
+                <ContextMenu
+                  onOpenChange={(open) => {
+                    console.log("Context menu open:", open);
+                    if (!open) {
+                      setImageContextMenu({ ...imageContextMenu, visible: false });
+                    }
+                  }}
+                >
+                <ContextMenuContent
+                  style={{
+                    position: 'fixed',
+                    left: imageContextMenu.x,
+                    top: imageContextMenu.y,
+                    zIndex: 1000,
+                  }}
+                >
+                  <ContextMenuItem
+                    onClick={() => {
+                      handleImageDelete(imageContextMenu.imageId);
+                      setImageContextMenu({ ...imageContextMenu, visible: false });
+                    }}
+                  >
+                    Delete Image
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+                )}
 
           {/* Rename Dialog */}
           <Dialog open={isRenaming} onOpenChange={setIsRenaming}>
@@ -1030,15 +1343,6 @@ const PageEditor = ({
               </DialogFooter>
             </DialogContent>
           </Dialog>
-
-          {/* Hidden file input for images */}
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleImageUpload}
-            accept="image/*"
-            className="hidden"
-          />
         </div>
       </div>
     </>

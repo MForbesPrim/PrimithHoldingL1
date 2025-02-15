@@ -125,3 +125,17 @@
 .ProseMirror table {
   @apply mt-1 mb-4 w-full border-collapse;
 }
+
+.tiptap p.is-editor-empty:first-child::before {
+  color: #adb5bd;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.prose :where(img):not(:where([class~="not-prose"],[class~="not-prose"] *)) {
+  margin-top: 0;
+  margin-bottom: 0;
+  border-radius: 0.5rem;
+}

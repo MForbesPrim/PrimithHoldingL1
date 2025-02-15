@@ -224,7 +224,7 @@ export class DocumentService {
 
   async permanentlyDelete(id: string, type: 'folder' | 'document', organizationId: string): Promise<void> {
     const headers = await this.getAuthHeader();
-    const response = await fetch(`${this.baseUrl}/trash/${type}s/${id}?organizationId=${organizationId}`, {
+    const response = await fetch(`${this.baseUrl}/trash/${type}/${id}?organizationId=${organizationId}`, {
       method: 'DELETE',
       credentials: 'include',
       headers
