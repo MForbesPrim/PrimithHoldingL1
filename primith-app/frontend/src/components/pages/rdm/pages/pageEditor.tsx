@@ -302,6 +302,9 @@ const PageEditor = ({
   const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [isLinkActive, setIsLinkActive] = useState(false);
+  const [isRefreshingImages, setIsRefreshingImages] = useState(false);
+  const { selectedOrgId } = useOrganization();
+
   const [imageContextMenu, setImageContextMenu] = useState<ImageContextMenuState>({
     visible: false,
     x: 0,
@@ -579,29 +582,48 @@ const PageEditor = ({
 
   useEffect(() => {
     if (editor && page) {
-      pagesService.refreshImageTokens(page.id, selectedOrgId)
-        .then(({ images }) => {
-          // Ensure images is an array even if null is returned from the backend.
-          const validImages = images ?? [];
-          validImages.forEach(({ id, url }) => {
-            const imageNodes: Array<{ node: any; pos: number }> = [];
-            editor.state.doc.descendants((node, pos) => {
-              if (node.type.name === 'image' && node.attrs.id === id) {
-                imageNodes.push({ node, pos });
+      const refreshImages = async () => {
+        setIsRefreshingImages(true);
+        try {
+          const { images } = await pagesService.refreshImageTokens(page.id, selectedOrgId);
+          if (images) {
+            editor.view.state.doc.descendants((node, pos) => {
+              if (node.type.name === 'image') {
+                const imageId = node.attrs['data-id'];
+                const matchingImage = images.find(img => img.id === imageId);
+                if (matchingImage) {
+                  editor.chain()
+                    .setNodeSelection(pos)
+                    .updateAttributes('image', { 
+                      src: matchingImage.url,
+                      'data-id': imageId 
+                    })
+                    .run();
+                }
               }
             });
-            imageNodes.forEach(({ pos }) => {
-              editor.chain()
-                .setNodeSelection(pos)
-                .updateAttributes('image', { src: url })
-                .run();
-            });
-          });
-        })
-        .catch(console.error);
-    }
-  }, [page.id, editor]);
+          }
+        } catch (error) {
+          console.error('Error refreshing image tokens:', error);
+        } finally {
+          setIsRefreshingImages(false);
+        }
+      };
   
+      refreshImages();
+      const interval = setInterval(refreshImages, 45 * 60 * 1000);
+      return () => clearInterval(interval);
+    }
+  }, [editor, page.id, selectedOrgId]);
+  
+
+  const LoadingOverlay = () => (
+    <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-50">
+      <div className="flex flex-col items-center gap-2">
+        <div className="w-8 h-8 border-4 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+      </div>
+    </div>
+  );
 
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -611,7 +633,6 @@ const PageEditor = ({
   const [isSearchMenuOpen, setIsSearchMenuOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [newName, setNewName] = useState(page.title);
-  const { selectedOrgId } = useOrganization();
   const [_isContextMenuOpen, setIsContextMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -858,7 +879,16 @@ const PageEditor = ({
             font-size: 14px;
             padding: 0;
           }
-        `}
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .animate-spin {
+      animation: spin 1s linear infinite;
+    }
+  `}
       </style>
 
       <div className="w-[90%] mx-auto mb-5 mt-1">
@@ -1206,13 +1236,14 @@ const PageEditor = ({
           </div>
 
           {/* Editor Content */}
+          <div className="relative">
           <EditorContent
-            editor={editor}
-            className="prose prose-strong:text-inherit max-w-none min-h-[700px] overflow-y-auto p-5
-                       [&.ProseMirror-focused]:outline-none
-                       [&.ProseMirror-focused]:border-none
-                       [&.ProseMirror-focused]:shadow-none"
-            onContextMenu={(event: React.MouseEvent<HTMLDivElement>) => {
+              editor={editor}
+              className="prose prose-strong:text-inherit max-w-none min-h-[700px] overflow-y-auto p-5
+                        [&.ProseMirror-focused]:outline-none
+                        [&.ProseMirror-focused]:border-none
+                        [&.ProseMirror-focused]:shadow-none"
+              onContextMenu={(event: React.MouseEvent<HTMLDivElement>) => {
                         const { clientX, clientY } = event;            
                         const pos = editor.view.posAtCoords({ left: clientX, top: clientY });
                         console.log("Contextmenu event, pos:", pos);
@@ -1230,9 +1261,10 @@ const PageEditor = ({
                           }
                         }
                         return false;
-                      }
-                    }
-            />
+                      }}
+                      />
+                      {isRefreshingImages && <LoadingOverlay />}
+                    </div>
 
           {imageContextMenu.visible && (
                 <ContextMenu
