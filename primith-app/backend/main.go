@@ -4561,6 +4561,128 @@ func handleDeletePageImage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleListTemplates(w http.ResponseWriter, r *http.Request) {
+	organizationId := r.URL.Query().Get("organizationId")
+	if organizationId == "" {
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	// Query both system and custom templates
+	rows, err := db.Query(`
+        SELECT 
+            pc.id, 
+            pc.parent_id,
+            pc.title,
+            COALESCE(pc.content, '') as content,
+            pc.status,
+            pc.template_type,
+            cb.email as created_by,
+            ub.email as updated_by,
+            pc.created_at,
+            pc.updated_at
+        FROM pages.pages_content pc
+        LEFT JOIN auth.users cb ON pc.created_by = cb.id
+        LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+        WHERE (
+            (pc.organization_id = $1 AND pc.status = 'template') -- Custom templates
+            OR 
+            (pc.status = 'system_template') -- System templates
+        )
+        AND pc.deleted_at IS NULL
+        ORDER BY 
+            CASE 
+                WHEN pc.status = 'system_template' THEN 1 
+                ELSE 2 
+            END,
+            pc.created_at DESC
+    `, organizationId)
+
+	if err != nil {
+		log.Printf("Error fetching templates: %v", err)
+		http.Error(w, "Failed to fetch templates", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var templates []map[string]interface{}
+	for rows.Next() {
+		var template struct {
+			ID           string
+			ParentID     sql.NullString
+			Title        string
+			Content      string
+			Status       string
+			TemplateType string
+			CreatedBy    string
+			UpdatedBy    string
+			CreatedAt    time.Time
+			UpdatedAt    time.Time
+		}
+
+		if err := rows.Scan(
+			&template.ID,
+			&template.ParentID,
+			&template.Title,
+			&template.Content,
+			&template.Status,
+			&template.TemplateType,
+			&template.CreatedBy,
+			&template.UpdatedBy,
+			&template.CreatedAt,
+			&template.UpdatedAt,
+		); err != nil {
+			log.Printf("Error scanning template row: %v", err)
+			continue
+		}
+
+		templateMap := map[string]interface{}{
+			"id":           template.ID,
+			"parentId":     template.ParentID.String,
+			"title":        template.Title,
+			"content":      template.Content,
+			"status":       template.Status,
+			"templateType": template.TemplateType,
+			"createdBy":    template.CreatedBy,
+			"updatedBy":    template.UpdatedBy,
+			"createdAt":    template.CreatedAt,
+			"updatedAt":    template.UpdatedAt,
+			"isSystem":     template.Status == "system_template",
+		}
+
+		templates = append(templates, templateMap)
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating template rows: %v", err)
+		http.Error(w, "Error processing templates", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"templates": templates,
+	})
+}
+
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -4742,6 +4864,7 @@ func main() {
 	r.HandleFunc("/pages/images/upload", authMiddleware(handleUploadPageImage)).Methods("POST")
 	r.HandleFunc("/pages/images/refresh-tokens", authMiddleware(handleRefreshImageSasTokens)).Methods("GET")
 	r.HandleFunc("/pages/images/{id}", authMiddleware(handleDeletePageImage)).Methods("DELETE")
+	r.HandleFunc("/pages/templates", authMiddleware(handleListTemplates)).Methods("GET")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

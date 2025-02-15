@@ -153,4 +153,15 @@ async deleteImage(imageId: string, organizationId: string): Promise<void> {
   
     if (!response.ok) throw new Error('Failed to delete image');
   }
+
+  async getTemplates(organizationId: string): Promise<PageNode[]> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/pages/templates?organizationId=${organizationId}`, {
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error('Failed to fetch templates');
+    const data = await response.json();
+    return data.templates;
+  }
 }

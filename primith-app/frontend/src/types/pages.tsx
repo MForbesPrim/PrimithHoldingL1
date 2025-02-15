@@ -11,4 +11,6 @@ export interface PageNode {
   updatedAt: string;
   deletedAt?: string;
   organizationId: string; 
+  isSystem?: boolean;
+  templateType?: string;
 }

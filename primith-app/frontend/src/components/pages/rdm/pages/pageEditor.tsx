@@ -618,17 +618,22 @@ const PageEditor = ({
     if (editor && page) {
       const refreshImages = async () => {
         try {
-          const { images } = await pagesService.refreshImageTokens(page.id, page.organizationId);
+          const { images } = await pagesService.refreshImageTokens(page.id, selectedOrgId);
           if (images) {
-            images.forEach(({ id, url }) => {
-              editor.state.doc.descendants((node, pos) => {
-                if (node.type.name === 'image' && node.attrs.id === id) {
+            editor.view.state.doc.descendants((node, pos) => {
+              if (node.type.name === 'image') {
+                const imageId = node.attrs['data-id'];
+                const matchingImage = images.find(img => img.id === imageId);
+                if (matchingImage) {
                   editor.chain()
                     .setNodeSelection(pos)
-                    .updateAttributes('image', { src: url })
+                    .updateAttributes('image', { 
+                      src: matchingImage.url,
+                      'data-id': imageId 
+                    })
                     .run();
                 }
-              });
+              }
             });
           }
         } catch (error) {
@@ -637,7 +642,7 @@ const PageEditor = ({
       };
   
       refreshImages();
-      const interval = setInterval(refreshImages, 1000 * 60 * 60);
+      const interval = setInterval(refreshImages, 45 * 60 * 1000); // Refresh every 45 minutes
       return () => clearInterval(interval);
     }
   }, [editor, page.id, page.organizationId]);

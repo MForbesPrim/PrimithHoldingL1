@@ -16,7 +16,8 @@ import { Input } from '@/components/ui/input';
 import { PagesService } from '@/services/pagesService';
 import { useOrganization } from "@/components/pages/rdm/context/organizationContext";
 import { PagesTable } from './pagesTable';
-// Import the Switch component from your shadcn/ui components
+import { Templates } from './pageTemplates';
+
 import { Switch } from '@/components/ui/switch';
 
 export function PagesDashboard() {
@@ -27,11 +28,16 @@ export function PagesDashboard() {
   const [newPageName, setNewPageName] = useState("");
   const [newPageParentId, setNewPageParentId] = useState<string | null>(null);
   const [isPageTreeVisible, setIsPageTreeVisible] = useState(false);
-  // New state for auto-save using a shadcn Switch.
+  const [showTemplates, setShowTemplates] = useState(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
 
   const { selectedOrgId } = useOrganization();
   const pagesService = new PagesService();
+
+  const handleTemplatesClick = () => {
+    setShowTemplates(true);
+    setSelectedPageId(null);
+  };
 
   useEffect(() => {
     if (selectedOrgId) {
@@ -57,6 +63,24 @@ export function PagesDashboard() {
     setNewPageParentId(parentId);
     setNewPageName("");
     setShowNewPageDialog(true);
+  };
+
+  const handleUseTemplate = async (template: PageNode) => {
+    try {
+      const newPage = await pagesService.createPage(
+        template.title,
+        null, // parentId
+        selectedOrgId
+      );
+      // Update the content after creation
+      await pagesService.updatePage(newPage.id, template.content, selectedOrgId);
+      
+      setPages(currentPages => [...currentPages, newPage]);
+      setSelectedPageId(newPage.id);
+      setShowTemplates(false); // Close templates view
+    } catch (error) {
+      console.error('Failed to create page from template:', error);
+    }
   };
 
   const handleCreatePage = async (parentId: string | null, title: string) => {
@@ -208,11 +232,24 @@ export function PagesDashboard() {
               autoSave={autoSaveEnabled}
             />
           </div>
-        ) : (
+               ) : showTemplates ? (
+                <Templates 
+                organizationId={selectedOrgId} 
+                onCreatePage={handleUseTemplate}
+                onClose={() => setShowTemplates(false)}
+              />
+              ) : (
           // Show Pages Dashboard when no page is selected
           <div className="mx-4">
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-2xl font-bold">Pages</h1>
+              <div className="flex justify-between items-center mb-4">
+              <Button
+                onClick={handleTemplatesClick}
+                className="px-4 mr-4"
+              >
+                Templates
+              </Button>
               <Button
                 onClick={() => handleCreatePageClick(null)}
                 className="px-4"
@@ -220,6 +257,7 @@ export function PagesDashboard() {
                 <Plus className="h-4 w-4 mr-2" />
                 Create Page
               </Button>
+              </div>
             </div>
             <PagesTable
               pages={pages}
