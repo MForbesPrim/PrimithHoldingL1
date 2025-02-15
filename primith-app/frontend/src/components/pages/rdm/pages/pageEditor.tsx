@@ -5,12 +5,15 @@ import TextStyle from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import Highlight from '@tiptap/extension-highlight';
 import Image from '@tiptap/extension-image';
+import Link from '@tiptap/extension-link'
 import Underline from '@tiptap/extension-underline';
 import Table from '@tiptap/extension-table';
 import TableRow from '@tiptap/extension-table-row';
 import ImageResize from 'tiptap-extension-resize-image';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
+import TaskList from '@tiptap/extension-task-list'
+import TaskItem from '@tiptap/extension-task-item'
 import TextAlign from '@tiptap/extension-text-align';
 import { useToast } from "@/hooks/use-toast";
 import Placeholder from '@tiptap/extension-placeholder';
@@ -34,6 +37,7 @@ import {
   ListOrdered,
   Table as TableIcon,
   Image as ImageIcon,
+  Link as LinkIcon,
   ChevronDown,
   Indent,
   Outdent,
@@ -45,6 +49,7 @@ import {
   Trash2,
   Search,
   Save,
+  CheckSquare,
 } from 'lucide-react';
 
 import { PageNode } from "@/types/pages";
@@ -234,6 +239,9 @@ const PageEditor = ({
   autoSave = false, // Default to false if not provided
 }: PageEditorProps) => {
   const { toast } = useToast();
+  const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [isLinkActive, setIsLinkActive] = useState(false);
   // 1. Initialize the editor
   const editor = useEditor({
     extensions: [
@@ -244,6 +252,7 @@ const PageEditor = ({
       }),
       Image,
       ImageResize,
+      Link,
       Underline,
       TextStyle,
       Color.configure({
@@ -258,6 +267,10 @@ const PageEditor = ({
       TableRow,
       TableCell,
       TableHeader,
+      TaskList,
+      TaskItem.configure({
+        nested: true,
+      }),
       TextAlign.configure({
         types: ['heading', 'paragraph'],
       }),
@@ -349,7 +362,7 @@ const PageEditor = ({
             }}
           >
             <Calendar className="w-4 h-4 mr-2" />
-            <span>Insert Date</span>
+            <span>Date</span>
           </li>
           <li
             className="flex items-center px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
@@ -369,7 +382,16 @@ const PageEditor = ({
           >
             <ChevronRight className="w-4 h-4 mr-2" />
             <span>Expand</span>
-          </li>
+            </li>
+            <li
+              className="flex items-center px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+              onClick={() => {
+                editor.chain().focus().toggleTaskList().run()
+              }}
+            >
+              <CheckSquare className="w-4 h-4 mr-2" />
+              <span>Task List</span>
+            </li>
         </ul>
       </div>
     );
@@ -506,6 +528,42 @@ const PageEditor = ({
           .search-highlight-current {
             background-color: rgba(255, 213, 0, 0.7);
           }
+
+           /* Task List Styles */
+          ul[data-type="taskList"] {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+          }
+
+          ul[data-type="taskList"] li {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0;
+            margin: 0;
+          }
+
+          ul[data-type="taskList"] input[type="checkbox"] {
+            margin: 0;
+            cursor: pointer;
+            position: relative;
+            top: 1px;
+          }
+
+          ul[data-type="taskList"] div {
+            flex: 1;
+            margin: 0;
+            line-height: 1.4;
+            display: flex;
+            align-items: center;
+          }
+
+          ul[data-type="taskList"] p {
+            margin: 0 !important;
+            font-size: 14px;
+            padding: 0;
+          }
         `}
       </style>
 
@@ -631,6 +689,27 @@ const PageEditor = ({
             >
               <Highlighter className="w-4 h-4 text-gray-600" />
             </TooltipButton>
+
+            {/* Link */}
+            <TooltipButton
+                title="Link"
+                onClick={(event?: React.MouseEvent) => {
+                  event?.stopPropagation();
+                  // When clicking the link button, open the dialog.
+                  if (editor.isActive('link')) {
+                    // If already linked, prefill the input and mark it as active.
+                    setLinkUrl(editor.getAttributes('link')?.href || '');
+                    setIsLinkActive(true);
+                  } else {
+                    setLinkUrl('');
+                    setIsLinkActive(false);
+                  }
+                  setIsLinkDialogOpen(true);
+                }}
+                className={editor.isActive('link') ? 'bg-gray-200' : ''}
+              >
+                <LinkIcon className="w-4 h-4 text-gray-600" />
+              </TooltipButton>
 
             {/* Bullet List / Ordered List */}
             <TooltipButton
@@ -871,6 +950,57 @@ const PageEditor = ({
                       onRename(page.id, newName.trim());
                       setIsRenaming(false);
                     }
+                  }}
+                >
+                  Save
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Link Dialog */}
+          <Dialog open={isLinkDialogOpen} onOpenChange={setIsLinkDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{isLinkActive ? 'Update Link' : 'Add Link'}</DialogTitle>
+                <DialogDescription>
+                  {isLinkActive
+                    ? 'Update the URL of the link.'
+                    : 'Enter the URL you want to link to.'}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="py-4">
+                <Input
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  placeholder="https://example.com"
+                />
+              </div>
+              <DialogFooter className="flex gap-2">
+                <Button variant="outline" onClick={() => setIsLinkDialogOpen(false)}>
+                  Cancel
+                </Button>
+                {isLinkActive && (
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      editor.chain().focus().unsetLink().run();
+                      setIsLinkDialogOpen(false);
+                    }}
+                  >
+                    Remove Link
+                  </Button>
+                )}
+                <Button
+                  onClick={() => {
+                    if (linkUrl) {
+                      // Normalize the URL: if it doesn't start with http:// or https://, prepend https://
+                      const normalizedUrl = /^(https?:\/\/)/i.test(linkUrl)
+                        ? linkUrl
+                        : `https://${linkUrl}`;
+                      editor.chain().focus().setLink({ href: normalizedUrl }).run();
+                    }
+                    setIsLinkDialogOpen(false);
                   }}
                 >
                   Save
