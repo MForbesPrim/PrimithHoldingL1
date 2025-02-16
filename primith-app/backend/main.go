@@ -3627,8 +3627,8 @@ func getBlobClient(organizationID string) (*azblob.Client, string, error) {
 	var storageAccount, storageKey string
 
 	if os.Getenv("ENVIRONMENT") == "production" {
-		storageAccount = os.Getenv("AZURE_STORAGE_ACCOUNT")
-		storageKey = os.Getenv("AZURE_STORAGE_KEY")
+		storageAccount = os.Getenv("AZURE_STORAGE_ACCOUNT_NAME")
+		storageKey = os.Getenv("AZURE_STORAGE_ACCOUNT_KEY")
 	} else {
 		config, err := loadConfigIfDev()
 		if err != nil {

@@ -52,10 +52,12 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
           className="p-4 border rounded-lg cursor-pointer hover:border-primary transition-colors"
           onClick={() => setSelectedTemplate(template)}
         >
-          <h3 className="font-medium">{template.title}</h3>
-          <p className="text-sm text-gray-500 mt-2 line-clamp-3">
-            {template.content.substring(0, 100)}...
-          </p>
+          <h3 className="font-medium text-base">{template.title}</h3>
+          {template.description && (
+            <p className="text-sm text-gray-500 mt-2">
+              {template.description}
+            </p>
+          )}
         </div>
       ))}
     </div>
