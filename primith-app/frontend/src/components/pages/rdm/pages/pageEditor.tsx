@@ -53,6 +53,13 @@ import {
   CheckSquare,
 } from 'lucide-react';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -305,8 +312,6 @@ const PageEditor = ({
   const [isLinkActive, setIsLinkActive] = useState(false);
   const [isRefreshingImages, setIsRefreshingImages] = useState(false);
   const { selectedOrgId } = useOrganization();
-  const [currentBackColor, setCurrentBackColor] = useState('transparent');
-  const backColorInputRef = useRef<HTMLInputElement>(null);
   const [imageContextMenu, setImageContextMenu] = useState<ImageContextMenuState>({
     visible: false,
     x: 0,
@@ -416,6 +421,15 @@ const PageEditor = ({
     }
   });
 
+  const HIGHLIGHT_COLORS = [
+    { color: '#fef08a', label: 'Yellow' },    // Light yellow
+    { color: '#fecaca', label: 'Red' },       // Light red
+    { color: '#bbf7d0', label: 'Green' },     // Light green
+    { color: '#bfdbfe', label: 'Blue' },      // Light blue
+    { color: '#ddd6fe', label: 'Purple' },    // Light purple
+    { color: '#fed7aa', label: 'Orange' },    // Light orange
+  ];
+
   // 1. Initialize the editor
   const editor = useEditor({
     extensions: [
@@ -436,7 +450,9 @@ const PageEditor = ({
       Color.configure({
         types: ['textStyle', 'bold'],
       }),
-      Highlight,
+      Highlight.configure({
+        multicolor: true,
+      }), 
       PageBreak,
       Table.configure({
         resizable: true,
@@ -446,7 +462,9 @@ const PageEditor = ({
       TableCell,
       TableHeader,
       TaskList,
-      BackColor,
+      BackColor.configure({
+        types: ['textStyle', 'tableCell', 'tableRow', 'tableHeader'],
+      }),
       TaskItem.configure({
         nested: true,
       }),
@@ -1009,55 +1027,52 @@ const PageEditor = ({
             </div>
 
             {/* Highlight */}
-            <TooltipButton
-              title="Highlight"
-              onClick={() => editor.chain().focus().toggleHighlight().run()}
-              className={editor.isActive('highlight') ? 'bg-gray-200' : ''}
-            >
-              <Highlighter className="w-4 h-4 text-gray-600" />
-            </TooltipButton>
-
-            {/* Background Color */}
-            <div className="relative">
-              <TooltipButton
-                title="Background Color"
-                onClick={(event?: React.MouseEvent) => {
-                  if (!event) return;
-                  event.stopPropagation();
-                  // If background color is currently applied, remove it
-                  if (editor.isActive('textStyle', { backgroundColor: currentBackColor })) {
-                    editor.chain().focus().unsetBackColor().run();
-                    setCurrentBackColor('transparent');
-                    return;
-                  }
-                  // Otherwise open color picker
-                  if (backColorInputRef.current) {
-                    backColorInputRef.current.click();
-                  }
-                }}
-                className={`relative ${editor.isActive('textStyle', { backgroundColor: currentBackColor }) ? 'bg-gray-200' : ''}`}
-              >
-                <div className="w-4 h-4 border border-gray-400 rounded" style={{ backgroundColor: currentBackColor }}>
-                  <Type className="w-4 h-4 opacity-50" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <div className="relative">
+                  <TooltipButton
+                    title="Table Options"
+                    className={`relative ${editor.isActive('highlight') ? 'bg-gray-200' : ''}`}
+                  >
+                    <div className="flex items-center gap-1">
+                      <Highlighter className="w-4 h-4 text-gray-600" />
+                      <ChevronDown className="w-3 h-3 text-gray-600" />
+                    </div>
+                  </TooltipButton>
                 </div>
-                <input
-                  ref={backColorInputRef}
-                  type="color"
-                  value={currentBackColor === 'transparent' ? '#ffffff' : currentBackColor}
-                  onChange={(e) => {
-                    const color = e.target.value;
-                    setCurrentBackColor(color);
-                    editor.chain().focus().setBackColor(color).run();
-                  }}
-                  className="absolute opacity-0 w-0 h-0 overflow-hidden"
-                  style={{
-                    clip: 'rect(0 0 0 0)',
-                    clipPath: 'inset(50%)',
-                    position: 'absolute'
-                  }}
-                />
-              </TooltipButton>
-            </div>
+              </DropdownMenuTrigger>
+              
+              <DropdownMenuContent align="start" className="p-2">
+                <div className="grid grid-cols-3 gap-1">
+                  {HIGHLIGHT_COLORS.map(({ color, label }) => (
+                    <button
+                      key={color}
+                      onClick={() => editor.chain().focus().toggleHighlight({ color }).run()}
+                      className={`
+                        w-8 h-8 rounded 
+                        ${editor.isActive('highlight', { color }) ? 'ring-2 ring-black ring-offset-2' : ''}
+                        hover:ring-2 hover:ring-gray-400 hover:ring-offset-2
+                        transition-all
+                      `}
+                      style={{ backgroundColor: color }}
+                      title={label}
+                    />
+                  ))}
+                </div>
+                
+                {editor.isActive('highlight') && (
+                  <>
+                    <DropdownMenuSeparator className="my-2" />
+                    <DropdownMenuItem
+                      onClick={() => editor.chain().focus().unsetHighlight().run()}
+                      className="justify-center text-xs text-red-600"
+                    >
+                      Clear Highlight
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             {/* Link */}
             <TooltipButton

@@ -25,7 +25,7 @@ export const BackColor = Extension.create<ColorOptions>({
 
   addOptions() {
     return {
-      types: ["textStyle"],
+      types: ["textStyle", "tableCell", "tableRow", "tableHeader"],
     };
   },
 
