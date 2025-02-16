@@ -30,7 +30,9 @@ export function PagesDashboard() {
   const [isPageTreeVisible, setIsPageTreeVisible] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
-
+  const [showTemplateNameDialog, setShowTemplateNameDialog] = useState(false);
+  const [templateToUse, setTemplateToUse] = useState<PageNode | null>(null);
+  const [newTemplateName, setNewTemplateName] = useState("");
   const { selectedOrgId } = useOrganization();
   const pagesService = new PagesService();
 
@@ -65,19 +67,69 @@ export function PagesDashboard() {
     setShowNewPageDialog(true);
   };
 
-  const handleUseTemplate = async (template: PageNode) => {
+  const handleUseTemplate = (template: PageNode) => {
+    setTemplateToUse(template);
+    setNewTemplateName(template.title); // Pre-fill with template name
+    setShowTemplateNameDialog(true);
+  };
+  
+  const handleConfirmTemplateUse = async () => {
+    if (!templateToUse || !selectedOrgId) return;
+  
     try {
+      // Extract variables from template content using regex
+      const variableRegex = /{{(\w+)}}/g;
+      let processedContent = templateToUse.content;
+      const matches = templateToUse.content.matchAll(variableRegex);
+  
+      for (const match of matches) {
+        const variableName = match[1]; // Get the variable name without {{ }}
+        let replacement = '';
+  
+        // Handle specific variables with auto-population
+        switch (variableName) {
+          case 'date':
+            replacement = new Date().toLocaleDateString();
+            break;
+          case 'startTime':
+            replacement = new Date().toLocaleTimeString([], { 
+              hour: '2-digit', 
+              minute: '2-digit' 
+            });
+            break;
+          default:
+            // Leave other variables empty
+            replacement = '';
+            break;
+        }
+  
+        processedContent = processedContent.replace(`{{${variableName}}}`, replacement);
+      }
+  
+      // Create the new page with the confirmed name
       const newPage = await pagesService.createPage(
-        template.title,
-        null, // parentId
+        newTemplateName,
+        null,
         selectedOrgId
       );
-      // Update the content after creation
-      await pagesService.updatePage(newPage.id, template.content, selectedOrgId);
+  
+      // Update the content with the processed template content
+      await pagesService.updatePage(newPage.id, processedContent, selectedOrgId);
       
-      setPages(currentPages => [...currentPages, newPage]);
+      // Update local state
+      setPages(currentPages => [...currentPages, {
+        ...newPage,
+        content: processedContent
+      }]);
+      
+      // Reset dialog state
+      setShowTemplateNameDialog(false);
+      setTemplateToUse(null);
+      setNewTemplateName("");
+      
+      // Show the new page
       setSelectedPageId(newPage.id);
-      setShowTemplates(false); // Close templates view
+      setShowTemplates(false);
     } catch (error) {
       console.error('Failed to create page from template:', error);
     }
@@ -303,6 +355,45 @@ export function PagesDashboard() {
                   handleCreatePage(newPageParentId, newPageName.trim());
                 }
               }}
+            >
+              Create Page
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Template Name Dialog */}
+      <Dialog open={showTemplateNameDialog} onOpenChange={setShowTemplateNameDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Page from Template</DialogTitle>
+            <DialogDescription>
+              Enter a name for your new page.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              value={newTemplateName}
+              onChange={(e) => setNewTemplateName(e.target.value)}
+              placeholder="Enter page name"
+              autoFocus
+              className="!text-[15px]"
+            />
+            </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowTemplateNameDialog(false);
+                setTemplateToUse(null);
+                setNewTemplateName("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmTemplateUse}
+              disabled={!newTemplateName.trim()}
             >
               Create Page
             </Button>

@@ -63,6 +63,7 @@ import { Indent as IndentExtension } from '@/components/pages/rdm/pages/TipTapEx
 import SearchAndReplace from '@/components/pages/rdm/pages/TipTapExtensionsExtra/SearchAndReplace';
 import SearchReplaceMenu from '@/components/pages/rdm/pages/TipTapExtensionsExtra/SearchReplaceMenu';
 import { GapCursorExtension } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/GapCursor'
+import { BackColor } from "@/components/pages/rdm/pages/TipTapExtensionsExtra/BackgroundColor";
 import { PagesService } from '@/services/pagesService';
 import { useOrganization } from "@/components/pages/rdm/context/organizationContext";
 
@@ -304,7 +305,8 @@ const PageEditor = ({
   const [isLinkActive, setIsLinkActive] = useState(false);
   const [isRefreshingImages, setIsRefreshingImages] = useState(false);
   const { selectedOrgId } = useOrganization();
-
+  const [currentBackColor, setCurrentBackColor] = useState('transparent');
+  const backColorInputRef = useRef<HTMLInputElement>(null);
   const [imageContextMenu, setImageContextMenu] = useState<ImageContextMenuState>({
     visible: false,
     x: 0,
@@ -444,6 +446,7 @@ const PageEditor = ({
       TableCell,
       TableHeader,
       TaskList,
+      BackColor,
       TaskItem.configure({
         nested: true,
       }),
@@ -932,7 +935,7 @@ const PageEditor = ({
               onClick={() => editor.chain().focus().toggleBold().run()}
               className={editor.isActive('bold') ? 'bg-gray-200' : ''}
             >
-              <Bold className="w-4 h-4 text-gray-600" />
+              <Bold className="d-4 h-4 text-gray-600" />
             </TooltipButton>
 
             <TooltipButton
@@ -1013,6 +1016,48 @@ const PageEditor = ({
             >
               <Highlighter className="w-4 h-4 text-gray-600" />
             </TooltipButton>
+
+            {/* Background Color */}
+            <div className="relative">
+              <TooltipButton
+                title="Background Color"
+                onClick={(event?: React.MouseEvent) => {
+                  if (!event) return;
+                  event.stopPropagation();
+                  // If background color is currently applied, remove it
+                  if (editor.isActive('textStyle', { backgroundColor: currentBackColor })) {
+                    editor.chain().focus().unsetBackColor().run();
+                    setCurrentBackColor('transparent');
+                    return;
+                  }
+                  // Otherwise open color picker
+                  if (backColorInputRef.current) {
+                    backColorInputRef.current.click();
+                  }
+                }}
+                className={`relative ${editor.isActive('textStyle', { backgroundColor: currentBackColor }) ? 'bg-gray-200' : ''}`}
+              >
+                <div className="w-4 h-4 border border-gray-400 rounded" style={{ backgroundColor: currentBackColor }}>
+                  <Type className="w-4 h-4 opacity-50" />
+                </div>
+                <input
+                  ref={backColorInputRef}
+                  type="color"
+                  value={currentBackColor === 'transparent' ? '#ffffff' : currentBackColor}
+                  onChange={(e) => {
+                    const color = e.target.value;
+                    setCurrentBackColor(color);
+                    editor.chain().focus().setBackColor(color).run();
+                  }}
+                  className="absolute opacity-0 w-0 h-0 overflow-hidden"
+                  style={{
+                    clip: 'rect(0 0 0 0)',
+                    clipPath: 'inset(50%)',
+                    position: 'absolute'
+                  }}
+                />
+              </TooltipButton>
+            </div>
 
             {/* Link */}
             <TooltipButton

@@ -21,12 +21,12 @@ export default function TemplatePreview({
               <h2 className="text-lg font-semibold">{template.title}</h2>
             </div>
             <div className="flex gap-2">
-              <Button onClick={() => onUseTemplate(template)}>
+                <Button onClick={() => onUseTemplate(template)}>
                 Use Template
-              </Button>
-              <Button variant="ghost" size="icon" onClick={onClose}>
-                <X className="h-4 w-4" />
-              </Button>
+                </Button>
+                <Button variant="ghost" size="icon" onClick={onClose}>
+                    <X className="h-4 w-4" />
+                </Button>
             </div>
           </div>
         </div>

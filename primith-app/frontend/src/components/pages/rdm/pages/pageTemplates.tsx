@@ -7,11 +7,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PagesService } from '@/services/pagesService';
 
 interface TemplateProps {
-  organizationId: string;
-  onCreatePage: (template: PageNode) => void;
-  onClose: () => void; 
-}
-
+    organizationId: string;
+    onCreatePage: (template: PageNode) => void;
+    onClose: () => void;
+  }
+  
 export function Templates({ organizationId, onCreatePage, onClose }: TemplateProps) {
   const [selectedTemplate, setSelectedTemplate] = useState<PageNode | null>(null);
   const [templates, setTemplates] = useState<PageNode[]>([]);
@@ -38,7 +38,7 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
       loadTemplates();
     }
   }, [organizationId]);
-  
+
   const systemTemplates = templates.filter(t => t.status === 'system_template');
   const customTemplates = templates.filter(t => t.status === 'template');
 
