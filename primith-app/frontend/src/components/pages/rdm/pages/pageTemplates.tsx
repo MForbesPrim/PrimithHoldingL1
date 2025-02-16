@@ -21,8 +21,10 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
   useEffect(() => {
     const loadTemplates = async () => {
       try {
+        console.log('Loading templates for organizationId:', organizationId);
         setLoading(true);
         const fetchedTemplates = await pagesService.getTemplates(organizationId);
+        console.log('Fetched templates:', fetchedTemplates);
         setTemplates(fetchedTemplates || []);
       } catch (error) {
         console.error('Failed to load templates:', error);
@@ -31,12 +33,12 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
         setLoading(false);
       }
     };
-
+  
     if (organizationId) {
       loadTemplates();
     }
   }, [organizationId]);
-
+  
   const systemTemplates = templates.filter(t => t.status === 'system_template');
   const customTemplates = templates.filter(t => t.status === 'template');
 

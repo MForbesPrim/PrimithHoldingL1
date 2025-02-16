@@ -4593,6 +4593,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
             pc.parent_id,
             pc.title,
             COALESCE(pc.content, '') as content,
+            COALESCE(pc.description, '') as description,
             pc.status,
             pc.template_type,
             cb.email as created_by,
@@ -4603,9 +4604,9 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
         LEFT JOIN auth.users cb ON pc.created_by = cb.id
         LEFT JOIN auth.users ub ON pc.updated_by = ub.id
         WHERE (
-            (pc.organization_id = $1 AND pc.status = 'template') -- Custom templates
+            (pc.organization_id = $1 AND pc.status = 'template') 
             OR 
-            (pc.status = 'system_template') -- System templates
+            (pc.status = 'system_template')
         )
         AND pc.deleted_at IS NULL
         ORDER BY 
@@ -4630,6 +4631,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 			ParentID     sql.NullString
 			Title        string
 			Content      string
+			Description  string
 			Status       string
 			TemplateType string
 			CreatedBy    string
@@ -4643,6 +4645,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 			&template.ParentID,
 			&template.Title,
 			&template.Content,
+			&template.Description,
 			&template.Status,
 			&template.TemplateType,
 			&template.CreatedBy,
@@ -4659,6 +4662,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 			"parentId":     template.ParentID.String,
 			"title":        template.Title,
 			"content":      template.Content,
+			"description":  template.Description,
 			"status":       template.Status,
 			"templateType": template.TemplateType,
 			"createdBy":    template.CreatedBy,

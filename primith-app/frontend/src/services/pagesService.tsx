@@ -161,7 +161,9 @@ async deleteImage(imageId: string, organizationId: string): Promise<void> {
       headers
     });
     if (!response.ok) throw new Error('Failed to fetch templates');
+
     const data = await response.json();
+    console.log(data.templates)
     return data.templates;
   }
 }
