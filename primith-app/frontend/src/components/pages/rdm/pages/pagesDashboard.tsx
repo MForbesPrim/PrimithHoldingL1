@@ -75,7 +75,29 @@ export function PagesDashboard() {
   
   const handleConfirmTemplateUse = async () => {
     if (!templateToUse || !selectedOrgId) return;
-  
+
+    const dates = {
+      monday_date: getDateOfWeekday(1),    // 1 = Monday
+      tuesday_date: getDateOfWeekday(2),   // 2 = Tuesday
+      wednesday_date: getDateOfWeekday(3), // 3 = Wednesday
+      thursday_date: getDateOfWeekday(4),  // 4 = Thursday
+      friday_date: getDateOfWeekday(5),    // 5 = Friday
+    };
+
+    function getDateOfWeekday(dayNum: number) {
+      const now = new Date();
+      const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+      
+      // Calculate how many days to subtract/add to get to the target day
+      const diff = dayNum - currentDay;
+      
+      // Create a new date starting from the beginning of today
+      const targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      targetDate.setDate(targetDate.getDate() + diff);
+      
+      return targetDate.toISOString();
+    }
+    
     try {
       // Extract variables from template content using regex
       const variableRegex = /{{(\w+)}}/g;
@@ -95,8 +117,18 @@ export function PagesDashboard() {
         const fullMatch = match[0]; // The full {{variable}} string
   
         switch (variableName) {
+          case 'monday_date':
+          case 'tuesday_date':
+          case 'wednesday_date':
+          case 'thursday_date':
+          case 'friday_date':
+            contentToProcess = contentToProcess.replace(
+              fullMatch,
+              `<time data-type="date" datetime="${dates[variableName]}"></time>`
+            );
+            break;
           case 'date':
-            // Insert a dateNode instead of plain text
+            // Default to current date for generic date variable
             contentToProcess = contentToProcess.replace(
               fullMatch,
               `<time data-type="date" datetime="${new Date().toISOString()}"></time>`
