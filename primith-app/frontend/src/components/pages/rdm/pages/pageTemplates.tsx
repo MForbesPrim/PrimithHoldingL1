@@ -82,7 +82,7 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
   return (
     <div className="flex h-full">
       <div className={`p-6 transition-all ${selectedTemplate ? 'w-2/3' : 'w-full'}`}>
-        <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-2">
             <Button 
               variant="ghost" 

@@ -249,7 +249,7 @@ export function PagesDashboard() {
       )}
 
       <div className="flex-1 p-4">
-        {selectedPageId ? (
+      {selectedPageId ? (
           // Show Page Editor when a page is selected
           <div>
             <div className="flex items-center justify-between mb-4">
