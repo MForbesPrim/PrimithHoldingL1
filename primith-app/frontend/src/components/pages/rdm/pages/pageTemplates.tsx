@@ -11,7 +11,7 @@ interface TemplateProps {
     onCreatePage: (template: PageNode) => void;
     onClose: () => void;
   }
-  
+
 export function Templates({ organizationId, onCreatePage, onClose }: TemplateProps) {
   const [selectedTemplate, setSelectedTemplate] = useState<PageNode | null>(null);
   const [templates, setTemplates] = useState<PageNode[]>([]);
@@ -51,15 +51,29 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
       {templates.map(template => (
         <div
           key={template.id}
-          className="p-4 border rounded-lg cursor-pointer hover:border-primary transition-colors"
+          className="p-4 border rounded-lg hover:border-primary transition-colors relative group"
           onClick={() => setSelectedTemplate(template)}
         >
-          <h3 className="font-medium text-base">{template.title}</h3>
-          {template.description && (
-            <p className="text-sm text-gray-500 mt-2">
-              {template.description}
-            </p>
-          )}
+          <h3 className="font-medium text-base cursor-pointer">{template.title}</h3>
+          
+          <div className="flex justify-between items-end mt-4">
+            {template.category && (
+              <p className="text-sm text-gray-500 max-w-[60%]">
+                {template.category}
+              </p>
+            )}
+            
+            <Button 
+              size="sm"
+              className="opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-4 right-4"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCreatePage(template);
+              }}
+            >
+              Use
+            </Button>
+          </div>
         </div>
       ))}
     </div>
@@ -116,7 +130,7 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
       </div>
 
       {selectedTemplate && (
-        <div className="w-1/3 border-l">
+        <div className="w-1/3">
           <TemplatePreview 
             template={selectedTemplate}
             onUseTemplate={onCreatePage}

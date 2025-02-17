@@ -4593,6 +4593,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
             pc.parent_id,
             pc.title,
             COALESCE(pc.content, '') as content,
+			COALESCE(pc.template_category, '') as category,
             COALESCE(pc.description, '') as description,
             pc.status,
             pc.template_type,
@@ -4631,6 +4632,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 			ParentID     sql.NullString
 			Title        string
 			Content      string
+			Category     string
 			Description  string
 			Status       string
 			TemplateType string
@@ -4645,6 +4647,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 			&template.ParentID,
 			&template.Title,
 			&template.Content,
+			&template.Category,
 			&template.Description,
 			&template.Status,
 			&template.TemplateType,
@@ -4662,6 +4665,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 			"parentId":     template.ParentID.String,
 			"title":        template.Title,
 			"content":      template.Content,
+			"category":     template.Category,
 			"description":  template.Description,
 			"status":       template.Status,
 			"templateType": template.TemplateType,

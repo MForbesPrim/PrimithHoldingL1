@@ -6,6 +6,7 @@ export interface PageNode {
   status: string;
   createdBy: string;
   updatedBy: string;
+  category?: string; 
   description?: string; 
   deletedBy?: string;
   createdAt: string;

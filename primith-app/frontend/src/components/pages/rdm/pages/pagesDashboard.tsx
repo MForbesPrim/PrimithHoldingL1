@@ -79,47 +79,52 @@ export function PagesDashboard() {
     try {
       // Extract variables from template content using regex
       const variableRegex = /{{(\w+)}}/g;
-      let processedContent = templateToUse.content;
-      const matches = templateToUse.content.matchAll(variableRegex);
-  
-      for (const match of matches) {
-        const variableName = match[1]; // Get the variable name without {{ }}
-        let replacement = '';
-  
-        // Handle specific variables with auto-population
-        switch (variableName) {
-          case 'date':
-            replacement = new Date().toLocaleDateString();
-            break;
-          case 'startTime':
-            replacement = new Date().toLocaleTimeString([], { 
-              hour: '2-digit', 
-              minute: '2-digit' 
-            });
-            break;
-          default:
-            // Leave other variables empty
-            replacement = '';
-            break;
-        }
-  
-        processedContent = processedContent.replace(`{{${variableName}}}`, replacement);
-      }
-  
-      // Create the new page with the confirmed name
+      let contentToProcess = templateToUse.content;
+      let matches = Array.from(contentToProcess.matchAll(variableRegex));
+      
+      // Create new page first
       const newPage = await pagesService.createPage(
         newTemplateName,
         null,
         selectedOrgId
       );
   
-      // Update the content with the processed template content
-      await pagesService.updatePage(newPage.id, processedContent, selectedOrgId);
+      // Process the content
+      for (const match of matches) {
+        const variableName = match[1];
+        const fullMatch = match[0]; // The full {{variable}} string
+  
+        switch (variableName) {
+          case 'date':
+            // Insert a dateNode instead of plain text
+            contentToProcess = contentToProcess.replace(
+              fullMatch,
+              `<time data-type="date" datetime="${new Date().toISOString()}"></time>`
+            );
+            break;
+          case 'startTime':
+            contentToProcess = contentToProcess.replace(
+              fullMatch,
+              new Date().toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+              })
+            );
+            break;
+          default:
+            // Leave other variables empty
+            contentToProcess = contentToProcess.replace(fullMatch, '');
+            break;
+        }
+      }
+  
+      // Update the page with processed content
+      await pagesService.updatePage(newPage.id, contentToProcess, selectedOrgId);
       
       // Update local state
       setPages(currentPages => [...currentPages, {
         ...newPage,
-        content: processedContent
+        content: contentToProcess
       }]);
       
       // Reset dialog state

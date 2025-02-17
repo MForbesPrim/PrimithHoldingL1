@@ -71,6 +71,7 @@ import SearchAndReplace from '@/components/pages/rdm/pages/TipTapExtensionsExtra
 import SearchReplaceMenu from '@/components/pages/rdm/pages/TipTapExtensionsExtra/SearchReplaceMenu';
 import { GapCursorExtension } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/GapCursor'
 import { BackColor } from "@/components/pages/rdm/pages/TipTapExtensionsExtra/BackgroundColor";
+import { TableCellAttributes } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/TableCellAttributes';
 import { PagesService } from '@/services/pagesService';
 import { useOrganization } from "@/components/pages/rdm/context/organizationContext";
 
@@ -139,6 +140,14 @@ declare module '@tiptap/core' {
   }
 }
 
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    setCellAttribute: {
+      setCellAttribute: (name: string, value: any) => ReturnType;
+    };
+  }
+}
+
 const TooltipButton: React.FC<TooltipButtonProps> = ({
   title,
   onClick,
@@ -182,6 +191,25 @@ const TooltipButton: React.FC<TooltipButtonProps> = ({
 
 const TableOptions: React.FC<TableOptionsProps> = ({ editor }) => {
   if (!editor || !editor.isActive('table')) return null;
+
+  const CELL_COLORS = [
+    { color: '#ffffff', label: 'White' },
+    { color: '#f8f9fa', label: 'Light Gray' },
+    { color: '#e2e8f0', label: 'Gray' },
+    { color: '#fef3c7', label: 'Yellow' },     // Soft yellow
+    { color: '#dcfce7', label: 'Green' },      // Soft green
+    { color: '#dbeafe', label: 'Blue' },       // Soft blue
+    { color: '#fce7f3', label: 'Pink' },       // Soft pink
+    { color: '#fee2e2', label: 'Red' },        // Soft red
+    { color: '#f3e8ff', label: 'Purple' },     // Soft purple
+    { color: '#ffedd5', label: 'Orange' },     // Soft orange
+    { color: '#ecfdf5', label: 'Mint' },       // Soft mint
+    { color: '#f1f5f9', label: 'Slate' }       // Soft slate
+  ];
+
+  const handleCellColorChange = (color: string) => {
+    editor.chain().focus().setCellAttribute('backgroundColor', color).run();
+  };
 
   return (
     <div className="absolute top-full left-0 bg-white border border-gray-200 rounded-lg shadow-lg p-2 min-w-[200px] z-50">
@@ -293,6 +321,31 @@ const TableOptions: React.FC<TableOptionsProps> = ({ editor }) => {
         <path d="M15.46,15.88L16.88,14.46L19,16.59L21.12,14.46L22.54,15.88L20.41,18L22.54,20.12L21.12,21.54L19,19.41L16.88,21.54L15.46,20.12L17.59,18L15.46,15.88M4,3H18A2,2 0 0,1 20,5V12.08C18.45,11.82 16.92,12.18 15.68,13H12V17H13.08C12.97,17.68 12.97,18.35 13.08,19H4A2,2 0 0,1 2,17V5A2,2 0 0,1 4,3M4,7V11H10V7H4M12,7V11H18V7H12M4,13V17H10V13H4Z" />
         </svg>
           <span>Delete Table</span>
+        </li>
+        <li className="px-3 py-2">
+          <div className="text-sm text-gray-700 mb-2">Cell Background</div>
+          <div className="grid grid-cols-4 gap-1">
+            {CELL_COLORS.map(({ color, label }) => (
+              <button
+                key={color}
+                onClick={() => handleCellColorChange(color)}
+                className="w-6 h-6 rounded border border-gray-200 hover:border-gray-400 transition-all"
+                style={{ backgroundColor: color }}
+                title={label}
+              />
+            ))}
+          </div>
+        </li>
+        
+        {/* Add clear background option */}
+        <li
+          className="flex items-center px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+          onClick={() => handleCellColorChange('transparent')}
+        >
+          <svg className="mr-2" xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 0 24 24" width="18px" fill="#5f6368">
+            <path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3.59-13L12 10.59 8.41 7 7 8.41 10.59 12 7 15.59 8.41 17 12 13.41 15.59 17 17 15.59 13.41 12 17 8.41z"/>
+          </svg>
+          <span>Clear Background</span>
         </li>
       </ul>
     </div>
@@ -448,7 +501,7 @@ const PageEditor = ({
       Underline,
       TextStyle,
       Color.configure({
-        types: ['textStyle', 'bold'],
+        types: ['textStyle', 'bold', 'tableCell', 'tableHeader'],
       }),
       Highlight.configure({
         multicolor: true,
@@ -457,6 +510,9 @@ const PageEditor = ({
       Table.configure({
         resizable: true,
         allowTableNodeSelection: true,
+      }), 
+      TableCellAttributes.configure({
+        types: ['tableCell', 'tableHeader'],
       }),
       TableRow,
       TableCell,
@@ -900,16 +956,39 @@ const PageEditor = ({
             font-size: 14px;
             padding: 0;
           }
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
-    }
 
-    .animate-spin {
-      animation: spin 1s linear infinite;
-    }
-  `}
+          @keyframes spin {
+            to {
+              transform: rotate(360deg);
+            }
+          }
+
+          .animate-spin {
+            animation: spin 1s linear infinite;
+          }
+          .ProseMirror table {
+            border-collapse: collapse;
+            margin: 0;
+            overflow: hidden;
+            table-layout: fixed;
+            width: 100%;
+          }
+
+          .ProseMirror td,
+          .ProseMirror th {
+            box-sizing: border-box;
+            min-width: 1em;
+            padding: 3px 5px;
+            position: relative;
+            vertical-align: top;
+          }
+
+          .ProseMirror th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            text-align: left;
+          }
+        `}
       </style>
 
       <div className="w-[90%] mx-auto mb-5 mt-1">
