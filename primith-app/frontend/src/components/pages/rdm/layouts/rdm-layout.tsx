@@ -33,8 +33,10 @@ export function RdmLayout({ children }: RdmLayoutProps) {
           <AppSidebar />
           <SidebarInset>
             <RdmHeader />
-            <main className="flex-1">
+            <main className="flex-1 overflow-hidden">
+              <div className="h-full overflow-y-auto pl-4">
               {children}
+              </div>
             </main>
           </SidebarInset>
         </SidebarProvider>

@@ -991,7 +991,7 @@ const PageEditor = ({
         `}
       </style>
 
-      <div className="w-[90%] mx-auto mb-5 mt-1">
+      <div className="w-[90%] mx-auto mb-5 mt-1 pb-8">
         <div className="flex justify-between items-start mb-4">
           <h1 className="text-2xl font-bold text-gray-900">{page.title}</h1>
           <div className="text-right">

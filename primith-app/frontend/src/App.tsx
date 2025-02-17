@@ -38,7 +38,6 @@ function App() {
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
       <div className="flex h-screen w-screen">
         <div className="flex flex-1 flex-col">
-          <main className="flex-1">
             <Routes>
               {isSupport ? (
                 <Route path="/" element={<HelpPage />} />
@@ -87,7 +86,6 @@ function App() {
                 </>
               )}
             </Routes>
-          </main>
         </div>
       </div>
       <Toaster />

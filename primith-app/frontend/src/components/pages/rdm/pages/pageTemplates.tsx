@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Plus } from 'lucide-react';
+import { ArrowLeft, Plus, X } from 'lucide-react';
 import { PageNode } from '@/types/pages';
-import TemplatePreview from './pageTemplatePreview';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PagesService } from '@/services/pagesService';
 
@@ -80,64 +79,90 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
   );
 
   return (
-    <div className="flex h-full">
-      <div className={`p-6 transition-all ${selectedTemplate ? 'w-2/3' : 'w-full'}`}>
-      <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center gap-2">
-            <Button 
-              variant="ghost" 
-              onClick={onClose}
-              className="mr-2"
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back
+    <div className="flex h-full"> {/* No scroll here - just container */}
+      <div className={`overflow-y-auto transition-all duration-300 ${
+        selectedTemplate ? 'w-2/3' : 'w-full'
+      }`}>
+        {/* First scrollable area - template grid */}
+        <div className="p-6">
+          <div className="flex justify-between items-center mb-6">
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="ghost" 
+                onClick={onClose}
+                className="mr-2"
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back
+              </Button>
+              <h1 className="text-2xl font-bold">Templates</h1>
+            </div>
+            <Button onClick={() => {/* TODO: Implement create template */}}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create Template
             </Button>
-            <h1 className="text-2xl font-bold">Templates</h1>
           </div>
-          <Button onClick={() => {/* TODO: Implement create template */}}>
-            <Plus className="h-4 w-4 mr-2" />
-            Create Template
-          </Button>
-        </div>
-
-        <Tabs defaultValue="system" className="w-full">
-          <TabsList className="mb-4">
-            <TabsTrigger value="system">System Templates</TabsTrigger>
-            <TabsTrigger value="custom">Custom Templates</TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="system">
-            {systemTemplates.length > 0 ? (
-              <TemplateGrid templates={systemTemplates} />
-            ) : (
-              <div className="text-gray-500 text-center p-8 border rounded-lg">
-                No system templates available
-              </div>
-            )}
-          </TabsContent>
-          
-          <TabsContent value="custom">
-            {customTemplates.length > 0 ? (
-              <TemplateGrid templates={customTemplates} />
-            ) : (
-              <div className="text-gray-500 text-center p-8 border rounded-lg">
-                <p>No custom templates yet</p>
-                <p className="text-sm mt-2">Click "Create Template" to create your first template</p>
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
+  
+          <Tabs defaultValue="system" className="w-full">
+              <TabsList className="mb-4">
+                <TabsTrigger value="system">System Templates</TabsTrigger>
+                <TabsTrigger value="custom">Custom Templates</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="system">
+                {systemTemplates.length > 0 ? (
+                  <TemplateGrid templates={systemTemplates} />
+                ) : (
+                  <div className="text-gray-500 text-center p-8 border rounded-lg">
+                    No system templates available
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="custom">
+                {customTemplates.length > 0 ? (
+                  <TemplateGrid templates={customTemplates} />
+                ) : (
+                  <div className="text-gray-500 text-center p-8 border rounded-lg">
+                    <p>No custom templates yet</p>
+                    <p className="text-sm mt-2">Click "Create Template" to create your first template</p>
+                  </div>
+                )}
+              </TabsContent>
+              </Tabs>
       </div>
-
-      {selectedTemplate && (
-        <div className="w-1/3">
-          <TemplatePreview 
-            template={selectedTemplate}
-            onUseTemplate={onCreatePage}
-            onClose={() => setSelectedTemplate(null)}
-          />
-        </div>
-      )}
     </div>
-  );
+
+    {selectedTemplate && (
+      <div className="w-1/3 flex flex-col border-l">
+        {/* Template preview with fixed header and scrollable content */}
+        <div className="py-6 pl-6 border-b">
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="text-lg font-semibold">{selectedTemplate.title}</h2>
+              <p className="text-sm text-gray-500 max-w-[80%] mb-4">{selectedTemplate.description}</p>
+              <Button onClick={() => onCreatePage(selectedTemplate)}>
+                Use Template
+              </Button>
+            </div>
+            <Button variant="ghost" size="icon" onClick={() => setSelectedTemplate(null)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {/* Second scrollable area - template preview content */}
+          <div className="px-0 py-6">
+            <div 
+              className="prose w-[900px] transform scale-50 origin-top-left px-20 " 
+              style={{ transformBox: 'border-box' }}
+            >
+              <div dangerouslySetInnerHTML={{ __html: selectedTemplate.content }} />
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+);
 }

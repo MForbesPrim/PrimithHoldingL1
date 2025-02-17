@@ -12,10 +12,10 @@ export default function TemplatePreview({
     template, 
     onUseTemplate, 
     onClose 
-  }: TemplatePreviewProps) {
+}: TemplatePreviewProps) {
     return (
-      <div className="fixed right-0 top-0 h-screen border-l bg-white z-50 w-[450px] shadow-lg">
-        <div className="p-2 border-b">
+      <div className="h-full flex flex-col bg-white">
+        <div className="p-2 border-b shrink-0">
           <div className="flex justify-between items-start">
             <div className="p-4">
               <h2 className="text-lg font-semibold">{template.title}</h2>
@@ -31,7 +31,7 @@ export default function TemplatePreview({
             </div>
           </div>
         </div>
-        <div className="h-[calc(100vh-88px)] overflow-y-auto">
+        <div className="flex-1 overflow-y-auto">
           <div className="px-0 py-6">
             <div 
               className="prose w-[900px] transform scale-50 origin-top-left px-20" 
