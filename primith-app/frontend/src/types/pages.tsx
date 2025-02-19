@@ -15,4 +15,5 @@ export interface PageNode {
   organizationId: string; 
   isSystem?: boolean;
   templateType?: string;
+  isFavorite?: boolean;
 }

@@ -256,7 +256,6 @@ func initDB(config Config) error {
 	var connStr string
 
 	if os.Getenv("ENVIRONMENT") == "production" {
-		// Use environment variables in production
 		connStr = fmt.Sprintf("user=%s dbname=%s password=%s host=%s sslmode=%s",
 			os.Getenv("DB_USER"),
 			os.Getenv("DB_NAME"),
@@ -264,7 +263,6 @@ func initDB(config Config) error {
 			os.Getenv("DB_HOST"),
 			os.Getenv("DB_SSLMODE"))
 	} else {
-		// Use config file in development
 		connStr = fmt.Sprintf("user=%s dbname=%s password=%s host=%s sslmode=%s",
 			config.Database.User,
 			config.Database.DBName,
@@ -273,13 +271,26 @@ func initDB(config Config) error {
 			config.Database.SSLMode)
 	}
 
-	log.Printf("Attempting to connect with connection string")
-
+	// Open the connection with specific pool settings
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
 		return err
 	}
-	return db.Ping()
+
+	// Set connection pool parameters
+	db.SetMaxOpenConns(25)                 // Maximum number of open connections
+	db.SetMaxIdleConns(10)                 // Maximum number of idle connections
+	db.SetConnMaxLifetime(5 * time.Minute) // Maximum lifetime of a connection
+	db.SetConnMaxIdleTime(1 * time.Minute) // Maximum idle time of a connection
+
+	// Verify connection
+	err = db.Ping()
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Successfully connected to database with pool settings")
+	return nil
 }
 
 // LoadConfigIfDev checks if we're in development mode before loading the config
@@ -3657,13 +3668,22 @@ func getBlobClient(organizationID string) (*azblob.Client, string, error) {
 
 // Handler for getting all pages
 func handleGetPages(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[handleGetPages] Starting request handling")
+
 	organizationId := r.URL.Query().Get("organizationId")
 	if organizationId == "" {
+		log.Printf("[handleGetPages] Error: Missing organizationId in request")
 		http.Error(w, "Organization ID is required", http.StatusBadRequest)
 		return
 	}
+	log.Printf("[handleGetPages] Requested organizationId: %s", organizationId)
 
 	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("[handleGetPages] User email from claims: %s", claims.Username)
+
+	// Log authorization headers
+	authHeader := r.Header.Get("Authorization")
+	log.Printf("[handleGetPages] Authorization header present: %v", authHeader != "")
 
 	// Verify user has access to the organization
 	var authorized bool
@@ -3676,11 +3696,68 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
         )
     `, claims.Username, organizationId).Scan(&authorized)
 
-	if err != nil || !authorized {
+	if err != nil {
+		log.Printf("[handleGetPages] Database error checking authorization: %v", err)
+		http.Error(w, "Error checking access", http.StatusInternalServerError)
+		return
+	}
+
+	if !authorized {
+		log.Printf("[handleGetPages] Access denied for user %s to organization %s",
+			claims.Username, organizationId)
+
+		// Log additional debugging info
+		var userExists bool
+		err := db.QueryRow(`
+            SELECT EXISTS(SELECT 1 FROM auth.users WHERE email = $1)
+        `, claims.Username).Scan(&userExists)
+		if err != nil {
+			log.Printf("[handleGetPages] Error checking user existence: %v", err)
+		} else {
+			log.Printf("[handleGetPages] User exists in database: %v", userExists)
+		}
+
+		var orgExists bool
+		err = db.QueryRow(`
+            SELECT EXISTS(SELECT 1 FROM auth.organizations WHERE id = $1)
+        `, organizationId).Scan(&orgExists)
+		if err != nil {
+			log.Printf("[handleGetPages] Error checking organization existence: %v", err)
+		} else {
+			log.Printf("[handleGetPages] Organization exists in database: %v", orgExists)
+		}
+
+		// Log membership entries
+		rows, err := db.Query(`
+            SELECT om.user_id, u.email, om.organization_id 
+            FROM auth.organization_members om
+            JOIN auth.users u ON om.user_id = u.id
+            WHERE organization_id = $1
+        `, organizationId)
+		if err != nil {
+			log.Printf("[handleGetPages] Error querying org members: %v", err)
+		} else {
+			defer rows.Close()
+			log.Printf("[handleGetPages] Current members of organization %s:", organizationId)
+			for rows.Next() {
+				var userId, email, orgId string
+				if err := rows.Scan(&userId, &email, &orgId); err != nil {
+					log.Printf("[handleGetPages] Error scanning member row: %v", err)
+					continue
+				}
+				log.Printf("[handleGetPages] Member: userId=%s, email=%s, orgId=%s",
+					userId, email, orgId)
+			}
+		}
+
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
 		return
 	}
 
+	log.Printf("[handleGetPages] Access authorized for user %s to organization %s",
+		claims.Username, organizationId)
+
+	// Rest of the code to fetch pages...
 	rows, err := db.Query(`
         SELECT 
             pc.id, 
@@ -3704,7 +3781,7 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
     `, organizationId)
 
 	if err != nil {
-		log.Printf("Error fetching pages: %v", err)
+		log.Printf("[handleGetPages] Error fetching pages: %v", err)
 		http.Error(w, "Failed to fetch pages", http.StatusInternalServerError)
 		return
 	}
@@ -4586,37 +4663,41 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Query both system and custom templates
 	rows, err := db.Query(`
-        SELECT 
-            pc.id, 
-            pc.parent_id,
-            pc.title,
-            COALESCE(pc.content, '') as content,
+		SELECT 
+			pc.id, 
+			pc.parent_id,
+			pc.title,
+			COALESCE(pc.content, '') as content,
 			COALESCE(pc.template_category, '') as category,
-            COALESCE(pc.description, '') as description,
-            pc.status,
-            pc.template_type,
-            cb.email as created_by,
-            ub.email as updated_by,
-            pc.created_at,
-            pc.updated_at
-        FROM pages.pages_content pc
-        LEFT JOIN auth.users cb ON pc.created_by = cb.id
-        LEFT JOIN auth.users ub ON pc.updated_by = ub.id
-        WHERE (
-            (pc.organization_id = $1 AND pc.status = 'template') 
-            OR 
-            (pc.status = 'system_template')
-        )
-        AND pc.deleted_at IS NULL
-        ORDER BY 
-            CASE 
-                WHEN pc.status = 'system_template' THEN 1 
-                ELSE 2 
-            END,
-            pc.created_at DESC
-    `, organizationId)
+			COALESCE(pc.description, '') as description,
+			pc.status,
+			pc.template_type,
+			cb.email as created_by,
+			ub.email as updated_by,
+			pc.created_at,
+			pc.updated_at,
+			EXISTS (
+				SELECT 1 FROM pages.user_favorite_templates uft 
+				WHERE uft.template_id = pc.id 
+				AND uft.user_id = (SELECT id FROM auth.users WHERE email = $2)
+			) as is_favorite
+		FROM pages.pages_content pc
+		LEFT JOIN auth.users cb ON pc.created_by = cb.id
+		LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+		WHERE (
+			(pc.organization_id = $1 AND pc.status = 'template') 
+			OR 
+			(pc.status = 'system_template')
+		)
+		AND pc.deleted_at IS NULL
+		ORDER BY 
+			CASE 
+				WHEN pc.status = 'system_template' THEN 1 
+				ELSE 2 
+			END,
+			pc.created_at DESC
+	`, organizationId, claims.Username)
 
 	if err != nil {
 		log.Printf("Error fetching templates: %v", err)
@@ -4640,6 +4721,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 			UpdatedBy    string
 			CreatedAt    time.Time
 			UpdatedAt    time.Time
+			IsFavorite   bool
 		}
 
 		if err := rows.Scan(
@@ -4655,6 +4737,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 			&template.UpdatedBy,
 			&template.CreatedAt,
 			&template.UpdatedAt,
+			&template.IsFavorite,
 		); err != nil {
 			log.Printf("Error scanning template row: %v", err)
 			continue
@@ -4674,6 +4757,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 			"createdAt":    template.CreatedAt,
 			"updatedAt":    template.UpdatedAt,
 			"isSystem":     template.Status == "system_template",
+			"isFavorite":   template.IsFavorite,
 		}
 
 		templates = append(templates, templateMap)
@@ -4688,6 +4772,61 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"templates": templates,
+	})
+}
+
+func handleToggleFavoriteTemplate(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	templateId := vars["id"]
+
+	// Get user ID
+	var userId string
+	err := db.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if template is already favorited
+	var exists bool
+	err = db.QueryRow(`
+        SELECT EXISTS(
+            SELECT 1 FROM pages.user_favorite_templates 
+            WHERE user_id = $1 AND template_id = $2
+        )
+    `, userId, templateId).Scan(&exists)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	if exists {
+		// Remove favorite
+		_, err = db.Exec(`
+            DELETE FROM pages.user_favorite_templates 
+            WHERE user_id = $1 AND template_id = $2
+        `, userId, templateId)
+	} else {
+		// Add favorite
+		_, err = db.Exec(`
+            INSERT INTO pages.user_favorite_templates (user_id, template_id)
+            VALUES ($1, $2)
+        `, userId, templateId)
+	}
+
+	if err != nil {
+		http.Error(w, "Failed to toggle favorite", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"isFavorite": !exists,
 	})
 }
 
@@ -4873,6 +5012,7 @@ func main() {
 	r.HandleFunc("/pages/images/refresh-tokens", authMiddleware(handleRefreshImageSasTokens)).Methods("GET")
 	r.HandleFunc("/pages/images/{id}", authMiddleware(handleDeletePageImage)).Methods("DELETE")
 	r.HandleFunc("/pages/templates", authMiddleware(handleListTemplates)).Methods("GET")
+	r.HandleFunc("/pages/templates/{id}/favorite", authMiddleware(handleToggleFavoriteTemplate)).Methods("POST")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

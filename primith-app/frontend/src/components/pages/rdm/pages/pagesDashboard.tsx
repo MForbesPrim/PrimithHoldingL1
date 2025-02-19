@@ -17,10 +17,13 @@ import { PagesService } from '@/services/pagesService';
 import { useOrganization } from "@/components/pages/rdm/context/organizationContext";
 import { PagesTable } from './pagesTable';
 import { Templates } from './pageTemplates';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 import { Switch } from '@/components/ui/switch';
 
 export function PagesDashboard() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [pages, setPages] = useState<PageNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
@@ -37,8 +40,14 @@ export function PagesDashboard() {
   const pagesService = new PagesService();
 
   const handleTemplatesClick = () => {
+    navigate('/rdm/pages/templates');
     setShowTemplates(true);
     setSelectedPageId(null);
+  };
+
+  const handleCloseTemplates = () => {
+    navigate('/rdm/pages');
+    setShowTemplates(false);
   };
 
   useEffect(() => {
@@ -46,6 +55,11 @@ export function PagesDashboard() {
       loadPages();
     }
   }, [selectedOrgId]);
+
+  useEffect(() => {
+    // Set showTemplates based on URL path
+    setShowTemplates(location.pathname === '/rdm/pages/templates');
+  }, [location.pathname]);
 
   const loadPages = async () => {
     if (!selectedOrgId) return;
@@ -97,7 +111,7 @@ export function PagesDashboard() {
       
       return targetDate.toISOString();
     }
-    
+
     try {
       // Extract variables from template content using regex
       const variableRegex = /{{(\w+)}}/g;
@@ -323,10 +337,10 @@ export function PagesDashboard() {
           </div>
                ) : showTemplates ? (
                 <Templates 
-                organizationId={selectedOrgId} 
-                onCreatePage={handleUseTemplate}
-                onClose={() => setShowTemplates(false)}
-              />
+                  organizationId={selectedOrgId} 
+                  onCreatePage={handleUseTemplate}
+                  onClose={handleCloseTemplates}
+                />
               ) : (
           // Show Pages Dashboard when no page is selected
           <div className="mx-4">

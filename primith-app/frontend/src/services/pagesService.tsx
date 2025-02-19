@@ -25,17 +25,43 @@ export class PagesService {
   }
 
   async getPages(organizationId: string): Promise<PageNode[]> {
-    const headers = await this.getAuthHeader();
-    console.log('Fetching pages for org:', organizationId);
-    const response = await fetch(`${this.baseUrl}/pages?organizationId=${organizationId}`, {
+    try {
+      if (!organizationId) {
+        console.error('No organization ID provided');
+        throw new Error('Organization ID is required');
+      }
+  
+      const headers = await this.getAuthHeader();
+      console.log('Fetching pages for org:', organizationId);
+      
+      const response = await fetch(`${this.baseUrl}/pages?organizationId=${organizationId}`, {
         credentials: 'include',
         headers
-    });
-    if (!response.ok) throw new Error('Failed to fetch pages');
-    const data = await response.json();
-    console.log('Received pages:', data);
-    return data;
+      });
+      
+      if (response.status === 403) {
+        console.error('Access forbidden to organization:', organizationId);
+        throw new Error('Access denied to organization');
+      }
+      
+      if (!response.ok) {
+        console.error('Failed to fetch pages:', {
+          status: response.status,
+          statusText: response.statusText
+        });
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        throw new Error(`Failed to fetch pages: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('Received pages:', data);
+      return data;
+    } catch (error) {
+      console.error('Error in getPages:', error);
+      throw error;
     }
+  }
 
   async createPage(title: string, parentId: string | null, organizationId: string): Promise<PageNode> {
     const headers = await this.getAuthHeader();
@@ -165,5 +191,17 @@ async deleteImage(imageId: string, organizationId: string): Promise<void> {
     const data = await response.json();
     console.log(data.templates)
     return data.templates;
+  }
+
+  async toggleFavoriteTemplate(templateId: string): Promise<boolean> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/pages/templates/${templateId}/favorite`, {
+      method: 'POST',
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error('Failed to toggle template favorite');
+    const data = await response.json();
+    return data.isFavorite;
   }
 }

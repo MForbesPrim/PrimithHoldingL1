@@ -60,6 +60,7 @@ function App() {
                     <Route path="/rdm" element={<RdmHomePage />} />
                     <Route path="/rdm/projects" element={<ProjectsPage />} />
                     <Route path="/rdm/pages" element={<PagesDashboard />} />
+                    <Route path="/rdm/pages/templates" element={<PagesDashboard />} />
                     <Route path="/rdm/document-management" element={<DocumentManagementPage />} />
                   </Route>
                   <Route path="/login" element={<LoginPage />} />

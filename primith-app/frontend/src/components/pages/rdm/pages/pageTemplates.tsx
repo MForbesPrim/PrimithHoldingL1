@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Plus, Search, X } from 'lucide-react';
+import { ArrowLeft, Plus, Search, X, Star, StarOff } from 'lucide-react';
 import { PageNode } from '@/types/pages';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PagesService } from '@/services/pagesService';
@@ -17,10 +17,21 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
   const [templates, setTemplates] = useState<PageNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [filterFavorites, setFilterFavorites] = useState(false);
+
   const handleClearSearch = () => {
     setSearchQuery('');
   };
   const pagesService = new PagesService();
+
+  const getUniqueCategories = (templates: PageNode[]): string[] => {
+    return Array.from(new Set(
+      templates
+        .map(t => t.category)
+        .filter((category): category is string => category !== undefined && category !== null)
+    ));
+  };
 
   useEffect(() => {
     const loadTemplates = async () => {
@@ -44,10 +55,33 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
   }, [organizationId]);
 
   const filterTemplates = (templates: PageNode[]) => {
-    return templates.filter(template => 
-      template.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (template.category?.toLowerCase().includes(searchQuery.toLowerCase()))
-    );
+    return templates.filter(template => {
+      // Check if template matches search query
+      const matchesSearch = template.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (template.category?.toLowerCase().includes(searchQuery.toLowerCase()));
+      
+      // Check if template is favorited (when favorites filter is active)
+      const matchesFavorites = !filterFavorites || template.isFavorite;
+      
+      // Check if template matches selected categories
+      const matchesCategories = selectedCategories.length === 0 || 
+        (template.category && selectedCategories.includes(template.category));
+      
+      // Return true only if all conditions are met
+      return matchesSearch && matchesFavorites && matchesCategories;
+    });
+  };
+
+  const handleToggleFavorite = async (template: PageNode, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const isFavorite = await pagesService.toggleFavoriteTemplate(template.id);
+      setTemplates(prev => prev.map(t => 
+        t.id === template.id ? {...t, isFavorite} : t
+      ));
+    } catch (error) {
+      console.error('Failed to toggle favorite:', error);
+    }
   };
 
   const systemTemplates = templates.filter(t => t.status === 'system_template');
@@ -62,10 +96,23 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
       {templates.map(template => (
         <div
           key={template.id}
-          className="p-4 border rounded-lg hover:border-primary transition-colors relative group"
+          className="p-6 border rounded-lg hover:border-primary transition-colors relative group"
           onClick={() => setSelectedTemplate(template)}
         >
-          <h3 className="font-medium text-base cursor-pointer">{template.title}</h3>
+          <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={(e) => handleToggleFavorite(template, e)}
+            >
+              {template.isFavorite ? (
+                <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+              ) : (
+                <StarOff className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+          <h3 className="text-base cursor-pointer font-bold">{template.title}</h3>
           
           <div className="flex justify-between items-end mt-4">
             {template.category && (
@@ -133,6 +180,53 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
             ) : (
                 <Search className="absolute top-1/2 right-3 -translate-y-1/2 h-4 w-4 text-gray-400" />
             )}
+        </div>
+
+        {/* Category Badges */}
+            <div className="flex flex-wrap gap-2 mb-6">
+            <Button
+            variant={filterFavorites ? "default" : "outline"}
+            size="sm"
+            onClick={() => setFilterFavorites(!filterFavorites)}
+            className="rounded-full"
+            >
+            <Star className="h-4 w-4 mr-2" />
+            My Templates
+            </Button>
+            {getUniqueCategories(templates).map((category) => (
+                <Button
+                key={category}
+                variant={selectedCategories.includes(category) ? "default" : "outline"}
+                size="sm"
+                onClick={() => {
+                    setSelectedCategories(prev => 
+                    prev.includes(category)
+                        ? prev.filter(c => c !== category)
+                        : [...prev, category]
+                    );
+                }}
+                className="rounded-full"
+                >
+                {category}
+                </Button>
+            ))}
+            </div>
+
+            {/* Template Count Display */}
+            <div className="text-sm text-gray-500 mb-4">
+            {searchQuery || selectedCategories.length > 0 || filterFavorites ? (
+                <p>
+                Displaying <span className="font-bold">
+                    {filterTemplates(templates).length}
+                </span> of <span className="font-bold">
+                    {templates.length}
+                </span> templates
+                </p>
+            ) : (
+                <p>
+                Displaying all <span className="font-bold">{templates.length}</span> templates
+                </p>
+            )}
             </div>
 
         <Tabs defaultValue="system" className="w-full">
@@ -143,7 +237,9 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
               
               <TabsContent value="system">
                 {systemTemplates.length > 0 ? (
+                    <>
                     <TemplateGrid templates={filterTemplates(systemTemplates)} />
+                    </>
                 ) : (
                     <div className="text-gray-500 text-center p-8 border rounded-lg">
                     No system templates available
@@ -153,7 +249,9 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
 
                 <TabsContent value="custom">
                 {customTemplates.length > 0 ? (
+                    <>
                     <TemplateGrid templates={filterTemplates(customTemplates)} />
+                    </>
                 ) : (
                     <div className="text-gray-500 text-center p-8 border rounded-lg">
                     <p>No custom templates yet</p>
