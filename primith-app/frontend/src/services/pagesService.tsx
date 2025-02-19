@@ -1,5 +1,5 @@
 import AuthService from '@/services/auth'
-import { PageNode } from '@/types/pages'
+import { PageNode, FolderNode } from '@/types/pages'
 
 export class PagesService {
   private baseUrl = import.meta.env.VITE_API_URL;
@@ -204,4 +204,60 @@ async deleteImage(imageId: string, organizationId: string): Promise<void> {
     const data = await response.json();
     return data.isFavorite;
   }
+
+  async getFolders(organizationId: string): Promise<FolderNode[]> {
+    try {
+      console.log('PagesService: Fetching folders for org:', organizationId);
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/pages/folders?organizationId=${organizationId}`, {
+        credentials: 'include',
+        headers
+      });
+  
+      if (!response.ok) {
+        console.error('Failed to fetch folders:', response.status, response.statusText);
+        throw new Error('Failed to fetch folders');
+      }
+  
+      const data = await response.json();
+      console.log('PagesService: Received folder data:', data);
+      return data.folders;
+    } catch (error) {
+      console.error('Error in getFolders:', error);
+      throw error;
+    }
+  }
+
+    async createFolder(name: string, parentId: string | null, organizationId: string) {
+        const headers = await this.getAuthHeader();
+        const response = await fetch(`${this.baseUrl}/pages/folders`, {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        body: JSON.stringify({ name, parentId, organizationId })
+        });
+        if (!response.ok) throw new Error('Failed to create folder');
+        return response.json();
+    }
+
+    async updateFolder(folderId: string, name: string, parentId: string | null, organizationId: string) {
+        const headers = await this.getAuthHeader();
+        const response = await fetch(`${this.baseUrl}/pages/folders/${folderId}`, {
+            method: 'PUT',
+            credentials: 'include',
+            headers,
+            body: JSON.stringify({ name, parentId, organizationId })
+        });
+        if (!response.ok) throw new Error('Failed to update folder');
+    }
+
+    async deleteFolder(folderId: string) {
+        const headers = await this.getAuthHeader();
+        const response = await fetch(`${this.baseUrl}/pages/folders/${folderId}`, {
+            method: 'DELETE',
+            credentials: 'include',
+            headers
+        });
+        if (!response.ok) throw new Error('Failed to delete folder');
+    }
 }

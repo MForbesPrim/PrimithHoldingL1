@@ -4830,6 +4830,293 @@ func handleToggleFavoriteTemplate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func handleGetPagesFolders(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Starting handleGetFolders")
+	organizationId := r.URL.Query().Get("organizationId")
+	log.Printf("Fetching folders for organizationId: %s", organizationId)
+
+	// Modify the query to be simpler first to debug
+	rows, err := db.Query(`
+        SELECT 
+            f.id, 
+            f.name,
+            f.parent_id,
+            f.organization_id,
+            f.created_at,
+            f.updated_at,
+            f.deleted_at,
+            cb.email as created_by,    -- Join to get email
+            ub.email as updated_by,    -- Join to get email
+            db.email as deleted_by     -- Join to get email
+        FROM pages.folders f
+        LEFT JOIN auth.users cb ON f.created_by = cb.id
+        LEFT JOIN auth.users ub ON f.updated_by = ub.id
+        LEFT JOIN auth.users db ON f.deleted_by = db.id
+        WHERE f.organization_id = $1
+        AND f.deleted_at IS NULL
+        ORDER BY f.created_at DESC
+    `, organizationId)
+
+	if err != nil {
+		log.Printf("Error in folder query: %v", err)
+		http.Error(w, "Failed to fetch folders", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var folders []map[string]interface{}
+	for rows.Next() {
+		var folder struct {
+			ID             string
+			Name           string
+			ParentID       sql.NullString
+			OrganizationID string
+			CreatedAt      time.Time
+			UpdatedAt      time.Time
+			DeletedAt      sql.NullTime
+			CreatedBy      string
+			UpdatedBy      sql.NullString
+			DeletedBy      sql.NullString
+		}
+
+		err := rows.Scan(
+			&folder.ID,
+			&folder.Name,
+			&folder.ParentID,
+			&folder.OrganizationID,
+			&folder.CreatedAt,
+			&folder.UpdatedAt,
+			&folder.DeletedAt,
+			&folder.CreatedBy,
+			&folder.UpdatedBy,
+			&folder.DeletedBy,
+		)
+		if err != nil {
+			log.Printf("Error scanning folder row: %v", err)
+			continue
+		}
+
+		log.Printf("Found folder: ID=%s, Name=%s, ParentID=%v, CreatedBy=%s",
+			folder.ID,
+			folder.Name,
+			folder.ParentID.String,
+			folder.CreatedBy)
+
+		folderMap := map[string]interface{}{
+			"id":             folder.ID,
+			"name":           folder.Name,
+			"parentId":       folder.ParentID.String,
+			"organizationId": folder.OrganizationID,
+			"createdAt":      folder.CreatedAt,
+			"updatedAt":      folder.UpdatedAt,
+			"deletedAt":      folder.DeletedAt.Time,
+			"createdBy":      folder.CreatedBy,
+			"updatedBy":      folder.UpdatedBy.String,
+			"deletedBy":      folder.DeletedBy.String,
+		}
+		folders = append(folders, folderMap)
+	}
+
+	log.Printf("Returning %d folders: %+v", len(folders), folders)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"folders": folders,
+	})
+}
+
+func handleCreatePagesFolder(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var req struct {
+		Name           string  `json:"name"`
+		ParentID       *string `json:"parentId"`
+		OrganizationID string  `json:"organizationId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, req.OrganizationID).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Unauthorized", http.StatusForbidden)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err = db.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Create the folder
+	var folderID string
+	err = db.QueryRow(`
+        INSERT INTO pages.folders (
+            name,
+            parent_id,
+            organization_id,
+            created_by,
+            updated_by
+        ) VALUES ($1, $2, $3, $4, $4)
+        RETURNING id
+    `, req.Name, req.ParentID, req.OrganizationID, userId).Scan(&folderID)
+
+	if err != nil {
+		http.Error(w, "Failed to create folder", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":             folderID,
+		"name":           req.Name,
+		"parentId":       req.ParentID,
+		"organizationId": req.OrganizationID,
+	})
+}
+
+func handleUpdatePagesFolder(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	folderID := vars["id"]
+
+	var req struct {
+		Name           string  `json:"name"`
+		ParentID       *string `json:"parentId"`
+		OrganizationID string  `json:"organizationId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err := db.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	result, err := db.Exec(`
+        UPDATE pages.folders 
+        SET name = $1,
+            parent_id = $2,
+            updated_by = $3,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $4
+        AND organization_id = $5
+        AND EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            WHERE om.organization_id = $5
+            AND om.user_id = $3
+        )
+    `, req.Name, req.ParentID, userId, folderID, req.OrganizationID)
+
+	if err != nil {
+		http.Error(w, "Failed to update folder", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Folder not found or access denied", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleDeletePagesFolder(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	folderID := vars["id"]
+
+	// Get user ID
+	var userId string
+	err := db.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Soft delete folder and all its contents
+	_, err = tx.Exec(`
+        WITH RECURSIVE folder_tree AS (
+            SELECT id FROM pages.folders WHERE id = $1
+            UNION ALL
+            SELECT f.id FROM pages.folders f
+            INNER JOIN folder_tree ft ON f.parent_id = ft.id
+        )
+        UPDATE pages.folders 
+        SET deleted_at = CURRENT_TIMESTAMP,
+            deleted_by = $2
+        WHERE id IN (SELECT id FROM folder_tree)
+    `, folderID, userId)
+
+	if err != nil {
+		http.Error(w, "Failed to delete folder", http.StatusInternalServerError)
+		return
+	}
+
+	// Soft delete all pages in the folder tree
+	_, err = tx.Exec(`
+        WITH RECURSIVE folder_tree AS (
+            SELECT id FROM pages.folders WHERE id = $1
+            UNION ALL
+            SELECT f.id FROM pages.folders f
+            INNER JOIN folder_tree ft ON f.parent_id = ft.id
+        )
+        UPDATE pages.pages_content
+        SET deleted_at = CURRENT_TIMESTAMP,
+            deleted_by = $2
+        WHERE folder_id IN (SELECT id FROM folder_tree)
+    `, folderID, userId)
+
+	if err != nil {
+		http.Error(w, "Failed to delete folder contents", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -5013,6 +5300,10 @@ func main() {
 	r.HandleFunc("/pages/images/{id}", authMiddleware(handleDeletePageImage)).Methods("DELETE")
 	r.HandleFunc("/pages/templates", authMiddleware(handleListTemplates)).Methods("GET")
 	r.HandleFunc("/pages/templates/{id}/favorite", authMiddleware(handleToggleFavoriteTemplate)).Methods("POST")
+	r.HandleFunc("/pages/folders", authMiddleware(handleGetPagesFolders)).Methods("GET")
+	r.HandleFunc("/pages/folders", authMiddleware(handleCreatePagesFolder)).Methods("POST")
+	r.HandleFunc("/pages/folders/{id}", authMiddleware(handleUpdatePagesFolder)).Methods("PUT")
+	r.HandleFunc("/pages/folders/{id}", authMiddleware(handleDeletePagesFolder)).Methods("DELETE")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

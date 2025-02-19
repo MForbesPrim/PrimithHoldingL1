@@ -1,6 +1,7 @@
 export interface PageNode {
   id: string;
   parentId: string | null;
+  folderId: string | null;
   title: string;
   content: string;
   status: string;
@@ -16,4 +17,17 @@ export interface PageNode {
   isSystem?: boolean;
   templateType?: string;
   isFavorite?: boolean;
+}
+
+export interface FolderNode {
+  id: string;
+  name: string;
+  parentId: string | null;
+  organizationId: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+  createdBy: string;
+  updatedBy?: string;
+  deletedBy?: string;
 }

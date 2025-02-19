@@ -4,8 +4,9 @@ import {
   MoreHorizontal,
   ChevronRight,
   ChevronDown,
+  Folder,
 } from 'lucide-react';
-import { PageNode } from '@/types/pages';
+import { PageNode, FolderNode } from '@/types/pages';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -28,7 +29,6 @@ import {
   useReactTable,
   getSortedRowModel,
   SortingState,
-  Row,
 } from '@tanstack/react-table';
 import {
   Dialog,
@@ -42,85 +42,194 @@ import { Input } from '@/components/ui/input';
 
 interface PagesTableProps {
   pages: PageNode[];
+  folders: FolderNode[];
   onPageClick: (pageId: string) => void;
   onCreatePage: (parentId: string | null, title: string) => void;
   onDeletePage: (id: string) => Promise<void>;
   onRenamePage: (id: string, title: string) => void;
+  onFolderClick: (id: string) => void;
+  onCreateFolder: (organizationId?: string) => void;
+  onDeleteFolder: (id: string) => Promise<void>;
+  onRenameFolder: (id: string, title: string) => void;
+  currentFolderId: string | null;
+}
+
+type CombinedNode = {
+  id: string;
+  parentId: string | null;
+  title: string;
+  type: 'page' | 'folder';
+  createdBy: string;
+  updatedAt: string;
+  children: CombinedNode[];
+  organizationId?: string;
+  hasChildren: boolean;
+};
+
+function buildCombinedTree(pages: PageNode[], folders: FolderNode[]): CombinedNode[] {
+  const nodesMap = new Map<string, CombinedNode>();
+
+  // Add folders
+  folders.forEach(folder => {
+    nodesMap.set(folder.id, {
+      id: folder.id,
+      parentId: folder.parentId || null,
+      title: folder.name,
+      type: 'folder',
+      createdBy: folder.createdBy,
+      updatedAt: folder.updatedAt,
+      children: [],
+      organizationId: folder.organizationId,
+      hasChildren: false,
+    });
+  });
+
+  // Add pages
+  pages.forEach(page => {
+    nodesMap.set(page.id, {
+      id: page.id,
+      parentId: page.folderId || page.parentId || null,
+      title: page.title,
+      type: 'page',
+      createdBy: page.createdBy,
+      updatedAt: page.updatedAt,
+      children: [],
+      organizationId: page.organizationId,
+      hasChildren: false,
+    });
+  });
+
+  // Build tree and determine hasChildren
+  const roots: CombinedNode[] = [];
+  nodesMap.forEach((node) => {
+    if (node.parentId) {
+      const parent = nodesMap.get(node.parentId);
+      if (parent) {
+        parent.children.push(node);
+        parent.hasChildren = true;
+      } else {
+        roots.push(node);
+      }
+    } else {
+      roots.push(node);
+    }
+  });
+
+  return roots;
+}
+
+function findNodeById(nodes: CombinedNode[], id: string): CombinedNode | undefined {
+  for (const node of nodes) {
+    if (node.id === id) {
+      return node;
+    }
+    const found = findNodeById(node.children, id);
+    if (found) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function flattenTree(
+  nodes: CombinedNode[],
+  expanded: Set<string>,
+  depth = 0
+): (CombinedNode & { depth: number })[] {
+  let result: (CombinedNode & { depth: number })[] = [];
+  nodes.forEach((node) => {
+    result.push({ ...node, depth });
+    if (expanded.has(node.id) && node.hasChildren) {
+      result = result.concat(flattenTree(node.children, expanded, depth + 1));
+    }
+  });
+  return result;
 }
 
 export function PagesTable({
   pages,
+  folders,
   onPageClick,
   onCreatePage,
   onDeletePage,
   onRenamePage,
+  onFolderClick,
+  onCreateFolder,
+  onDeleteFolder,
+  onRenameFolder,
+  currentFolderId,
 }: PagesTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [renamePageId, setRenamePageId] = useState<string | null>(null);
+  const [renameTargetId, setRenameTargetId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
-
-  // New state for deletion confirmation
-  const [pageToDelete, setPageToDelete] = useState<string | null>(null);
+  const [isTargetFolder, setIsTargetFolder] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [isDeleting, _setIsDeleting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Helper function to check if a page has children.
-  const hasChildren = (pageId: string) =>
-    pages.some((page) => page.parentId === pageId);
-
-  // Toggle expanded/collapsed state for a page row.
-  const toggleExpand = (pageId: string) => {
-    const newExpanded = new Set(expandedRows);
-    if (newExpanded.has(pageId)) {
-      newExpanded.delete(pageId);
-    } else {
-      newExpanded.add(pageId);
+  const tree = useMemo(() => buildCombinedTree(pages, folders), [pages, folders]);
+  const currentNodes = useMemo(() => {
+    if (!currentFolderId) {
+      return tree; // Show root nodes when no folder is selected
     }
-    setExpandedRows(newExpanded);
-  };
+    const currentFolder = findNodeById(tree, currentFolderId);
+    return currentFolder ? currentFolder.children : [];
+  }, [tree, currentFolderId]);
+  const flatData = useMemo(() => flattenTree(currentNodes, expandedRows), [currentNodes, expandedRows]);
 
-  // Columns for the table.
-  const columns: ColumnDef<PageNode>[] = useMemo(
+  const columns: ColumnDef<CombinedNode & { depth: number }>[] = useMemo(
     () => [
       {
-        accessorKey: 'title',
-        header: 'Title',
-        cell: ({ row }: { row: Row<PageNode> }) => {
-          const depth = getPageDepth(row.original.id, pages);
-          const hasChildPages = hasChildren(row.original.id);
-          const isExpanded = expandedRows.has(row.original.id);
+        id: 'name',
+        header: 'Name',
+        cell: ({ row }) => {
+          const node = row.original;
+          const isExpanded = expandedRows.has(node.id);
+
           return (
-            <div
-              className="flex items-center"
-              style={{ paddingLeft: `${depth * 24}px` }}
-            >
-              {hasChildPages && (
+            <div className="flex items-center" style={{ paddingLeft: `${node.depth * 20}px` }}>
+              {node.hasChildren ? (
                 <Button
                   variant="ghost"
                   size="sm"
                   className="p-0 h-4 w-4 mr-2"
                   onClick={(e) => {
                     e.stopPropagation();
-                    toggleExpand(row.original.id);
+                    setExpandedRows(prev => {
+                      const next = new Set(prev);
+                      if (next.has(node.id)) {
+                        next.delete(node.id);
+                      } else {
+                        next.add(node.id);
+                      }
+                      return next;
+                    });
                   }}
                 >
-                  {isExpanded ? (
-                    <ChevronDown className="h-4 w-4" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4" />
-                  )}
+                  {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 </Button>
+              ) : (
+                <div className="w-6" />
               )}
-              {!hasChildPages && <div className="w-6" />}
-              <div
-                className="flex items-center cursor-pointer"
-                onClick={() => onPageClick(row.original.id)}
-              >
+              {node.type === 'folder' ? (
+                <Folder className="h-4 w-4 mr-2" />
+              ) : (
                 <FileText className="h-4 w-4 mr-2" />
-                {row.getValue('title')}
+              )}
+              <div
+                className="cursor-pointer"
+                onClick={() => {
+                  if (node.type === 'folder') {
+                    onFolderClick(node.id);
+                  } else {
+                    onPageClick(node.id);
+                  }
+                }}
+              >
+                {node.title}
               </div>
             </div>
           );
@@ -133,127 +242,141 @@ export function PagesTable({
       {
         accessorKey: 'updatedAt',
         header: 'Last Modified',
-        cell: ({ row }: { row: Row<PageNode> }) =>
-          new Date(row.getValue('updatedAt')).toLocaleDateString(),
+        cell: ({ row }) => {
+          const date = row.getValue('updatedAt');
+          return date ? new Date(date as string).toLocaleDateString() : '';
+        },
       },
       {
         id: 'actions',
-        cell: ({ row }: { row: Row<PageNode> }) => (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="h-8 w-8 p-0">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem
-                onClick={() => onCreatePage(row.original.id, 'New Page')}
-              >
-                Create Sub-page
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  // Trigger rename dialog (using a slight delay so the menu closes first)
-                  setRenamePageId(row.original.id);
-                  setNewName(row.original.title);
-                  console.log('Rename dialog triggered for:', row.original.id);
-                  setTimeout(() => {
-                    setIsRenameDialogOpen(true);
-                    console.log('Rename dialog opened.');
-                  }, 0);
-                }}
-              >
-                Rename
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                    setTimeout(() => {
-                    setPageToDelete(row.original.id);
-                    setIsDeleteDialogOpen(true);
-                    }, 0);
-                }}
-                className="text-red-600"
-                >
-                Delete
-                </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ),
+        cell: ({ row }) => {
+          const node = row.original;
+          return (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="h-8 w-8 p-0">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                {node.type === 'folder' ? (
+                  <>
+                    <DropdownMenuItem onClick={() => onCreateFolder(node.id)}>
+                      Create Subfolder
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onCreatePage(node.id, 'New Page')}>
+                      Create Subpage
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setRenameTargetId(node.id);
+                        setNewName(node.title);
+                        setIsTargetFolder(true);
+                        setIsRenameDialogOpen(true);
+                      }}
+                    >
+                      Rename
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setDeleteTargetId(node.id);
+                        setIsTargetFolder(true);
+                        setIsDeleteDialogOpen(true);
+                      }}
+                      className="text-red-600"
+                    >
+                      Delete
+                    </DropdownMenuItem>
+                  </>
+                ) : (
+                  <>
+                    <DropdownMenuItem onClick={() => onCreatePage(node.id, 'New Page')}>
+                      Create Sub-Page
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setRenameTargetId(node.id);
+                        setNewName(node.title);
+                        setIsTargetFolder(false);
+                        setIsRenameDialogOpen(true);
+                      }}
+                    >
+                      Rename
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setDeleteTargetId(node.id);
+                        setIsTargetFolder(false);
+                        setIsDeleteDialogOpen(true);
+                      }}
+                      className="text-red-600"
+                    >
+                      Delete
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          );
+        },
       },
     ],
-    [onPageClick, onCreatePage, onDeletePage, expandedRows, pages, onRenamePage]
+    [expandedRows, onPageClick, onFolderClick, onCreateFolder, onCreatePage]
   );
 
-  // Organize pages so that child pages are nested under their parent.
-  const data = useMemo(() => {
-    const organized = organizePages(pages);
-    return organized.filter((page) => {
-        if (!page.parentId) return true;
-        let currentPage = page;
-        const visitedWhileLoop = new Set<string>();
-      
-        while (currentPage.parentId) {
-          // Check for loops here
-          if (visitedWhileLoop.has(currentPage.id)) {
-            console.warn(
-              "Cycle detected in while loop. Page:", currentPage.id
-            );
-            return false; // or break, or do something else safe
-          }
-          visitedWhileLoop.add(currentPage.id);
-      
-          const parent = pages.find((p) => p.id === currentPage.parentId);
-          if (!parent || !expandedRows.has(parent.id)) {
-            return false;
-          }
-          currentPage = parent;
-        }
-        return true;
-      });
-      
-  }, [pages, expandedRows]);
+  const table = useReactTable({
+    data: flatData,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    onSortingChange: setSorting,
+    state: { sorting },
+  });
 
-    const table = useReactTable({
-        data,
-        columns,
-        getCoreRowModel: getCoreRowModel(),
-        getSortedRowModel: getSortedRowModel(),
-        onSortingChange: setSorting,
-        state: { sorting },
-    });
+  const handleRenameDialogOpenChange = (open: boolean) => {
+    setIsRenameDialogOpen(open);
+    if (!open) {
+      setRenameTargetId(null);
+      setNewName('');
+      setIsTargetFolder(false);
+    }
+  };
 
-  // Controlled dialog for renaming.
-    const handleRenameDialogOpenChange = (open: boolean) => {
-        console.log('Rename Dialog onOpenChange:', open);
-        setIsRenameDialogOpen(open);
-        if (!open) {
-        setRenamePageId(null);
-        setNewName('');
-        }
-    };  
+  const handleDeleteDialogOpenChange = (open: boolean) => {
+    setIsDeleteDialogOpen(open);
+    if (!open) {
+      setDeleteTargetId(null);
+      setDeleteError(null);
+      setIsTargetFolder(false);
+    }
+  };
 
-    const handleDeleteDialogOpenChange = (open: boolean) => {
-        setIsDeleteDialogOpen(open);
-        if (!open) {
-          setPageToDelete(null);
-          setDeleteError(null);
-        }
-      };
+  const handleRename = () => {
+    if (!renameTargetId || !newName.trim()) return;
+    if (isTargetFolder) {
+      onRenameFolder(renameTargetId, newName.trim());
+    } else {
+      onRenamePage(renameTargetId, newName.trim());
+    }
+    handleRenameDialogOpenChange(false);
+  };
 
-  // Delete confirmation handler.
-    const confirmDelete = async () => {
-        if (!pageToDelete) return;
-        
-        try {
-        await onDeletePage(pageToDelete);
-        // Only close the dialog after successful deletion
-        setIsDeleteDialogOpen(false);
-        setPageToDelete(null);
-        } catch (error) {
-        console.error('Failed to delete page:', error);
-        setDeleteError(error instanceof Error ? error.message : 'Failed to delete page');
-        }
-    };
+  const handleDelete = async () => {
+    if (!deleteTargetId) return;
+    setIsDeleting(true);
+    try {
+      if (isTargetFolder) {
+        await onDeleteFolder(deleteTargetId);
+      } else {
+        await onDeletePage(deleteTargetId);
+      }
+      handleDeleteDialogOpenChange(false);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'Failed to delete');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <>
@@ -266,10 +389,7 @@ export function PagesTable({
                   <TableHead key={header.id}>
                     {header.isPlaceholder
                       ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
+                      : flexRender(header.column.columnDef.header, header.getContext())}
                   </TableHead>
                 ))}
               </TableRow>
@@ -278,27 +398,18 @@ export function PagesTable({
           <TableBody>
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  data-state={row.getIsSelected() && 'selected'}
-                >
+                <TableRow key={row.id} data-state={row.getIsSelected() && 'selected'}>
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}
                 </TableRow>
               ))
             ) : (
               <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="h-24 text-center"
-                >
-                  No pages created.
+                <TableCell colSpan={columns.length} className="h-24 text-center">
+                  No items found.
                 </TableCell>
               </TableRow>
             )}
@@ -306,113 +417,51 @@ export function PagesTable({
         </Table>
       </div>
 
-      {/* Controlled Rename Dialog */}
+      {/* Rename Dialog */}
       <Dialog open={isRenameDialogOpen} onOpenChange={handleRenameDialogOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Rename Page</DialogTitle>
+            <DialogTitle>Rename {isTargetFolder ? 'Folder' : 'Page'}</DialogTitle>
             <DialogDescription>
-              Enter a new name for the page.
+              Enter a new name for the {isTargetFolder ? 'folder' : 'page'}.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <Input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="Enter page name"
+              placeholder={`Enter ${isTargetFolder ? 'folder' : 'page'} name`}
+              autoFocus
             />
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                console.log('Cancel clicked');
-                handleRenameDialogOpenChange(false);
-              }}
-            >
+            <Button variant="outline" onClick={() => handleRenameDialogOpenChange(false)}>
               Cancel
             </Button>
-            <Button
-              onClick={() => {
-                if (newName.trim() && renamePageId) {
-                  onRenamePage(renamePageId, newName.trim());
-                  handleRenameDialogOpenChange(false);
-                }
-              }}
-            >
-              Save
+            <Button onClick={handleRename}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDeleteDialogOpen} onOpenChange={handleDeleteDialogOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Deletion</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this {isTargetFolder ? 'folder' : 'page'}? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && <div className="text-red-500 text-sm">{deleteError}</div>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => handleDeleteDialogOpenChange(false)} disabled={isDeleting}>
+              Cancel
+            </Button>
+            <Button onClick={handleDelete} disabled={isDeleting}>
+              {isDeleting ? 'Deleting...' : 'Confirm'}
             </Button>
           </DialogFooter>
         </DialogContent>
-        </Dialog>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={handleDeleteDialogOpenChange}>
-        <DialogContent>
-            <DialogHeader>
-            <DialogTitle>Confirm Deletion</DialogTitle>
-            <DialogDescription>
-                Are you sure you want to delete this page? This action cannot be undone.
-            </DialogDescription>
-            </DialogHeader>
-            {deleteError && (
-            <div className="text-red-500 text-sm">{deleteError}</div>
-            )}
-            <DialogFooter>
-            <Button
-                variant="outline"
-                onClick={() => handleDeleteDialogOpenChange(false)}
-                disabled={isDeleting}
-            >
-                Cancel
-            </Button>
-            <Button 
-                onClick={confirmDelete}
-                disabled={isDeleting}
-            >
-                {isDeleting ? 'Deleting...' : 'Confirm'}
-            </Button>
-            </DialogFooter>
-        </DialogContent>
-        </Dialog>
+      </Dialog>
     </>
   );
-}
-
-// Helper function to organize pages hierarchically.
-function organizePages(pages: PageNode[]): PageNode[] {
-    const organized: PageNode[] = [];
-    const visited = new Set<string>();
-  
-    function addPage(page: PageNode, depth: number) {
-      // If we’ve already visited this page, we have a cycle
-      if (visited.has(page.id)) {
-        console.warn(`Circular reference detected. Page ID: ${page.id}`);
-        return;
-      }
-      visited.add(page.id);
-  
-      organized.push(page);
-  
-      const children = pages.filter(p => p.parentId === page.id);
-      children.sort((a, b) => a.title.localeCompare(b.title));
-      children.forEach(child => addPage(child, depth + 1));
-    }
-  
-    const rootPages = pages.filter(p => !p.parentId);
-    rootPages.sort((a, b) => a.title.localeCompare(b.title));
-    rootPages.forEach(page => addPage(page, 0));
-  
-    return organized;
-  }
-
-// Helper function to determine a page's depth in the hierarchy.
-function getPageDepth(pageId: string, pages: PageNode[]): number {
-  let depth = 0;
-  let currentPage = pages.find((p) => p.id === pageId);
-  while (currentPage?.parentId) {
-    depth++;
-    currentPage = pages.find((p) => p.id === currentPage?.parentId);
-  }
-  return depth;
 }

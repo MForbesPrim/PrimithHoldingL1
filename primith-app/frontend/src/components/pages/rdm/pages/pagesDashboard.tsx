@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { PageTree } from './pagesTree';
-import { PageNode } from "@/types/pages";
+import { PageNode, FolderNode } from "@/types/pages";
 import PageEditor from './pageEditor';
 import { Button } from '@/components/ui/button';
-import { Plus, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react';
+import { ArrowLeft, Plus, PanelLeftClose, PanelLeftOpen, Folder, X } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -25,6 +25,14 @@ export function PagesDashboard() {
   const navigate = useNavigate();
   const location = useLocation();
   const [pages, setPages] = useState<PageNode[]>([]);
+  const [folders, setFolders] = useState<FolderNode[]>([]);
+  const [showNewFolderDialog, setShowNewFolderDialog] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [renameFolderDialog, setRenameFolderDialog] = useState<{ open: boolean; folder: FolderNode | null }>({
+    open: false,
+    folder: null
+  });
   const [loading, setLoading] = useState(true);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [showNewPageDialog, setShowNewPageDialog] = useState(false);
@@ -38,6 +46,7 @@ export function PagesDashboard() {
   const [newTemplateName, setNewTemplateName] = useState("");
   const { selectedOrgId } = useOrganization();
   const pagesService = new PagesService();
+  const [folderHistory, setFolderHistory] = useState<string[]>([])
 
   const handleTemplatesClick = () => {
     navigate('/rdm/pages/templates');
@@ -53,13 +62,104 @@ export function PagesDashboard() {
   useEffect(() => {
     if (selectedOrgId) {
       loadPages();
+      loadFolders();
     }
   }, [selectedOrgId]);
+
+  const handleBackClick = () => {
+    if (folderHistory.length > 0) {
+      const previousFolder = folderHistory[folderHistory.length - 1];
+      setFolderHistory(prev => prev.slice(0, -1));
+      setCurrentFolderId(previousFolder);
+    } else {
+      setCurrentFolderId(null);
+    }
+  };
 
   useEffect(() => {
     // Set showTemplates based on URL path
     setShowTemplates(location.pathname === '/rdm/pages/templates');
   }, [location.pathname]);
+
+  const handleCreateFolder = async (parentId: string | null = null) => {
+    const organizationId = selectedOrgId;
+    
+    if (!organizationId) return;
+  
+    try {
+      const newFolder = await pagesService.createFolder(
+        newFolderName,
+        parentId || currentFolderId, 
+        organizationId
+      );
+      
+      // Update folder history if creating a subfolder
+      if (parentId || currentFolderId) {
+        setFolderHistory(prev => [...prev, currentFolderId || '']);
+      }
+      
+      // Update folders and reset dialog
+      setFolders([...folders, newFolder]);
+      setShowNewFolderDialog(false);
+      setNewFolderName("");
+    } catch (error) {
+      console.error('Failed to create folder:', error);
+    }
+  };
+
+const handleRenameFolder = async (folderId: string, newName: string) => {
+  if (!selectedOrgId) return;
+  try {
+    await pagesService.updateFolder(
+      folderId, 
+      newName, 
+      renameFolderDialog.folder?.parentId || null, 
+      selectedOrgId
+    );
+    
+    // Update local state
+    setFolders(folders.map(folder => 
+      folder.id === folderId ? { ...folder, name: newName } : folder
+    ));
+    
+    // Close rename dialog
+    setRenameFolderDialog({ open: false, folder: null });
+  } catch (error) {
+    console.error('Failed to rename folder:', error);
+  }
+  };
+
+  const handleDeleteFolder = async (folderId: string) => {
+    if (!selectedOrgId) return;
+    try {
+      await pagesService.deleteFolder(folderId);
+      
+      // Update local state
+      setFolders(folders.filter(folder => folder.id !== folderId));
+      
+      // Also remove or update any pages that were in this folder
+      setPages(pages.filter(page => page.folderId !== folderId));
+    } catch (error) {
+      console.error('Failed to delete folder:', error);
+    }
+  };
+
+  const loadFolders = async () => {
+    if (!selectedOrgId) return;
+    try {
+      const fetchedFolders = await pagesService.getFolders(selectedOrgId);
+      setFolders(fetchedFolders);
+    } catch (error) {
+      console.error('Failed to load folders:', error);
+    }
+  };
+
+  const handleFolderClick = (folderId: string) => {
+    if (currentFolderId) {
+      setFolderHistory(prev => [...prev, currentFolderId]);
+    }
+    setCurrentFolderId(folderId);
+  };
 
   const loadPages = async () => {
     if (!selectedOrgId) return;
@@ -343,32 +443,84 @@ export function PagesDashboard() {
                 />
               ) : (
           // Show Pages Dashboard when no page is selected
-          <div className="mx-4">
-            <div className="flex justify-between items-center mb-4">
-              <h1 className="text-2xl font-bold">Pages</h1>
-              <div className="flex justify-between items-center mb-4">
-              <Button
-                onClick={handleTemplatesClick}
-                className="px-4 mr-4"
-              >
-                Templates
-              </Button>
-              <Button
-                onClick={() => handleCreatePageClick(null)}
-                className="px-4"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Create Page
-              </Button>
-              </div>
-            </div>
-            <PagesTable
-              pages={pages}
-              onPageClick={setSelectedPageId}
-              onCreatePage={handleCreatePageClick}
-              onDeletePage={handleDeletePage}
-              onRenamePage={handleRenamePage}
-            />
+          <div className="flex-1 p-4">
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex items-center gap-2">
+                    {currentFolderId ? (
+                      <>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={handleBackClick}
+                          className="gap-2 border border-gray-300"
+                        >
+                          <ArrowLeft className="h-4 w-4" />
+                          Previous
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setCurrentFolderId(null);
+                            setFolderHistory([]);
+                          }}
+                          className="gap-2 border border-gray-300"
+                        >
+                          Dashboard
+                        </Button>
+                      </>
+                    ) : null}
+                    <h1 className="text-2xl font-bold ml-2">Pages</h1>
+                  </div>
+                  
+                  <div className="flex justify-between items-center mb-4">
+                    <Button
+                      onClick={handleTemplatesClick}
+                      className="px-4 mr-4"
+                    >
+                      Templates
+                    </Button>
+                    <Button
+                      onClick={() => setShowNewFolderDialog(true)}
+                      className="px-4 mr-4"
+                    >
+                      <Folder className="h-4 w-4 mr-1" />
+                      Create Folder
+                    </Button>
+                    <Button
+                      onClick={() => handleCreatePageClick(null)}
+                      className="px-4"
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      Create Page
+                    </Button>
+                  </div>
+                </div>
+                <PagesTable
+                  pages={pages}
+                  folders={folders}
+                  onFolderClick={handleFolderClick}
+                  currentFolderId={currentFolderId}
+                  onPageClick={setSelectedPageId}
+                  onCreatePage={handleCreatePageClick}
+                  onDeletePage={handleDeletePage}
+                  onRenamePage={handleRenamePage}
+                  onCreateFolder={(parentId) => {
+                    setNewFolderName("");
+                    setShowNewFolderDialog(true);
+                    if (parentId) {
+                      setCurrentFolderId(parentId);
+                    }
+                  }}
+                  onRenameFolder={(id, name) => {
+                    setNewFolderName(name);
+                    setRenameFolderDialog({ 
+                      open: true, 
+                      folder: (folders ?? []).find(f => f.id === id) || null 
+                    });
+                  }}
+                  onDeleteFolder={handleDeleteFolder}
+                />
           </div>
         )}
       </div>
@@ -447,6 +599,83 @@ export function PagesDashboard() {
               disabled={!newTemplateName.trim()}
             >
               Create Page
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* New Folder Dialog */}
+      <Dialog open={showNewFolderDialog} onOpenChange={setShowNewFolderDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Folder</DialogTitle>
+            <DialogDescription>
+              Enter a name for the new folder.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              placeholder="Enter folder name"
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowNewFolderDialog(false);
+                setNewFolderName("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={(e) => {
+                e.preventDefault(); // Prevent default form submission
+                handleCreateFolder(); // Call without parameters
+              }}
+              disabled={!newFolderName.trim()}
+            >
+              Create Folder
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename Folder Dialog */}
+      <Dialog 
+        open={renameFolderDialog.open} 
+        onOpenChange={(open) => setRenameFolderDialog({ open, folder: null })}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename Folder</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              placeholder="Enter new folder name"
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRenameFolderDialog({ open: false, folder: null })}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (renameFolderDialog.folder) {
+                  handleRenameFolder(renameFolderDialog.folder.id, newFolderName);
+                }
+              }}
+              disabled={!newFolderName.trim()}
+            >
+              Rename
             </Button>
           </DialogFooter>
         </DialogContent>
