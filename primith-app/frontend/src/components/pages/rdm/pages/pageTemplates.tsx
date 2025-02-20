@@ -7,6 +7,7 @@ import { PagesService } from '@/services/pagesService';
 import { Input } from '@/components/ui/input';
 import { useToast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
+import { useNavigate } from 'react-router-dom';
 
 interface TemplateProps {
   organizationId: string;
@@ -15,37 +16,42 @@ interface TemplateProps {
 }
 
 export function Templates({ organizationId, onCreatePage, onClose }: TemplateProps) {
-  const [selectedTemplate, setSelectedTemplate] = useState<PageNode | null>(null);
-  const [templates, setTemplates] = useState<PageNode[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [filterFavorites, setFilterFavorites] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [editForm, setEditForm] = useState({
-    title: '',
-    description: '',
-    category: '',
-    content: ''
-  });
+    const navigate = useNavigate();
+    const [selectedTemplate, setSelectedTemplate] = useState<PageNode | null>(null);
+    const [templates, setTemplates] = useState<PageNode[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+    const [filterFavorites, setFilterFavorites] = useState(false);
+    const [editMode, setEditMode] = useState(false);
+    const [editForm, setEditForm] = useState({
+        title: '',
+        description: '',
+        category: '',
+        content: ''
+    });
 
-  const { toast } = useToast();
-  const pagesService = new PagesService();
+    const { toast } = useToast();
+    const pagesService = new PagesService();
 
-  useEffect(() => {
-    if (selectedTemplate && editMode) {
-      setEditForm({
-        title: selectedTemplate.title,
-        description: selectedTemplate.description || '',
-        category: selectedTemplate.category || '',
-        content: selectedTemplate.content
-      });
-    }
-  }, [selectedTemplate, editMode]);
+    useEffect(() => {
+        if (selectedTemplate && editMode) {
+        setEditForm({
+            title: selectedTemplate.title,
+            description: selectedTemplate.description || '',
+            category: selectedTemplate.category || '',
+            content: selectedTemplate.content
+        });
+        }
+    }, [selectedTemplate, editMode]);
 
-  const handleClearSearch = () => {
-    setSearchQuery('');
-  };
+    const handleClearSearch = () => {
+        setSearchQuery('');
+    };
+
+    const handleCreateTemplateClick = () => {
+        navigate('/rdm/create-template');
+      };
 
   const getUniqueCategories = (templates: PageNode[]): string[] => {
     return Array.from(new Set(
@@ -261,9 +267,12 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
               </Button>
               <h1 className="text-2xl font-bold">Templates</h1>
             </div>
-            <Button onClick={() => {/* TODO: Implement create template */}}>
-              <Plus className="h-4 w-4 mr-2" />
-              Create Template
+            <Button
+            onClick={handleCreateTemplateClick}
+            className="px-4"
+            >
+            <Plus className="h-4 w-4 mr-2" />
+            Create Template
             </Button>
           </div>
 

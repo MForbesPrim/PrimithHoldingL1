@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useEditor, EditorContent, Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import TextStyle from '@tiptap/extension-text-style';
@@ -24,7 +24,7 @@ import { Expand } from './TipTapExtensionsExtra/Expand';
 import { EditorView } from 'prosemirror-view';
 import { Plugin } from 'prosemirror-state';
 import { MouseEvent } from 'react';
-import { MoreHorizontal, Minus, Info, Calendar, ChevronRight, Plus, Check, ChevronsUpDown, X } from 'lucide-react';
+import { MoreHorizontal, Minus, Info, Calendar, ChevronRight, Plus, Check, ChevronsUpDown, X, Edit } from 'lucide-react';
 import {
   Undo2,
   Redo2,
@@ -91,13 +91,27 @@ import { Textarea } from '@/components/ui/textarea';
 
 interface PageEditorProps {
   page: PageNode;
-  onSave: (id: string, content: string) => void;
+  onSave: (
+    id: string, 
+    content: string, 
+    templateDetails?: {
+      title: string;
+      description: string;
+      categoryId: number | null;
+    }
+  ) => void;
   onRename: (id: string, newTitle: string) => void;
   /** 
    * If true, the editor calls onSave on every update (auto-save).
    * If false, user must click 'Save' in the toolbar to save changes.
    */
   autoSave?: boolean; 
+  templateMode?: boolean;
+  onUpdateTemplateDetails?: (id: string, details: {
+    title: string;
+    description: string;
+    categoryId: number;
+  }) => Promise<void>;
 }
 
 interface TableOptionsProps {
@@ -359,7 +373,8 @@ const PageEditor = ({
   page,
   onSave,
   onRename,
-  autoSave = false, // Default to false if not provided
+  autoSave = false,
+  templateMode = false,
 }: PageEditorProps) => {
   const { toast } = useToast();
   const pagesService = new PagesService();
@@ -370,15 +385,17 @@ const PageEditor = ({
   const { selectedOrgId } = useOrganization();
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [templateName, setTemplateName] = useState("");
-  const [templateCategory, setTemplateCategory] = useState("");
+  const [_templateCategory, setTemplateCategory] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
-  const [isCreatingTemplate, setIsCreatingTemplate] = useState(false);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isCreatingTemplate, _setIsCreatingTemplate] = useState(false);
+  const [isDialogOpen, _setIsDialogOpen] = useState(false);
   const [categories, setCategories] = useState<TemplateCategory[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [contentWidth, setContentWidth] = useState('auto');
+  const [currentTitle, setCurrentTitle] = useState(page.title);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -731,6 +748,12 @@ const PageEditor = ({
     };
     loadCategories();
   }, []);
+
+  const [stagingTemplateDetails, setStagingTemplateDetails] = useState({
+    title: page.title,
+    description: page.description || '',
+    categoryId: page.categoryId || null
+  });
   
   const LoadingOverlay = () => (
     <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-50">
@@ -814,103 +837,52 @@ const PageEditor = ({
     };
   }, [isDialogOpen]); // Cleanup when dialog closes
   
-  const handleCloseTemplateDialog = () => {
-    setIsDialogOpen(false);
+  // const handleCloseTemplateDialog = () => {
+  //   setIsDialogOpen(false);
   
-    // Ensure editor resets when closing the dialog
-    if (editorRef.current) {
-      editorRef.current.commands.clearContent();
-      editorRef.current.commands.setContent('');
-      editorRef.current.destroy();
-      editorRef.current = null;
-    }
-  };
+  //   // Ensure editor resets when closing the dialog
+  //   if (editorRef.current) {
+  //     editorRef.current.commands.clearContent();
+  //     editorRef.current.commands.setContent('');
+  //     editorRef.current.destroy();
+  //     editorRef.current = null;
+  //   }
+  // };
 
-  const handleCreateTemplate = useCallback(async () => {
-    if (!selectedOrgId) {
-      toast({ title: "Error", description: "No organization selected", variant: "destructive" });
-      return;
-    }
-    if (!editor) {
-      toast({ title: "Error", description: "Editor not initialized", variant: "destructive" });
-      return;
-    }
-    setIsCreatingTemplate(true);
-    console.log('handleCreateTemplate starting:', { templateName, templateCategory, templateDescription });
-    if (!selectedCategoryId) {
-      toast({ title: "Error", description: "Please select a category", variant: "destructive" });
-      return;
-    }
-    try {
-      await pagesService.createTemplate(
-        templateName,
-        editor.getHTML(),
-        templateDescription,
-        selectedCategoryId,
-        selectedOrgId
-      );
-      toast({ title: "Success", description: "Template created successfully" });
-      handleCloseTemplateDialog();
-    } catch (error) {
-      console.error('Failed to create template:', error);
-      toast({ title: "Error", description: "Failed to create template", variant: "destructive" });
-    } finally {
-      setIsCreatingTemplate(false);
-      console.log('handleCreateTemplate completed');
-    }
-  }, [templateName, templateCategory, templateDescription, editor, selectedCategoryId, selectedOrgId, pagesService, handleCloseTemplateDialog]);
-  
-//   const templateDialog = useMemo(() => (
-//     <Dialog open={showTemplateDialog} onOpenChange={handleCloseTemplateDialog}>
-//       <DialogContent>
-//           <DialogHeader>
-//             <DialogTitle>Save as Template</DialogTitle>
-//             <DialogDescription>
-//               Create a reusable template from this page.
-//             </DialogDescription>
-//           </DialogHeader>
-//           <div className="py-4 space-y-4">
-//             <div>
-//               <label className="block text-sm font-medium mb-1">Template Name</label>
-//               <Input 
-//                 value={templateName}
-//                 onChange={(e) => setTemplateName(e.target.value)}
-//                 placeholder="Enter template name"
-//                 autoFocus
-//               />
-//             </div>
-//             <div>
-//               <label className="block text-sm font-medium mb-1">Category (optional)</label>
-//               <Input
-//                 value={templateCategory}
-//                 onChange={(e) => setTemplateCategory(e.target.value)} 
-//                 placeholder="Enter category"
-//               />
-//             </div>
-//             <div>
-//               <label className="block text-sm font-medium mb-1">Description (optional)</label>
-//               <Textarea
-//                 value={templateDescription}
-//                 onChange={(e) => setTemplateDescription(e.target.value)}
-//                 placeholder="Enter template description"
-//               />
-//             </div>
-//           </div>
-//           <DialogFooter>
-//         <Button variant="outline" onClick={handleCloseTemplateDialog}>
-//           Cancel
-//         </Button>
-//         <Button 
-//           onClick={handleCreateTemplate}
-//           disabled={!templateName.trim()}
-//         >
-//           Create Template
-//         </Button>
-//       </DialogFooter>
-//     </DialogContent>
-//   </Dialog>
-// ), [showTemplateDialog, templateName, templateCategory, templateDescription, handleCloseTemplateDialog, handleCreateTemplate]);
-  
+  // const handleCreateTemplate = useCallback(async () => {
+  //   if (!selectedOrgId) {
+  //     toast({ title: "Error", description: "No organization selected", variant: "destructive" });
+  //     return;
+  //   }
+  //   if (!editor) {
+  //     toast({ title: "Error", description: "Editor not initialized", variant: "destructive" });
+  //     return;
+  //   }
+  //   setIsCreatingTemplate(true);
+  //   console.log('handleCreateTemplate starting:', { templateName, templateCategory, templateDescription });
+  //   if (!selectedCategoryId) {
+  //     toast({ title: "Error", description: "Please select a category", variant: "destructive" });
+  //     return;
+  //   }
+  //   try {
+  //     await pagesService.createTemplate(
+  //       templateName,
+  //       editor.getHTML(),
+  //       templateDescription,
+  //       selectedCategoryId,
+  //       selectedOrgId
+  //     );
+  //     toast({ title: "Success", description: "Template created successfully" });
+  //     handleCloseTemplateDialog();
+  //   } catch (error) {
+  //     console.error('Failed to create template:', error);
+  //     toast({ title: "Error", description: "Failed to create template", variant: "destructive" });
+  //   } finally {
+  //     setIsCreatingTemplate(false);
+  //     console.log('handleCreateTemplate completed');
+  //   }
+  // }, [templateName, templateCategory, templateDescription, editor, selectedCategoryId, selectedOrgId, pagesService, handleCloseTemplateDialog]);
+    
   const handleImageContextMenu = (event: MouseEvent<HTMLElement>, imageId: string) => {
     console.log("handleImageContextMenu called");
     event.preventDefault();
@@ -938,6 +910,7 @@ const PageEditor = ({
         setTemplateName("");
         setTemplateCategory("");
         setTemplateDescription("");
+        setIsEditing(false);
       }
     }, 0);
   };
@@ -1154,16 +1127,18 @@ const PageEditor = ({
 
       <div className="w-[90%] mx-auto mb-5 mt-1 pb-8">
         <div className="flex justify-between items-start mb-4">
-          <h1 className="text-2xl font-bold text-gray-900">{page.title}</h1>
-          <div className="text-right">
-            <div className="text-sm text-gray-600">
-              Created by {page.createdBy}
-            </div>
-            <div className="text-xs text-gray-400">
-              Last updated: {new Date(page.updatedAt).toLocaleString()}
-            </div>
+        <h2 className="text-sm font-medium text-gray-800">{currentTitle}</h2>
+        {!templateMode && (
+        <div className="text-right">
+          <div className="text-sm text-gray-600">
+            Created by {page.createdBy}
+          </div>
+          <div className="text-xs text-gray-400">
+            Last updated: {new Date(page.updatedAt).toLocaleString()}
           </div>
         </div>
+        )}
+      </div>
 
         {/* Editor Wrapper */}
         <div className="border border-gray-200 rounded-lg" onClick={closeAllMenus}>
@@ -1506,7 +1481,37 @@ const PageEditor = ({
               {openMenu === 'moreElements' && <MoreElementsMenu editor={editor} />}
             </div>
 
-            {/* Regular Save Button */}
+          {/* Save Button - show differently for template mode */}
+          {templateMode ? (
+            <div className="flex items-center gap-1">
+              <TooltipButton
+                title="Save Template"
+                onClick={() => {
+                  setIsEditing(false); // Ensure isEditing is false for confirm save
+                  setShowTemplateDialog(true);
+                  setTemplateName(stagingTemplateDetails.title || page.title);
+                  setTemplateDescription(stagingTemplateDetails.description || '');
+                  setSelectedCategoryId(stagingTemplateDetails.categoryId);
+                }}
+              >
+                <Save className="w-4 h-4 text-gray-600" />
+              </TooltipButton>
+
+              <TooltipButton
+                title="Template Details"
+                onClick={() => {
+                  setIsEditing(true);
+                  setShowTemplateDialog(true);
+                  setTemplateName(stagingTemplateDetails.title || page.title);
+                  setTemplateDescription(stagingTemplateDetails.description || '');
+                  setSelectedCategoryId(stagingTemplateDetails.categoryId);
+                }}
+              >
+                <Edit className="w-4 h-4 text-gray-600" />
+              </TooltipButton>
+            </div>
+          ) : (
+          <>
             {!autoSave && (
               <TooltipButton
                 title="Save"
@@ -1547,7 +1552,7 @@ const PageEditor = ({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem 
-                  className="cursor-pointer"
+                    className="cursor-pointer"
                     onClick={async () => {
                       setIsGeneratingPDF(true);
                       try {
@@ -1561,23 +1566,25 @@ const PageEditor = ({
                     <span>Export PDF</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem 
-                      className="cursor-pointer" 
-                      onClick={() => {
-                        setTimeout(() => {
-                          setShowTemplateDialog(true);
-                          setTemplateName("");
-                          setTemplateCategory("");
-                          setTemplateDescription("");
-                        }, 0);
-                      }}
-                    >
-                      <Save className="w-4 h-4 mr-2" />
-                      <span>Save as Template</span>
-                    </DropdownMenuItem>
+                    className="cursor-pointer" 
+                    onClick={() => {
+                      setTimeout(() => {
+                        setShowTemplateDialog(true);
+                        setTemplateName("");
+                        setTemplateCategory("");
+                        setTemplateDescription("");
+                      }, 0);
+                    }}
+                  >
+                    <Save className="w-4 h-4 mr-2" />
+                    <span>Save as Template</span>
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-          </div>
+          </>
+        )}
+        </div>
 
           {/* Editor Content */}
           <div className="relative">
@@ -1725,12 +1732,18 @@ const PageEditor = ({
             </DialogContent>
           </Dialog>
 
-          {/* Template Creation Dialog */}
+          {/* Template Creation/Edit Dialog */}
           <Dialog open={showTemplateDialog} onOpenChange={handleTemplateDialogOpenChange}>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Save as Template</DialogTitle>
-                <DialogDescription>Create a reusable template from this page.</DialogDescription>
+                <DialogTitle>
+                  {templateMode ? (isEditing ? 'Edit Template Details' : 'Confirm Save Template') : 'Save as Template'}
+                </DialogTitle>
+                <DialogDescription>
+                  {templateMode ? (
+                    isEditing ? 'Update template information.' : 'Confirm template details before saving.'
+                  ) : 'Create a reusable template from this page.'}
+                </DialogDescription>
               </DialogHeader>
               <div className="py-4 space-y-4">
                 <div>
@@ -1805,11 +1818,29 @@ const PageEditor = ({
                   Cancel
                 </Button>
                 <Button 
-                  onClick={handleCreateTemplate}
-                  disabled={!templateName.trim() || !selectedCategoryId || isCreatingTemplate}
-                >
-                  {isCreatingTemplate ? "Creating..." : "Create Template"}
-                </Button>
+                onClick={() => {
+                  if (isEditing) {
+                    // For Edit mode - just update staging details
+                    setStagingTemplateDetails({
+                      title: templateName,
+                      description: templateDescription,
+                      categoryId: selectedCategoryId
+                    });
+                    setCurrentTitle(templateName);
+                  } else {
+                    // For Save mode - actually save the template
+                    onSave(page.id, editor.getHTML(), {
+                      title: templateName,
+                      description: templateDescription,
+                      categoryId: selectedCategoryId
+                    });
+                  }
+                  handleTemplateDialogOpenChange(false);
+                }}
+                disabled={!templateName.trim()}
+              >
+                {isEditing ? 'Update Details' : 'Save Template'}
+              </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
