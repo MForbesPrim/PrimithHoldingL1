@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditor, EditorContent, Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import TextStyle from '@tiptap/extension-text-style';
@@ -24,7 +24,7 @@ import { Expand } from './TipTapExtensionsExtra/Expand';
 import { EditorView } from 'prosemirror-view';
 import { Plugin } from 'prosemirror-state';
 import { MouseEvent } from 'react';
-import { MoreHorizontal, Minus, Info, Calendar, ChevronRight } from 'lucide-react';
+import { MoreHorizontal, Minus, Info, Calendar, ChevronRight, Plus, Check, ChevronsUpDown, X } from 'lucide-react';
 import {
   Undo2,
   Redo2,
@@ -58,13 +58,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
 } from "@/components/ui/context-menu";
-import { PageNode } from "@/types/pages";
+import { PageNode, TemplateCategory } from "@/types/pages";
 import { PageBreak } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/PageBreak';
 import { Indent as IndentExtension } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/Indent';
 import SearchAndReplace from '@/components/pages/rdm/pages/TipTapExtensionsExtra/SearchAndReplace';
@@ -85,6 +87,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 
 interface PageEditorProps {
   page: PageNode;
@@ -365,6 +368,25 @@ const PageEditor = ({
   const [isLinkActive, setIsLinkActive] = useState(false);
   const [isRefreshingImages, setIsRefreshingImages] = useState(false);
   const { selectedOrgId } = useOrganization();
+  const [showTemplateDialog, setShowTemplateDialog] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateCategory, setTemplateCategory] = useState("");
+  const [templateDescription, setTemplateDescription] = useState("");
+  const [isCreatingTemplate, setIsCreatingTemplate] = useState(false);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [categories, setCategories] = useState<TemplateCategory[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
+  const editorRef = useRef<Editor | null>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [contentWidth, setContentWidth] = useState('auto');
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (isDropdownOpen && triggerRef.current) {
+      setContentWidth(triggerRef.current ? `${triggerRef.current.offsetWidth}px` : 'auto');
+    }
+  }, [isDropdownOpen]);
+
   const [imageContextMenu, setImageContextMenu] = useState<ImageContextMenuState>({
     visible: false,
     x: 0,
@@ -692,8 +714,24 @@ const PageEditor = ({
       return () => clearInterval(interval);
     }
   }, [editor, page.id, selectedOrgId]);
-  
 
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const fetchedCategories = await pagesService.getTemplateCategories();
+        setCategories(fetchedCategories);
+      } catch (error) {
+        console.error('Failed to load categories:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load template categories",
+          variant: "destructive"
+        });
+      }
+    };
+    loadCategories();
+  }, []);
+  
   const LoadingOverlay = () => (
     <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-50">
       <div className="flex flex-col items-center gap-2">
@@ -763,6 +801,115 @@ const PageEditor = ({
       });
     }
   };
+
+  useEffect(() => {
+    // Store editor instance in ref to avoid re-initialization issues
+    editorRef.current = editor;
+  
+    return () => {
+      if (editorRef.current) {
+        editorRef.current.destroy();
+        editorRef.current = null;
+      }
+    };
+  }, [isDialogOpen]); // Cleanup when dialog closes
+  
+  const handleCloseTemplateDialog = () => {
+    setIsDialogOpen(false);
+  
+    // Ensure editor resets when closing the dialog
+    if (editorRef.current) {
+      editorRef.current.commands.clearContent();
+      editorRef.current.commands.setContent('');
+      editorRef.current.destroy();
+      editorRef.current = null;
+    }
+  };
+
+  const handleCreateTemplate = useCallback(async () => {
+    if (!selectedOrgId) {
+      toast({ title: "Error", description: "No organization selected", variant: "destructive" });
+      return;
+    }
+    if (!editor) {
+      toast({ title: "Error", description: "Editor not initialized", variant: "destructive" });
+      return;
+    }
+    setIsCreatingTemplate(true);
+    console.log('handleCreateTemplate starting:', { templateName, templateCategory, templateDescription });
+    if (!selectedCategoryId) {
+      toast({ title: "Error", description: "Please select a category", variant: "destructive" });
+      return;
+    }
+    try {
+      await pagesService.createTemplate(
+        templateName,
+        editor.getHTML(),
+        templateDescription,
+        selectedCategoryId,
+        selectedOrgId
+      );
+      toast({ title: "Success", description: "Template created successfully" });
+      handleCloseTemplateDialog();
+    } catch (error) {
+      console.error('Failed to create template:', error);
+      toast({ title: "Error", description: "Failed to create template", variant: "destructive" });
+    } finally {
+      setIsCreatingTemplate(false);
+      console.log('handleCreateTemplate completed');
+    }
+  }, [templateName, templateCategory, templateDescription, editor, selectedCategoryId, selectedOrgId, pagesService, handleCloseTemplateDialog]);
+  
+//   const templateDialog = useMemo(() => (
+//     <Dialog open={showTemplateDialog} onOpenChange={handleCloseTemplateDialog}>
+//       <DialogContent>
+//           <DialogHeader>
+//             <DialogTitle>Save as Template</DialogTitle>
+//             <DialogDescription>
+//               Create a reusable template from this page.
+//             </DialogDescription>
+//           </DialogHeader>
+//           <div className="py-4 space-y-4">
+//             <div>
+//               <label className="block text-sm font-medium mb-1">Template Name</label>
+//               <Input 
+//                 value={templateName}
+//                 onChange={(e) => setTemplateName(e.target.value)}
+//                 placeholder="Enter template name"
+//                 autoFocus
+//               />
+//             </div>
+//             <div>
+//               <label className="block text-sm font-medium mb-1">Category (optional)</label>
+//               <Input
+//                 value={templateCategory}
+//                 onChange={(e) => setTemplateCategory(e.target.value)} 
+//                 placeholder="Enter category"
+//               />
+//             </div>
+//             <div>
+//               <label className="block text-sm font-medium mb-1">Description (optional)</label>
+//               <Textarea
+//                 value={templateDescription}
+//                 onChange={(e) => setTemplateDescription(e.target.value)}
+//                 placeholder="Enter template description"
+//               />
+//             </div>
+//           </div>
+//           <DialogFooter>
+//         <Button variant="outline" onClick={handleCloseTemplateDialog}>
+//           Cancel
+//         </Button>
+//         <Button 
+//           onClick={handleCreateTemplate}
+//           disabled={!templateName.trim()}
+//         >
+//           Create Template
+//         </Button>
+//       </DialogFooter>
+//     </DialogContent>
+//   </Dialog>
+// ), [showTemplateDialog, templateName, templateCategory, templateDescription, handleCloseTemplateDialog, handleCreateTemplate]);
   
   const handleImageContextMenu = (event: MouseEvent<HTMLElement>, imageId: string) => {
     console.log("handleImageContextMenu called");
@@ -784,6 +931,16 @@ const PageEditor = ({
     });
   };
 
+  const handleTemplateDialogOpenChange = (open: boolean) => {
+    setTimeout(() => {
+      setShowTemplateDialog(open);
+      if (!open) {
+        setTemplateName("");
+        setTemplateCategory("");
+        setTemplateDescription("");
+      }
+    }, 0);
+  };
 
   const triggerImageUpload = () => {
     const input = document.createElement('input');
@@ -844,15 +1001,19 @@ const PageEditor = ({
   
   const handleGeneratePDF = async () => {
     if (!editor) return;
-    setIsGeneratingPDF(true);
     try {
       const content = editor.getHTML();
       // Implement PDF generation logic here
       console.log('Generating PDF with content:', content);
+      // Add artificial delay to see the loading state
+      await new Promise(resolve => setTimeout(resolve, 2000));
     } catch (error) {
       console.error('Error generating PDF:', error);
-    } finally {
-      setIsGeneratingPDF(false);
+      toast({
+        title: 'Error',
+        description: 'Failed to generate PDF',
+        variant: 'destructive'
+      });
     }
   };
 
@@ -1328,24 +1489,24 @@ const PageEditor = ({
             </div>
 
             <div className="relative">
-            <TooltipButton
-              title="More Elements"
-              onClick={(event?: React.MouseEvent) => {
-                if (!event) return;
-                event.stopPropagation();
-                setOpenMenu(openMenu === 'moreElements' ? null : 'moreElements');
-              }}
-              className={openMenu === 'moreElements' ? 'bg-gray-200' : ''}
-            >
-              <div className="flex items-center gap-1">
-                <MoreHorizontal className="w-4 h-4 text-gray-600" />
-                <ChevronDown className="w-3 h-3 text-gray-600" />
-              </div>
-            </TooltipButton>
-            {openMenu === 'moreElements' && <MoreElementsMenu editor={editor} />}
-          </div>
+              <TooltipButton
+                title="More Elements"
+                onClick={(event?: React.MouseEvent) => {
+                  if (!event) return;
+                  event.stopPropagation();
+                  setOpenMenu(openMenu === 'moreElements' ? null : 'moreElements');
+                }}
+                className={openMenu === 'moreElements' ? 'bg-gray-200' : ''}
+              >
+                <div className="flex items-center gap-1">
+                  <Plus className="w-4 h-4 text-gray-600" />
+                  <ChevronDown className="w-3 h-3 text-gray-600" />
+                </div>
+              </TooltipButton>
+              {openMenu === 'moreElements' && <MoreElementsMenu editor={editor} />}
+            </div>
 
-            {/* Manual Save if autoSave is false */}
+            {/* Regular Save Button */}
             {!autoSave && (
               <TooltipButton
                 title="Save"
@@ -1362,15 +1523,59 @@ const PageEditor = ({
               </TooltipButton>
             )}
 
-            {/* PDF Generation Button */}
-            <div className="ml-auto rounded">
-              <TooltipButton title="Create PDF" onClick={handleGeneratePDF} className="bg-gray-500 hover:bg-gray-600">
-                {isGeneratingPDF ? (
-                  <div className="w-4 h-4 text-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <FileDown className="w-4 h-4 text-white" />
-                )}
-              </TooltipButton>
+            {/* Actions Dropdown */}
+            <div className="relative cursor-pointer">
+              <DropdownMenu>
+                <DropdownMenuTrigger disabled={isGeneratingPDF}>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="p-2 hover:bg-gray-100"
+                    disabled={isGeneratingPDF}
+                  >
+                    <div className="flex items-center gap-1">
+                      {isGeneratingPDF ? (
+                        <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          <MoreHorizontal className="w-4 h-4 text-gray-600" />
+                          <ChevronDown className="w-3 h-3 text-gray-600" />
+                        </>
+                      )}
+                    </div>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem 
+                  className="cursor-pointer"
+                    onClick={async () => {
+                      setIsGeneratingPDF(true);
+                      try {
+                        await handleGeneratePDF();
+                      } finally {
+                        setIsGeneratingPDF(false);
+                      }
+                    }}
+                  >
+                    <FileDown className="w-4 h-4 mr-2" />
+                    <span>Export PDF</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem 
+                      className="cursor-pointer" 
+                      onClick={() => {
+                        setTimeout(() => {
+                          setShowTemplateDialog(true);
+                          setTemplateName("");
+                          setTemplateCategory("");
+                          setTemplateDescription("");
+                        }, 0);
+                      }}
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      <span>Save as Template</span>
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 
@@ -1515,6 +1720,95 @@ const PageEditor = ({
                   }}
                 >
                   Save
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Template Creation Dialog */}
+          <Dialog open={showTemplateDialog} onOpenChange={handleTemplateDialogOpenChange}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Save as Template</DialogTitle>
+                <DialogDescription>Create a reusable template from this page.</DialogDescription>
+              </DialogHeader>
+              <div className="py-4 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Template Name</label>
+                  <Input 
+                    value={templateName}
+                    onChange={(e) => setTemplateName(e.target.value)}
+                    placeholder="Enter template name"
+                    autoFocus
+                    disabled={isCreatingTemplate}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Category</label>
+                  <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
+                    <DropdownMenuTrigger asChild disabled={isCreatingTemplate}>
+                      <Button 
+                        ref={triggerRef}
+                        variant="outline" 
+                        role="combobox" 
+                        className="w-full justify-between px-3 py-2"
+                      >
+                        {selectedCategoryId
+                          ? categories.find((cat) => cat.id === selectedCategoryId)?.label || "Select category..."
+                          : "Select category..."}
+                        <div className="flex items-center gap-1">
+                          {selectedCategoryId && (
+                            <X 
+                              className="h-4 w-4 opacity-50 hover:opacity-100 cursor-pointer" 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedCategoryId(null);
+                              }}
+                              aria-label="Clear category selection"
+                            />
+                          )}
+                          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+                        </div>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent style={{ width: contentWidth }} className="min-w-[200px] max-w-[1000px]">
+                      <DropdownMenuLabel>Categories</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuGroup>
+                        {categories.map((category) => (
+                          <DropdownMenuItem
+                            key={category.id}
+                            onSelect={() => setSelectedCategoryId(category.id)}
+                            className="justify-between"
+                            disabled={isCreatingTemplate}
+                          >
+                            {category.label}
+                            {selectedCategoryId === category.id && <Check className="h-4 w-4" />}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Description (optional)</label>
+                  <Textarea
+                    value={templateDescription}
+                    onChange={(e) => setTemplateDescription(e.target.value)}
+                    placeholder="Enter template description"
+                    disabled={isCreatingTemplate}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => handleTemplateDialogOpenChange(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleCreateTemplate}
+                  disabled={!templateName.trim() || !selectedCategoryId || isCreatingTemplate}
+                >
+                  {isCreatingTemplate ? "Creating..." : "Create Template"}
                 </Button>
               </DialogFooter>
             </DialogContent>

@@ -259,61 +259,88 @@ export function PagesTable({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                {node.type === 'folder' ? (
-                  <>
-                    <DropdownMenuItem onClick={() => onCreateFolder(node.id)}>
-                      Create Subfolder
+              {node.type === 'folder' ? (
+                <>
+                    <DropdownMenuItem onClick={() => {
+                    setTimeout(() => {
+                        onCreateFolder(node.id);
+                    }, 0);
+                    }}>
+                    Create Subfolder
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => onCreatePage(node.id, 'New Page')}>
-                      Create Subpage
+                    <DropdownMenuItem onClick={() => {
+                    setTimeout(() => {
+                        onCreatePage(node.id, 'New Page');
+                    }, 0);
+                    }}>
+                    Create Subpage
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={() => {
+                    onClick={() => {
+                        setTimeout(() => {
                         setRenameTargetId(node.id);
                         setNewName(node.title);
                         setIsTargetFolder(true);
                         setIsRenameDialogOpen(true);
-                      }}
+                        }, 0);
+                    }}
                     >
-                      Rename
+                    Rename
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={() => {
+                    onClick={() => {
+                        setTimeout(() => {
                         setDeleteTargetId(node.id);
-                        setIsTargetFolder(true);
+                        setIsTargetFolder(node.type === 'folder');
                         setIsDeleteDialogOpen(true);
-                      }}
-                      className="text-red-600"
+                        }, 0);
+                    }}
+                    className="text-red-600"
                     >
-                      Delete
+                    Delete
                     </DropdownMenuItem>
-                  </>
+                </>
                 ) : (
-                  <>
-                    <DropdownMenuItem onClick={() => onCreatePage(node.id, 'New Page')}>
-                      Create Sub-Page
+                <>
+                    <DropdownMenuItem onClick={() => {
+                    setTimeout(() => {
+                        onCreateFolder(node.id);
+                    }, 0);
+                    }}>
+                    Create Subfolder
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                    setTimeout(() => {
+                        onCreatePage(node.id, 'New Page');
+                    }, 0);
+                    }}>
+                    Create Subpage
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={() => {
+                    onClick={() => {
+                        setTimeout(() => {
                         setRenameTargetId(node.id);
                         setNewName(node.title);
                         setIsTargetFolder(false);
                         setIsRenameDialogOpen(true);
-                      }}
+                        }, 0);
+                    }}
                     >
-                      Rename
+                    Rename
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={() => {
+                    onClick={() => {
+                        setTimeout(() => {
                         setDeleteTargetId(node.id);
                         setIsTargetFolder(false);
                         setIsDeleteDialogOpen(true);
-                      }}
-                      className="text-red-600"
+                        }, 0);
+                    }}
+                    className="text-red-600"
                     >
-                      Delete
+                    Delete
                     </DropdownMenuItem>
-                  </>
+                </>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -343,12 +370,13 @@ export function PagesTable({
   };
 
   const handleDeleteDialogOpenChange = (open: boolean) => {
-    setIsDeleteDialogOpen(open);
-    if (!open) {
-      setDeleteTargetId(null);
-      setDeleteError(null);
-      setIsTargetFolder(false);
-    }
+    setTimeout(() => {
+      setIsDeleteDialogOpen(open);
+      if (!open) {
+        setDeleteTargetId(null);
+        setDeleteError(null);
+      }
+    }, 0);
   };
 
   const handleRename = () => {

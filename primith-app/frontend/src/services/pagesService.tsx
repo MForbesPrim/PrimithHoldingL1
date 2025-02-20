@@ -1,5 +1,5 @@
 import AuthService from '@/services/auth'
-import { PageNode, FolderNode } from '@/types/pages'
+import { PageNode, FolderNode, TemplateCategory } from '@/types/pages'
 
 export class PagesService {
   private baseUrl = import.meta.env.VITE_API_URL;
@@ -260,4 +260,52 @@ async deleteImage(imageId: string, organizationId: string): Promise<void> {
         });
         if (!response.ok) throw new Error('Failed to delete folder');
     }
+
+// In PagesService class
+async createTemplate(
+    title: string,
+    content: string,
+    description: string,
+    categoryId: number,
+    organizationId: string
+  ): Promise<PageNode> {
+    try {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/pages/templates`, {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        body: JSON.stringify({
+          title,
+          content,
+          description,
+          categoryId,
+          organizationId,
+          status: 'template'
+        })
+      });
+  
+      if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error('Access denied. You may not have permission to create templates in this organization.');
+        }
+        throw new Error('Failed to create template');
+      }
+  
+      return response.json();
+    } catch (error) {
+      console.error('Error in createTemplate:', error);
+      throw error;
+    }
+  }
+
+  async getTemplateCategories(): Promise<TemplateCategory[]> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/pages/template-categories`, {
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error('Failed to fetch template categories');
+    return response.json();
+  }
 }

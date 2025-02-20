@@ -4023,58 +4023,6 @@ func handleUpdatePage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// Handler for deleting a page
-func handleDeletePage(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	pageId := vars["id"]
-	claims := r.Context().Value(claimsKey).(*Claims)
-
-	organizationId := r.URL.Query().Get("organizationId")
-	if organizationId == "" {
-		http.Error(w, "Organization ID is required", http.StatusBadRequest)
-		return
-	}
-
-	// Get user ID
-	var userId string
-	err := db.QueryRow(
-		"SELECT id FROM auth.users WHERE email = $1",
-		claims.Username,
-	).Scan(&userId)
-	if err != nil {
-		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
-		return
-	}
-
-	result, err := db.Exec(`
-        UPDATE pages.pages_content 
-        SET 
-            deleted_at = CURRENT_TIMESTAMP,
-            deleted_by = $1
-        WHERE id = $2
-        AND organization_id = $3
-        AND EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            WHERE om.organization_id = $3
-            AND om.user_id = $1
-        )
-    `, userId, pageId, organizationId)
-
-	if err != nil {
-		http.Error(w, "Failed to delete page", http.StatusInternalServerError)
-		return
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil || rowsAffected == 0 {
-		http.Error(w, "Page not found or access denied", http.StatusNotFound)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-}
-
 // Handler for renaming a page
 func handleRenamePage(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -4669,10 +4617,10 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 			pc.parent_id,
 			pc.title,
 			COALESCE(pc.content, '') as content,
-			COALESCE(pc.template_category, '') as category,
+			COALESCE(tc.label, '') as category, 
 			COALESCE(pc.description, '') as description,
 			pc.status,
-			pc.template_type,
+			tc.code as template_type,
 			cb.email as created_by,
 			ub.email as updated_by,
 			pc.created_at,
@@ -4685,6 +4633,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		FROM pages.pages_content pc
 		LEFT JOIN auth.users cb ON pc.created_by = cb.id
 		LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+		LEFT JOIN pages.template_categories tc ON pc.template_category_id = tc.id
 		WHERE (
 			(pc.organization_id = $1 AND pc.status = 'template') 
 			OR 
@@ -5117,6 +5066,171 @@ func handleDeletePagesFolder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var req struct {
+		Title          string `json:"title"`
+		Content        string `json:"content"`
+		Description    string `json:"description"`
+		CategoryId     int    `json:"categoryId"`
+		OrganizationID string `json:"organizationId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, req.OrganizationID).Scan(&authorized)
+	if err != nil || !authorized {
+		http.Error(w, "Unauthorized access to organization", http.StatusForbidden)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err = db.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Create the template
+	var templateId string
+	var createdAt, updatedAt time.Time
+	err = db.QueryRow(`
+        INSERT INTO pages.pages_content (
+            title,
+            content,
+            description,
+            template_category_id,
+            organization_id,
+            status,
+            created_by,
+            updated_by
+        ) VALUES ($1, $2, $3, $4, $5, 'template', $6, $6)
+        RETURNING id, created_at, updated_at
+    `, req.Title, req.Content, req.Description, req.CategoryId, req.OrganizationID, userId).Scan(&templateId, &createdAt, &updatedAt)
+	if err != nil {
+		log.Printf("Error creating template: %v", err)
+		http.Error(w, "Failed to create template", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":          templateId,
+		"title":       req.Title,
+		"content":     req.Content,
+		"description": req.Description,
+		"categoryId":  req.CategoryId,
+		"status":      "template",
+		"createdBy":   claims.Username,
+		"updatedBy":   claims.Username,
+		"createdAt":   createdAt,
+		"updatedAt":   updatedAt,
+	})
+}
+
+func handleDeletePage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	pageId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	organizationId := r.URL.Query().Get("organizationId")
+	if organizationId == "" {
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if the page is a system template
+	var status string
+	err = db.QueryRow("SELECT status FROM pages.pages_content WHERE id = $1", pageId).Scan(&status)
+	if err != nil {
+		http.Error(w, "Failed to fetch page status", http.StatusInternalServerError)
+		return
+	}
+
+	if status == "system_template" {
+		isAdmin, err := isSuperAdmin(claims.Username)
+		if err != nil || !isAdmin {
+			http.Error(w, "Only super admins can delete system templates", http.StatusForbidden)
+			return
+		}
+	}
+
+	result, err := db.Exec(`
+        UPDATE pages.pages_content 
+        SET deleted_at = CURRENT_TIMESTAMP, deleted_by = $1
+        WHERE id = $2 AND organization_id = $3
+        AND EXISTS (
+            SELECT 1 FROM auth.organization_members om
+            WHERE om.organization_id = $3 AND om.user_id = $1
+        )
+    `, userId, pageId, organizationId)
+	if err != nil {
+		http.Error(w, "Failed to delete page", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Page not found or access denied", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleGetTemplateCategories(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT id, code, label, is_system FROM pages.template_categories ORDER BY id")
+	if err != nil {
+		http.Error(w, "Failed to fetch template categories", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var categories []TemplateCategory
+	for rows.Next() {
+		var cat TemplateCategory
+		if err := rows.Scan(&cat.ID, &cat.Code, &cat.Label, &cat.IsSystem); err != nil {
+			http.Error(w, "Error scanning categories", http.StatusInternalServerError)
+			return
+		}
+		categories = append(categories, cat)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(categories)
+}
+
+// Assuming a struct to match the TypeScript interface
+type TemplateCategory struct {
+	ID       int    `json:"id"`
+	Code     string `json:"code"`
+	Label    string `json:"label"`
+	IsSystem bool   `json:"isSystem"`
+}
+
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -5304,6 +5418,8 @@ func main() {
 	r.HandleFunc("/pages/folders", authMiddleware(handleCreatePagesFolder)).Methods("POST")
 	r.HandleFunc("/pages/folders/{id}", authMiddleware(handleUpdatePagesFolder)).Methods("PUT")
 	r.HandleFunc("/pages/folders/{id}", authMiddleware(handleDeletePagesFolder)).Methods("DELETE")
+	r.HandleFunc("/pages/templates", authMiddleware(handleCreateTemplate)).Methods("POST")
+	r.HandleFunc("/pages/template-categories", authMiddleware(handleGetTemplateCategories)).Methods("GET")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

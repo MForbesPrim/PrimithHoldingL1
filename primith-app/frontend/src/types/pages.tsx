@@ -7,7 +7,8 @@ export interface PageNode {
   status: string;
   createdBy: string;
   updatedBy: string;
-  category?: string; 
+  category?: string;
+  categoryId?: number;
   description?: string; 
   deletedBy?: string;
   createdAt: string;
@@ -30,4 +31,11 @@ export interface FolderNode {
   createdBy: string;
   updatedBy?: string;
   deletedBy?: string;
+}
+
+export interface TemplateCategory {
+  id: number;
+  code: string;
+  label: string;
+  isSystem: boolean;
 }
