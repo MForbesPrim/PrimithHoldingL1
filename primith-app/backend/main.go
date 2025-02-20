@@ -65,6 +65,7 @@ type ContactRequest struct {
 }
 
 type UserData struct {
+	ID        string `json:"id"`
 	FirstName string `json:"firstName"`
 	LastName  string `json:"lastName"`
 	Email     string `json:"email"`
@@ -537,7 +538,12 @@ func login(w http.ResponseWriter, r *http.Request) {
 		Message:      "Logged in successfully",
 		Token:        accessTokenString,
 		RefreshToken: refreshTokenString,
-		User:         userData,
+		User: UserData{
+			ID:        userID,
+			FirstName: userData.FirstName,
+			LastName:  userData.LastName,
+			Email:     userData.Email,
+		},
 	})
 }
 
@@ -5223,12 +5229,234 @@ func handleGetTemplateCategories(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(categories)
 }
 
-// Assuming a struct to match the TypeScript interface
 type TemplateCategory struct {
 	ID       int    `json:"id"`
 	Code     string `json:"code"`
 	Label    string `json:"label"`
 	IsSystem bool   `json:"isSystem"`
+}
+
+func handleGetTemplate(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[handleGetTemplate] Starting request handling")
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	templateId := vars["id"]
+	organizationId := r.URL.Query().Get("organizationId")
+	if organizationId == "" {
+		log.Printf("[handleGetTemplate] Error: Missing organizationId")
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+	log.Printf("[handleGetTemplate] templateId: %s, organizationId: %s", templateId, organizationId)
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("[handleGetTemplate] User: %s", claims.Username)
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+	if err != nil {
+		log.Printf("[handleGetTemplate] Error checking authorization: %v", err)
+		http.Error(w, "Error checking access", http.StatusInternalServerError)
+		return
+	}
+	if !authorized {
+		log.Printf("[handleGetTemplate] Access denied for user %s to organization %s", claims.Username, organizationId)
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+	log.Printf("[handleGetTemplate] User authorized")
+
+	// Fetch the template
+	var template struct {
+		ID           string
+		ParentID     sql.NullString
+		Title        string
+		Content      string
+		Category     string
+		CategoryID   sql.NullInt64
+		Description  string
+		Status       string
+		TemplateType string
+		CreatedBy    string
+		UpdatedBy    string
+		CreatedAt    time.Time
+		UpdatedAt    time.Time
+		IsFavorite   bool
+	}
+
+	err = db.QueryRow(`
+        SELECT 
+            pc.id, 
+            pc.parent_id,
+            pc.title,
+            COALESCE(pc.content, '') as content,
+            COALESCE(tc.label, '') as category,
+            pc.template_category_id,
+            COALESCE(pc.description, '') as description,
+            pc.status,
+            tc.code as template_type,
+            cb.email as created_by,
+            pc.updated_by,
+            pc.created_at,
+            pc.updated_at,
+            EXISTS (
+                SELECT 1 FROM pages.user_favorite_templates uft 
+                WHERE uft.template_id = pc.id 
+                AND uft.user_id = (SELECT id FROM auth.users WHERE email = $2)
+            ) as is_favorite
+        FROM pages.pages_content pc
+        LEFT JOIN auth.users cb ON pc.created_by = cb.id
+        LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+        LEFT JOIN pages.template_categories tc ON pc.template_category_id = tc.id
+        WHERE pc.id = $1
+        AND pc.organization_id = $3
+        AND pc.deleted_at IS NULL
+    `, templateId, claims.Username, organizationId).Scan(
+		&template.ID,
+		&template.ParentID,
+		&template.Title,
+		&template.Content,
+		&template.Category,
+		&template.CategoryID,
+		&template.Description,
+		&template.Status,
+		&template.TemplateType,
+		&template.CreatedBy,
+		&template.UpdatedBy,
+		&template.CreatedAt,
+		&template.UpdatedAt,
+		&template.IsFavorite,
+	)
+
+	if err == sql.ErrNoRows {
+		log.Printf("[handleGetTemplate] Template %s not found", templateId)
+		http.Error(w, "Template not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		log.Printf("[handleGetTemplate] Error fetching template: %v", err)
+		http.Error(w, "Failed to fetch template", http.StatusInternalServerError)
+		return
+	}
+
+	templateMap := map[string]interface{}{
+		"id":           template.ID,
+		"parentId":     template.ParentID.String,
+		"title":        template.Title,
+		"content":      template.Content,
+		"category":     template.Category,
+		"categoryId":   template.CategoryID.Int64,
+		"description":  template.Description,
+		"status":       template.Status,
+		"templateType": template.TemplateType,
+		"createdBy":    template.CreatedBy,
+		"updatedBy":    template.UpdatedBy,
+		"createdAt":    template.CreatedAt,
+		"updatedAt":    template.UpdatedAt,
+		"isSystem":     template.Status == "system_template",
+		"isFavorite":   template.IsFavorite,
+	}
+
+	log.Printf("[handleGetTemplate] Returning template: %s", templateId)
+	json.NewEncoder(w).Encode(templateMap)
+}
+
+func handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[handleUpdateTemplate] Starting request handling")
+	w.Header().Set("Content-Type", "application/json")
+
+	vars := mux.Vars(r)
+	templateId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("[handleUpdateTemplate] templateId: %s, user: %s", templateId, claims.Username)
+
+	var req struct {
+		Title          string `json:"title"`
+		Content        string `json:"content"`
+		Description    string `json:"description"`
+		CategoryId     int    `json:"categoryId"`
+		OrganizationID string `json:"organizationId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[handleUpdateTemplate] Invalid request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	log.Printf("[handleUpdateTemplate] Request data: %+v", req)
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("[handleUpdateTemplate] Failed to start transaction: %v", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Get user ID
+	var userId string
+	err = tx.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		log.Printf("[handleUpdateTemplate] Failed to get user ID: %v", err)
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Verify access and update the template
+	result, err := tx.Exec(`
+        UPDATE pages.pages_content 
+        SET 
+            title = $1,
+            content = $2,
+            description = $3,
+            template_category_id = $4,
+            updated_by = $5,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $6
+        AND organization_id = $7
+        AND status = 'template'
+        AND EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            WHERE om.organization_id = $7
+            AND om.user_id = $5
+        )
+    `, req.Title, req.Content, req.Description, req.CategoryId, userId, templateId, req.OrganizationID)
+	if err != nil {
+		log.Printf("[handleUpdateTemplate] Error updating template: %v", err)
+		http.Error(w, "Failed to update template", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		log.Printf("[handleUpdateTemplate] No rows affected or error: %v, rows: %d", err, rowsAffected)
+		http.Error(w, "Template not found or access denied", http.StatusNotFound)
+		return
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("[handleUpdateTemplate] Failed to commit transaction: %v", err)
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("[handleUpdateTemplate] Template %s updated successfully", templateId)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Template updated successfully",
+	})
 }
 
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
@@ -5420,6 +5648,8 @@ func main() {
 	r.HandleFunc("/pages/folders/{id}", authMiddleware(handleDeletePagesFolder)).Methods("DELETE")
 	r.HandleFunc("/pages/templates", authMiddleware(handleCreateTemplate)).Methods("POST")
 	r.HandleFunc("/pages/template-categories", authMiddleware(handleGetTemplateCategories)).Methods("GET")
+	r.HandleFunc("/pages/templates/{id}", authMiddleware(handleGetTemplate)).Methods("GET")
+	r.HandleFunc("/pages/templates/{id}", authMiddleware(handleUpdateTemplate)).Methods("PUT")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

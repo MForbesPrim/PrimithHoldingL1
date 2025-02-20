@@ -308,4 +308,58 @@ async createTemplate(
     if (!response.ok) throw new Error('Failed to fetch template categories');
     return response.json();
   }
+
+  async getTemplateById(templateId: string, organizationId: string): Promise<PageNode> {
+    try {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(
+        `${this.baseUrl}/pages/templates/${templateId}?organizationId=${organizationId}`,
+        {
+          credentials: 'include',
+          headers
+        }
+      );
+      if (!response.ok) {
+        if (response.status === 403) throw new Error('Access denied');
+        throw new Error(`Failed to fetch template: ${response.status}`);
+      }
+      return response.json();
+    } catch (error) {
+      console.error('Error in getTemplateById:', error);
+      throw error;
+    }
+  }
+
+  async updateTemplate(
+    templateId: string,
+    title: string,
+    content: string,
+    description: string,
+    categoryId: number,
+    organizationId: string
+  ): Promise<void> {
+    try {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/pages/templates/${templateId}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers,
+        body: JSON.stringify({
+          title,
+          content,
+          description,
+          categoryId,
+          organizationId,
+          status: 'template'
+        })
+      });
+      if (!response.ok) {
+        if (response.status === 403) throw new Error('Access denied');
+        throw new Error('Failed to update template');
+      }
+    } catch (error) {
+      console.error('Error in updateTemplate:', error);
+      throw error;
+    }
+  }
 }

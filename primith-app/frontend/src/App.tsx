@@ -24,6 +24,7 @@ import { RdmHomePage } from "@/components/pages/rdm/rdmHomePage";
 import { ProjectsPage } from "@/components/pages/rdm/projects/projectsDashboard";
 import { PagesDashboard } from "@/components/pages/rdm/pages/pagesDashboard";
 import { CreateTemplate } from "@/components/pages/rdm/pages/pagesCreateTemplate";
+import { EditTemplate } from "@/components/pages/rdm/pages/pagesEditTemplate";
 import { DocumentManagementPage } from "@/components/pages/rdm/documentManagement/dmDashboard";
 import { ProtectedRdmLayout } from "@/components/pages/rdm/layouts/protected-rdm-layout";
 import { HelpPage } from "@/components/pages/helpCenterPage";
@@ -64,6 +65,7 @@ function App() {
                     <Route path="/rdm/pages/templates" element={<PagesDashboard />} />
                     <Route path="/rdm/document-management" element={<DocumentManagementPage />} />
                     <Route path="/rdm/create-template" element={<CreateTemplate />} />
+                    <Route path="/rdm/pages/templates/edit/:id" element={<EditTemplate />} />
                   </Route>
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/auth-redirect" element={<AuthRedirect />} />

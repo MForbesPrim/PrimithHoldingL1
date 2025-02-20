@@ -101,12 +101,9 @@ interface PageEditorProps {
     }
   ) => void;
   onRename: (id: string, newTitle: string) => void;
-  /** 
-   * If true, the editor calls onSave on every update (auto-save).
-   * If false, user must click 'Save' in the toolbar to save changes.
-   */
-  autoSave?: boolean; 
+  autoSave?: boolean;
   templateMode?: boolean;
+  editMode?: boolean;
   onUpdateTemplateDetails?: (id: string, details: {
     title: string;
     description: string;
@@ -375,6 +372,7 @@ const PageEditor = ({
   onRename,
   autoSave = false,
   templateMode = false,
+  editMode = false
 }: PageEditorProps) => {
   const { toast } = useToast();
   const pagesService = new PagesService();
@@ -814,6 +812,7 @@ const PageEditor = ({
       toast({
         title: 'Success',
         description: 'Image deleted successfully',
+        duration: 5000
       });
     } catch (error) {
       console.error('Error deleting image:', error);
@@ -821,6 +820,7 @@ const PageEditor = ({
         title: 'Error',
         description: 'Failed to delete image',
         variant: 'destructive',
+        duration: 5000
       });
     }
   };
@@ -837,52 +837,6 @@ const PageEditor = ({
     };
   }, [isDialogOpen]); // Cleanup when dialog closes
   
-  // const handleCloseTemplateDialog = () => {
-  //   setIsDialogOpen(false);
-  
-  //   // Ensure editor resets when closing the dialog
-  //   if (editorRef.current) {
-  //     editorRef.current.commands.clearContent();
-  //     editorRef.current.commands.setContent('');
-  //     editorRef.current.destroy();
-  //     editorRef.current = null;
-  //   }
-  // };
-
-  // const handleCreateTemplate = useCallback(async () => {
-  //   if (!selectedOrgId) {
-  //     toast({ title: "Error", description: "No organization selected", variant: "destructive" });
-  //     return;
-  //   }
-  //   if (!editor) {
-  //     toast({ title: "Error", description: "Editor not initialized", variant: "destructive" });
-  //     return;
-  //   }
-  //   setIsCreatingTemplate(true);
-  //   console.log('handleCreateTemplate starting:', { templateName, templateCategory, templateDescription });
-  //   if (!selectedCategoryId) {
-  //     toast({ title: "Error", description: "Please select a category", variant: "destructive" });
-  //     return;
-  //   }
-  //   try {
-  //     await pagesService.createTemplate(
-  //       templateName,
-  //       editor.getHTML(),
-  //       templateDescription,
-  //       selectedCategoryId,
-  //       selectedOrgId
-  //     );
-  //     toast({ title: "Success", description: "Template created successfully" });
-  //     handleCloseTemplateDialog();
-  //   } catch (error) {
-  //     console.error('Failed to create template:', error);
-  //     toast({ title: "Error", description: "Failed to create template", variant: "destructive" });
-  //   } finally {
-  //     setIsCreatingTemplate(false);
-  //     console.log('handleCreateTemplate completed');
-  //   }
-  // }, [templateName, templateCategory, templateDescription, editor, selectedCategoryId, selectedOrgId, pagesService, handleCloseTemplateDialog]);
-    
   const handleImageContextMenu = (event: MouseEvent<HTMLElement>, imageId: string) => {
     console.log("handleImageContextMenu called");
     event.preventDefault();
@@ -1483,34 +1437,44 @@ const PageEditor = ({
 
           {/* Save Button - show differently for template mode */}
           {templateMode ? (
-            <div className="flex items-center gap-1">
-              <TooltipButton
-                title="Save Template"
-                onClick={() => {
-                  setIsEditing(false); // Ensure isEditing is false for confirm save
+          <div className="flex items-center gap-1">
+            <TooltipButton
+              title="Save Template"
+              onClick={() => {
+                if (editMode) {
+                  // In edit mode, save directly without dialog
+                  onSave(page.id, editor.getHTML(), {
+                    title: stagingTemplateDetails.title,
+                    description: stagingTemplateDetails.description,
+                    categoryId: stagingTemplateDetails.categoryId
+                  });
+                } else {
+                  // In create mode, show confirmation dialog
+                  setIsEditing(false);
                   setShowTemplateDialog(true);
                   setTemplateName(stagingTemplateDetails.title || page.title);
                   setTemplateDescription(stagingTemplateDetails.description || '');
                   setSelectedCategoryId(stagingTemplateDetails.categoryId);
-                }}
-              >
-                <Save className="w-4 h-4 text-gray-600" />
-              </TooltipButton>
+                }
+              }}
+            >
+              <Save className="w-4 h-4 text-gray-600" />
+            </TooltipButton>
 
-              <TooltipButton
-                title="Template Details"
-                onClick={() => {
-                  setIsEditing(true);
-                  setShowTemplateDialog(true);
-                  setTemplateName(stagingTemplateDetails.title || page.title);
-                  setTemplateDescription(stagingTemplateDetails.description || '');
-                  setSelectedCategoryId(stagingTemplateDetails.categoryId);
-                }}
-              >
-                <Edit className="w-4 h-4 text-gray-600" />
-              </TooltipButton>
-            </div>
-          ) : (
+            <TooltipButton
+              title="Template Details"
+              onClick={() => {
+                setIsEditing(true);
+                setShowTemplateDialog(true);
+                setTemplateName(stagingTemplateDetails.title || page.title);
+                setTemplateDescription(stagingTemplateDetails.description || '');
+                setSelectedCategoryId(stagingTemplateDetails.categoryId);
+              }}
+            >
+              <Edit className="w-4 h-4 text-gray-600" />
+            </TooltipButton>
+          </div>
+        ) : (
           <>
             {!autoSave && (
               <TooltipButton
