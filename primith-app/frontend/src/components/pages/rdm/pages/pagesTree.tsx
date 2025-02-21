@@ -171,7 +171,7 @@ export function PageTree({
 
     const handleStartRename = () => {
       setEditingPage(page.id);
-      setNewPageTitle(page.title);
+      setNewPageTitle(page.name);
     };
 
     const handleFinishRename = () => {
@@ -241,7 +241,7 @@ export function PageTree({
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <span className="text-sm flex-1">{page.title}</span>
+              <span className="text-sm flex-1">{page.name}</span>
             )}
           </div>
           <DropdownMenu>
@@ -333,7 +333,7 @@ export function PageTree({
             <div className="flex items-center p-1 bg-background border rounded-sm shadow-lg">
               <FileText className="h-4 w-4 mr-2" />
               <span className="text-sm">
-                {pages.find(p => p.id === activeId)?.title}
+                {pages.find(p => p.id === activeId)?.name}
               </span>
             </div>
           ) : null}

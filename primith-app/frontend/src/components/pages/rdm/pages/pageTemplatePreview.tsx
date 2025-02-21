@@ -18,7 +18,7 @@ export default function TemplatePreview({
         <div className="p-2 border-b shrink-0">
           <div className="flex justify-between items-start">
             <div className="p-4">
-              <h2 className="text-lg font-semibold">{template.title}</h2>
+              <h2 className="text-lg font-semibold">{template.name}</h2>
               <p className="text-sm text-gray-500 max-w-[80%] mb-4">{template.description}</p>
               <Button onClick={() => onUseTemplate(template)}>
                 Use Template

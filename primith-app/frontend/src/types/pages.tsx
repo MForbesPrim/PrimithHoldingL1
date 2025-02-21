@@ -1,8 +1,9 @@
 export interface PageNode {
   id: string;
   parentId: string | null;
-  folderId: string | null;
-  title: string;
+  folderId?: string | null;
+  type: 'page' | 'folder' | 'template' | 'system_template';
+  name: string;
   content: string;
   status: string;
   createdBy: string;
@@ -38,4 +39,8 @@ export interface TemplateCategory {
   code: string;
   label: string;
   isSystem: boolean;
+}
+
+export interface PageParent {
+  parentId?: string | null;
 }

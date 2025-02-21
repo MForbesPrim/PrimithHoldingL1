@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PageTree } from './pagesTree';
-import { PageNode, FolderNode } from "@/types/pages";
+import { PageNode, FolderNode, PageParent } from "@/types/pages";
 import PageEditor from './pageEditor';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Plus, PanelLeftClose, PanelLeftOpen, Folder, X } from 'lucide-react';
@@ -47,6 +47,9 @@ export function PagesDashboard() {
   const { selectedOrgId } = useOrganization();
   const pagesService = new PagesService();
   const [folderHistory, setFolderHistory] = useState<string[]>([])
+  const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
+  const [_newPageParentType, setNewPageParentType] = useState<'page' | 'folder' | undefined>();
+  const [newFolderParentType, setNewFolderParentType] = useState<'pages' | 'folders' | null>(null);
 
   const handleTemplatesClick = () => {
     navigate('/rdm/pages/templates');
@@ -81,31 +84,40 @@ export function PagesDashboard() {
     setShowTemplates(location.pathname === '/rdm/pages/templates');
   }, [location.pathname]);
 
-  const handleCreateFolder = async (parentId: string | null = null) => {
+  const handleCreateFolder = async () => {
     const organizationId = selectedOrgId;
     
     if (!organizationId) return;
   
     try {
-      const newFolder = await pagesService.createFolder(
-        newFolderName,
-        parentId || currentFolderId, 
-        organizationId
-      );
-      
-      // Update folder history if creating a subfolder
-      if (parentId || currentFolderId) {
-        setFolderHistory(prev => [...prev, currentFolderId || '']);
-      }
-      
-      // Update folders and reset dialog
-      setFolders([...folders, newFolder]);
-      setShowNewFolderDialog(false);
-      setNewFolderName("");
+        const newFolder = await pagesService.createFolder(
+            newFolderName,
+            newFolderParentId,
+            organizationId,
+            newFolderParentType
+        );
+        
+        console.log('New folder data:', newFolder);
+        
+        setFolders(prevFolders => {
+            const currentFolders = Array.isArray(prevFolders) ? prevFolders : [];
+            return [...currentFolders, newFolder];
+        });
+        
+        setShowNewFolderDialog(false);
+        setNewFolderName("");
+        
+        if (newFolderParentId) {
+            setFolderHistory(prev => [...prev, currentFolderId || '']);
+            setCurrentFolderId(newFolderParentId);
+        }
+        
+        setNewFolderParentId(null);
+        setNewFolderParentType(null);
     } catch (error) {
-      console.error('Failed to create folder:', error);
+        console.error('Failed to create folder:', error);
     }
-  };
+};
 
 const handleRenameFolder = async (folderId: string, newName: string) => {
   if (!selectedOrgId) return;
@@ -177,13 +189,14 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
 
   const handleCreatePageClick = (parentId: string | null) => {
     setNewPageParentId(parentId);
+    setNewPageParentType(undefined);
     setNewPageName("");
     setShowNewPageDialog(true);
   };
 
   const handleUseTemplate = (template: PageNode) => {
     setTemplateToUse(template);
-    setNewTemplateName(template.title); // Pre-fill with template name
+    setNewTemplateName(template.name); // Pre-fill with template name
     setShowTemplateNameDialog(true);
   };
   
@@ -221,7 +234,7 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
       // Create new page first
       const newPage = await pagesService.createPage(
         newTemplateName,
-        null,
+        { parentId: null },
         selectedOrgId
       );
   
@@ -286,20 +299,28 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
     }
   };
 
-  const handleCreatePage = async (parentId: string | null, title: string) => {
+  const handleCreatePage = async (parentId: string | null) => {
     if (!selectedOrgId) return;
     try {
-      const newPage = await pagesService.createPage(title, parentId, selectedOrgId);
+      const parentConfig: PageParent = { 
+        parentId: parentId ?? null 
+      };
+      
+      const newPage = await pagesService.createPage(
+        newPageName || 'New Page',
+        parentConfig,
+        selectedOrgId
+      );
       setPages(currentPages => [...currentPages, newPage]);
       setShowNewPageDialog(false);
       setNewPageName("");
-      // Select the new page to open it in the editor
       setSelectedPageId(newPage.id);
+      setNewPageParentId(null);
     } catch (error) {
       console.error('Failed to create page:', error);
     }
   };
-
+  
   const handleDeletePage = async (id: string) => {
     if (!selectedOrgId) return;
     
@@ -506,12 +527,11 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
                   onCreatePage={handleCreatePageClick}
                   onDeletePage={handleDeletePage}
                   onRenamePage={handleRenamePage}
-                  onCreateFolder={(parentId) => {
+                  onCreateFolder={(parentId, parentType?) => {  // Make parentType optional
+                    setNewFolderParentId(parentId || null);
                     setNewFolderName("");
+                    setNewFolderParentType(parentType || null);  // Handle undefined case
                     setShowNewFolderDialog(true);
-                    if (parentId) {
-                      setCurrentFolderId(parentId);
-                    }
                   }}
                   onRenameFolder={(id, name) => {
                     setNewFolderName(name);
@@ -556,7 +576,7 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
             <Button
               onClick={() => {
                 if (newPageName.trim()) {
-                  handleCreatePage(newPageParentId, newPageName.trim());
+                  handleCreatePage(newPageParentId);
                 }
               }}
             >
@@ -606,7 +626,7 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
       </Dialog>
       {/* New Folder Dialog */}
       <Dialog open={showNewFolderDialog} onOpenChange={setShowNewFolderDialog}>
-        <DialogContent>
+      <DialogContent>
           <DialogHeader>
             <DialogTitle>Create New Folder</DialogTitle>
             <DialogDescription>
@@ -621,28 +641,30 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
               autoFocus
             />
           </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowNewFolderDialog(false);
-                setNewFolderName("");
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={(e) => {
-                e.preventDefault(); // Prevent default form submission
-                handleCreateFolder(); // Call without parameters
-              }}
-              disabled={!newFolderName.trim()}
-            >
-              Create Folder
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowNewFolderDialog(false);
+                  setNewFolderName("");
+                  setNewFolderParentId(null); // Reset on cancel
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (newFolderName.trim()) {
+                    handleCreateFolder(); // No parameters needed
+                  }
+                }}
+                disabled={!newFolderName.trim()}
+              >
+                Create Folder
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
       {/* Rename Folder Dialog */}
       <Dialog 

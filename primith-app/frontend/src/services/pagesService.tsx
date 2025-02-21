@@ -1,5 +1,5 @@
 import AuthService from '@/services/auth'
-import { PageNode, FolderNode, TemplateCategory } from '@/types/pages'
+import { PageNode, FolderNode, TemplateCategory, PageParent } from '@/types/pages'
 
 export class PagesService {
   private baseUrl = import.meta.env.VITE_API_URL;
@@ -63,17 +63,32 @@ export class PagesService {
     }
   }
 
-  async createPage(title: string, parentId: string | null, organizationId: string): Promise<PageNode> {
+  async createPage(
+    title: string, 
+    parent: PageParent,
+    organizationId: string
+  ): Promise<PageNode> {
     const headers = await this.getAuthHeader();
+    const requestBody = { 
+      name: title,  
+      parentId: parent.parentId ?? null,
+      type: "page", 
+      organizationId 
+    };
+    
     const response = await fetch(`${this.baseUrl}/pages`, {
-        method: 'POST',
-        credentials: 'include',
-        headers,
-        body: JSON.stringify({ title, parentId, organizationId })
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify(requestBody)
     });
-    if (!response.ok) throw new Error('Failed to create page');
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Server error response:', response.status, errorText);
+        throw new Error(`Failed to create page: ${response.status} - ${errorText}`);
+      }
     return response.json();
-}
+  }
 
   async updatePage(pageId: string, content: string, organizationId: string): Promise<void> {
     const headers = await this.getAuthHeader();
@@ -207,39 +222,58 @@ async deleteImage(imageId: string, organizationId: string): Promise<void> {
 
   async getFolders(organizationId: string): Promise<FolderNode[]> {
     try {
-      console.log('PagesService: Fetching folders for org:', organizationId);
-      const headers = await this.getAuthHeader();
-      const response = await fetch(`${this.baseUrl}/pages/folders?organizationId=${organizationId}`, {
-        credentials: 'include',
-        headers
-      });
-  
-      if (!response.ok) {
-        console.error('Failed to fetch folders:', response.status, response.statusText);
-        throw new Error('Failed to fetch folders');
-      }
-  
-      const data = await response.json();
-      console.log('PagesService: Received folder data:', data);
-      return data.folders;
-    } catch (error) {
-      console.error('Error in getFolders:', error);
-      throw error;
-    }
-  }
-
-    async createFolder(name: string, parentId: string | null, organizationId: string) {
+        console.log('PagesService: Fetching folders for org:', organizationId);
         const headers = await this.getAuthHeader();
-        const response = await fetch(`${this.baseUrl}/pages/folders`, {
-        method: 'POST',
-        credentials: 'include',
-        headers,
-        body: JSON.stringify({ name, parentId, organizationId })
+        const response = await fetch(`${this.baseUrl}/pages/folders?organizationId=${organizationId}`, {
+            credentials: 'include',
+            headers
         });
-        if (!response.ok) throw new Error('Failed to create folder');
-        return response.json();
-    }
 
+        if (!response.ok) {
+            console.error('Failed to fetch folders:', response.status, response.statusText);
+            throw new Error('Failed to fetch folders');
+        }
+
+        const data = await response.json();
+        console.log('PagesService: Received folder data:', data);
+        // Ensure data.folders is an array; default to [] if not
+        return Array.isArray(data.folders) ? data.folders : [];
+    } catch (error) {
+        console.error('Error in getFolders:', error);
+        throw error;
+    }
+}
+
+  async createFolder(
+    name: string, 
+    parentId: string | null, 
+    organizationId: string,
+    parentTable?: 'pages' | 'folders' | null
+    ): Promise<FolderNode> {
+        const headers = await this.getAuthHeader();
+        const requestBody = { 
+            name, 
+            parentId: parentId || null, 
+            organizationId,
+            parentTable: parentId ? parentTable : null // Only include parentTable if there's a parentId
+        };
+        console.log('Creating folder with payload:', requestBody);
+        
+        const response = await fetch(`${this.baseUrl}/pages/folders`, {
+            method: 'POST',
+            credentials: 'include',
+            headers,
+            body: JSON.stringify(requestBody)
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Server error response:', errorText);
+            throw new Error('Failed to create folder');
+        }
+        const data = await response.json();
+        console.log('Raw response from server:', data);
+        return data;
+    }
     async updateFolder(folderId: string, name: string, parentId: string | null, organizationId: string) {
         const headers = await this.getAuthHeader();
         const response = await fetch(`${this.baseUrl}/pages/folders/${folderId}`, {
@@ -263,7 +297,7 @@ async deleteImage(imageId: string, organizationId: string): Promise<void> {
 
 // In PagesService class
 async createTemplate(
-    title: string,
+    name: string,
     content: string,
     description: string,
     categoryId: number,
@@ -276,12 +310,12 @@ async createTemplate(
         credentials: 'include',
         headers,
         body: JSON.stringify({
-          title,
-          content,
-          description,
-          categoryId,
-          organizationId,
-          status: 'template'
+            name,
+            content,
+            description,
+            categoryId,
+            organizationId,
+            status: 'template'
         })
       });
   
@@ -332,7 +366,7 @@ async createTemplate(
 
   async updateTemplate(
     templateId: string,
-    title: string,
+    name: string,
     content: string,
     description: string,
     categoryId: number,
@@ -345,12 +379,12 @@ async createTemplate(
         credentials: 'include',
         headers,
         body: JSON.stringify({
-          title,
-          content,
-          description,
-          categoryId,
-          organizationId,
-          status: 'template'
+            name,
+            content,
+            description,
+            categoryId,
+            organizationId,
+            status: 'template'
         })
       });
       if (!response.ok) {

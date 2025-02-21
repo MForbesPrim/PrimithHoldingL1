@@ -3768,7 +3768,7 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
         SELECT 
             pc.id, 
             pc.parent_id,
-            pc.title,
+            pc.name,
             COALESCE(pc.content, '') as content,
             pc.status,
             cb.email as created_by,
@@ -3798,7 +3798,7 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 		var page struct {
 			ID        string
 			ParentID  sql.NullString
-			Title     string
+			Name      string
 			Content   string // Changed from sql.NullString since we use COALESCE
 			Status    string
 			CreatedBy string
@@ -3812,7 +3812,7 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(
 			&page.ID,
 			&page.ParentID,
-			&page.Title,
+			&page.Name,
 			&page.Content,
 			&page.Status,
 			&page.CreatedBy,
@@ -3829,7 +3829,7 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 		pageMap := map[string]interface{}{
 			"id":        page.ID,
 			"parentId":  page.ParentID.String,
-			"title":     page.Title,
+			"name":      page.Name,
 			"content":   page.Content,
 			"status":    page.Status,
 			"createdBy": page.CreatedBy,
@@ -3853,14 +3853,16 @@ func handleCreatePage(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
 
 	var req struct {
-		Title          string  `json:"title"`
+		Name           string  `json:"name"`
 		ParentID       *string `json:"parentId"`
+		Type           string  `json:"type"`
 		OrganizationID string  `json:"organizationId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+	log.Printf("Received request: %+v", req)
 
 	// Verify user has access to the organization
 	var authorized bool
@@ -3872,65 +3874,85 @@ func handleCreatePage(w http.ResponseWriter, r *http.Request) {
             WHERE u.email = $1 AND om.organization_id = $2
         )
     `, claims.Username, req.OrganizationID).Scan(&authorized)
-
 	if err != nil || !authorized {
 		http.Error(w, "Unauthorized access to organization", http.StatusForbidden)
 		return
 	}
 
-	// Start transaction
-	tx, err := db.Begin()
-	if err != nil {
-		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
-		return
-	}
-	defer tx.Rollback()
-
 	// Get user ID
 	var userId string
-	err = tx.QueryRow(
-		"SELECT id FROM auth.users WHERE email = $1",
-		claims.Username,
-	).Scan(&userId)
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
 	if err != nil {
 		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
 		return
 	}
 
-	// Create the page
-	var pageId string
+	// Handle ParentID
+	var parentIDParam *string
+	if req.ParentID != nil && *req.ParentID != "" {
+		parentIDValue := *req.ParentID
+		parentIDParam = &parentIDValue
+		var parentExists bool
+		err = db.QueryRow(`
+            SELECT EXISTS (
+                SELECT 1 FROM pages.pages_content 
+                WHERE id = $1 AND organization_id = $2
+            )
+        `, parentIDParam, req.OrganizationID).Scan(&parentExists)
+		if err != nil || !parentExists {
+			http.Error(w, "Invalid parent ID", http.StatusBadRequest)
+			return
+		}
+	} else {
+		parentIDParam = nil
+	}
+
+	// Create the page/folder
+	var id string
 	var createdAt, updatedAt time.Time
+	log.Printf("Inserting: name=%s, parent_id=%v, org_id=%s, type=%s, user_id=%s",
+		req.Name, parentIDParam, req.OrganizationID, req.Type, userId)
 	err = db.QueryRow(`
         INSERT INTO pages.pages_content (
-            title,
+            name,
             parent_id,
             organization_id,
             content,
+            type,
             status,
             created_by,
             updated_by
-        ) VALUES ($1, $2, $3, '', 'active', $4, $4)
+        ) VALUES ($1, $2, $3, '', $4, 'active', $5, $5)
         RETURNING id, created_at, updated_at
-    `, req.Title, req.ParentID, req.OrganizationID, userId).Scan(&pageId, &createdAt, &updatedAt)
-
+    `, req.Name, parentIDParam, req.OrganizationID, req.Type, userId).Scan(&id, &createdAt, &updatedAt)
 	if err != nil {
-		log.Printf("Error creating page: %v", err)
-		http.Error(w, "Failed to create page", http.StatusInternalServerError)
+		log.Printf("Database error: %v", err)
+		http.Error(w, "Failed to create item", http.StatusInternalServerError)
 		return
 	}
 
-	// Return all the page fields
+	// Verify insertion
+	var insertedParentID *string
+	err = db.QueryRow("SELECT parent_id FROM pages.pages_content WHERE id = $1", id).Scan(&insertedParentID)
+	if err != nil {
+		log.Printf("Failed to verify parent_id: %v", err)
+	} else {
+		log.Printf("Inserted parent_id from DB: %v (expected: %v)", insertedParentID, parentIDParam)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":        pageId,
-		"title":     req.Title,
-		"parentId":  req.ParentID,
-		"content":   "",
-		"status":    "active",
-		"createdBy": claims.Username,
-		"updatedBy": claims.Username,
-		"createdAt": createdAt,
-		"updatedAt": updatedAt,
+		"id":             id,
+		"name":           req.Name,
+		"parentId":       req.ParentID,
+		"type":           req.Type,
+		"content":        "",
+		"status":         "active",
+		"createdBy":      claims.Username,
+		"updatedBy":      claims.Username,
+		"createdAt":      createdAt,
+		"updatedAt":      updatedAt,
+		"organizationId": req.OrganizationID,
 	})
 }
 
@@ -4036,7 +4058,7 @@ func handleRenamePage(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
 
 	var req struct {
-		Title          string `json:"title"`
+		Name           string `json:"name"`
 		OrganizationID string `json:"organizationId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -4058,7 +4080,7 @@ func handleRenamePage(w http.ResponseWriter, r *http.Request) {
 	result, err := db.Exec(`
         UPDATE pages.pages_content 
         SET 
-            title = $1,
+            name = $1,
             updated_by = $2,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $3
@@ -4069,7 +4091,7 @@ func handleRenamePage(w http.ResponseWriter, r *http.Request) {
             WHERE om.organization_id = $4
             AND om.user_id = $2
         )
-    `, req.Title, userId, pageId, req.OrganizationID)
+    `, req.Name, userId, pageId, req.OrganizationID)
 
 	if err != nil {
 		http.Error(w, "Failed to rename page", http.StatusInternalServerError)
@@ -4621,7 +4643,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		SELECT 
 			pc.id, 
 			pc.parent_id,
-			pc.title,
+			pc.name,
 			COALESCE(pc.content, '') as content,
 			COALESCE(tc.label, '') as category, 
 			COALESCE(pc.description, '') as description,
@@ -4666,7 +4688,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		var template struct {
 			ID           string
 			ParentID     sql.NullString
-			Title        string
+			Name         string
 			Content      string
 			Category     string
 			Description  string
@@ -4682,7 +4704,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(
 			&template.ID,
 			&template.ParentID,
-			&template.Title,
+			&template.Name,
 			&template.Content,
 			&template.Category,
 			&template.Description,
@@ -4701,7 +4723,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		templateMap := map[string]interface{}{
 			"id":           template.ID,
 			"parentId":     template.ParentID.String,
-			"title":        template.Title,
+			"name":         template.Name,
 			"content":      template.Content,
 			"category":     template.Category,
 			"description":  template.Description,
@@ -4786,30 +4808,30 @@ func handleToggleFavoriteTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetPagesFolders(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Starting handleGetFolders")
+	log.Printf("Starting handleGetPagesFolders")
 	organizationId := r.URL.Query().Get("organizationId")
 	log.Printf("Fetching folders for organizationId: %s", organizationId)
 
-	// Modify the query to be simpler first to debug
 	rows, err := db.Query(`
         SELECT 
-            f.id, 
-            f.name,
-            f.parent_id,
-            f.organization_id,
-            f.created_at,
-            f.updated_at,
-            f.deleted_at,
-            cb.email as created_by,    -- Join to get email
-            ub.email as updated_by,    -- Join to get email
-            db.email as deleted_by     -- Join to get email
-        FROM pages.folders f
-        LEFT JOIN auth.users cb ON f.created_by = cb.id
-        LEFT JOIN auth.users ub ON f.updated_by = ub.id
-        LEFT JOIN auth.users db ON f.deleted_by = db.id
-        WHERE f.organization_id = $1
-        AND f.deleted_at IS NULL
-        ORDER BY f.created_at DESC
+            pc.id, 
+            pc.name,
+            pc.parent_id,
+            pc.organization_id,
+            pc.created_at,
+            pc.updated_at,
+            pc.deleted_at,
+            cb.email as created_by,
+            ub.email as updated_by,
+            db.email as deleted_by
+        FROM pages.pages_content pc
+        LEFT JOIN auth.users cb ON pc.created_by = cb.id
+        LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+        LEFT JOIN auth.users db ON pc.deleted_by = db.id
+        WHERE pc.organization_id = $1
+        AND pc.type = 'folder'
+        AND pc.deleted_at IS NULL
+        ORDER BY pc.created_at DESC
     `, organizationId)
 
 	if err != nil {
@@ -4852,10 +4874,7 @@ func handleGetPagesFolders(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Printf("Found folder: ID=%s, Name=%s, ParentID=%v, CreatedBy=%s",
-			folder.ID,
-			folder.Name,
-			folder.ParentID.String,
-			folder.CreatedBy)
+			folder.ID, folder.Name, folder.ParentID.String, folder.CreatedBy)
 
 		folderMap := map[string]interface{}{
 			"id":             folder.ID,
@@ -4881,6 +4900,7 @@ func handleGetPagesFolders(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCreatePagesFolder(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Starting handleCreatePagesFolder")
 	claims := r.Context().Value(claimsKey).(*Claims)
 
 	var req struct {
@@ -4889,9 +4909,11 @@ func handleCreatePagesFolder(w http.ResponseWriter, r *http.Request) {
 		OrganizationID string  `json:"organizationId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+	log.Printf("Received create folder request: %+v", req)
 
 	// Verify user has access to the organization
 	var authorized bool
@@ -4903,7 +4925,6 @@ func handleCreatePagesFolder(w http.ResponseWriter, r *http.Request) {
             WHERE u.email = $1 AND om.organization_id = $2
         )
     `, claims.Username, req.OrganizationID).Scan(&authorized)
-
 	if err != nil || !authorized {
 		http.Error(w, "Unauthorized", http.StatusForbidden)
 		return
@@ -4920,30 +4941,85 @@ func handleCreatePagesFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create the folder
+	// Handle ParentID - ensure it's NULL if not provided
+	var parentIDParam interface{}
+	if req.ParentID != nil && *req.ParentID != "" {
+		parentIDParam = *req.ParentID
+	} else {
+		parentIDParam = nil
+	}
+
+	// Create the folder in pages_content
 	var folderID string
 	err = db.QueryRow(`
-        INSERT INTO pages.folders (
+        INSERT INTO pages.pages_content (
             name,
             parent_id,
             organization_id,
+            type,
+            status,
             created_by,
             updated_by
-        ) VALUES ($1, $2, $3, $4, $4)
+        ) VALUES ($1, $2, $3, 'folder', 'active', $4, $4)
         RETURNING id
-    `, req.Name, req.ParentID, req.OrganizationID, userId).Scan(&folderID)
-
+    `, req.Name, parentIDParam, req.OrganizationID, userId).Scan(&folderID)
 	if err != nil {
+		log.Printf("Error creating folder: %v", err)
 		http.Error(w, "Failed to create folder", http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch the complete folder data
+	var folder struct {
+		ID        string
+		Name      string
+		ParentID  sql.NullString
+		OrgID     string
+		CreatedAt time.Time
+		UpdatedAt time.Time
+		CreatedBy string
+		UpdatedBy string
+	}
+	err = db.QueryRow(`
+        SELECT 
+            pc.id,
+            pc.name,
+            pc.parent_id,
+            pc.organization_id,
+            pc.created_at,
+            pc.updated_at,
+            cb.email as created_by,
+            ub.email as updated_by
+        FROM pages.pages_content pc
+        LEFT JOIN auth.users cb ON pc.created_by = cb.id
+        LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+        WHERE pc.id = $1
+    `, folderID).Scan(
+		&folder.ID,
+		&folder.Name,
+		&folder.ParentID,
+		&folder.OrgID,
+		&folder.CreatedAt,
+		&folder.UpdatedAt,
+		&folder.CreatedBy,
+		&folder.UpdatedBy,
+	)
+	if err != nil {
+		log.Printf("Error fetching folder details: %v", err)
+		http.Error(w, "Failed to fetch folder details", http.StatusInternalServerError)
 		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":             folderID,
-		"name":           req.Name,
-		"parentId":       req.ParentID,
-		"organizationId": req.OrganizationID,
+		"id":             folder.ID,
+		"name":           folder.Name,
+		"parentId":       folder.ParentID.String,
+		"organizationId": folder.OrgID,
+		"createdAt":      folder.CreatedAt,
+		"updatedAt":      folder.UpdatedAt,
+		"createdBy":      folder.CreatedBy,
+		"updatedBy":      folder.UpdatedBy,
 	})
 }
 
@@ -4974,13 +5050,14 @@ func handleUpdatePagesFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := db.Exec(`
-        UPDATE pages.folders 
+        UPDATE pages.pages_content 
         SET name = $1,
             parent_id = $2,
             updated_by = $3,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $4
         AND organization_id = $5
+        AND type = 'folder'
         AND EXISTS (
             SELECT 1 
             FROM auth.organization_members om
@@ -4988,7 +5065,6 @@ func handleUpdatePagesFolder(w http.ResponseWriter, r *http.Request) {
             AND om.user_id = $3
         )
     `, req.Name, req.ParentID, userId, folderID, req.OrganizationID)
-
 	if err != nil {
 		http.Error(w, "Failed to update folder", http.StatusInternalServerError)
 		return
@@ -5026,41 +5102,21 @@ func handleDeletePagesFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Soft delete folder and all its contents
+	// Soft delete the folder and all its descendants
 	_, err = tx.Exec(`
-        WITH RECURSIVE folder_tree AS (
-            SELECT id FROM pages.folders WHERE id = $1
+        WITH RECURSIVE content_tree AS (
+            SELECT id FROM pages.pages_content WHERE id = $1 AND type = 'folder'
             UNION ALL
-            SELECT f.id FROM pages.folders f
-            INNER JOIN folder_tree ft ON f.parent_id = ft.id
-        )
-        UPDATE pages.folders 
-        SET deleted_at = CURRENT_TIMESTAMP,
-            deleted_by = $2
-        WHERE id IN (SELECT id FROM folder_tree)
-    `, folderID, userId)
-
-	if err != nil {
-		http.Error(w, "Failed to delete folder", http.StatusInternalServerError)
-		return
-	}
-
-	// Soft delete all pages in the folder tree
-	_, err = tx.Exec(`
-        WITH RECURSIVE folder_tree AS (
-            SELECT id FROM pages.folders WHERE id = $1
-            UNION ALL
-            SELECT f.id FROM pages.folders f
-            INNER JOIN folder_tree ft ON f.parent_id = ft.id
+            SELECT pc.id FROM pages.pages_content pc
+            INNER JOIN content_tree ct ON pc.parent_id = ct.id
         )
         UPDATE pages.pages_content
         SET deleted_at = CURRENT_TIMESTAMP,
             deleted_by = $2
-        WHERE folder_id IN (SELECT id FROM folder_tree)
+        WHERE id IN (SELECT id FROM content_tree)
     `, folderID, userId)
-
 	if err != nil {
-		http.Error(w, "Failed to delete folder contents", http.StatusInternalServerError)
+		http.Error(w, "Failed to delete folder and contents", http.StatusInternalServerError)
 		return
 	}
 
@@ -5076,7 +5132,7 @@ func handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
 
 	var req struct {
-		Title          string `json:"title"`
+		Name           string `json:"name"`
 		Content        string `json:"content"`
 		Description    string `json:"description"`
 		CategoryId     int    `json:"categoryId"`
@@ -5118,7 +5174,7 @@ func handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	var createdAt, updatedAt time.Time
 	err = db.QueryRow(`
         INSERT INTO pages.pages_content (
-            title,
+            name,
             content,
             description,
             template_category_id,
@@ -5128,7 +5184,7 @@ func handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
             updated_by
         ) VALUES ($1, $2, $3, $4, $5, 'template', $6, $6)
         RETURNING id, created_at, updated_at
-    `, req.Title, req.Content, req.Description, req.CategoryId, req.OrganizationID, userId).Scan(&templateId, &createdAt, &updatedAt)
+    `, req.Name, req.Content, req.Description, req.CategoryId, req.OrganizationID, userId).Scan(&templateId, &createdAt, &updatedAt)
 	if err != nil {
 		log.Printf("Error creating template: %v", err)
 		http.Error(w, "Failed to create template", http.StatusInternalServerError)
@@ -5138,7 +5194,7 @@ func handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":          templateId,
-		"title":       req.Title,
+		"name":        req.Name,
 		"content":     req.Content,
 		"description": req.Description,
 		"categoryId":  req.CategoryId,
@@ -5279,7 +5335,7 @@ func handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 	var template struct {
 		ID           string
 		ParentID     sql.NullString
-		Title        string
+		Name         string
 		Content      string
 		Category     string
 		CategoryID   sql.NullInt64
@@ -5297,7 +5353,7 @@ func handleGetTemplate(w http.ResponseWriter, r *http.Request) {
         SELECT 
             pc.id, 
             pc.parent_id,
-            pc.title,
+            pc.name,
             COALESCE(pc.content, '') as content,
             COALESCE(tc.label, '') as category,
             pc.template_category_id,
@@ -5323,7 +5379,7 @@ func handleGetTemplate(w http.ResponseWriter, r *http.Request) {
     `, templateId, claims.Username, organizationId).Scan(
 		&template.ID,
 		&template.ParentID,
-		&template.Title,
+		&template.Name,
 		&template.Content,
 		&template.Category,
 		&template.CategoryID,
@@ -5351,7 +5407,7 @@ func handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 	templateMap := map[string]interface{}{
 		"id":           template.ID,
 		"parentId":     template.ParentID.String,
-		"title":        template.Title,
+		"name":         template.Name,
 		"content":      template.Content,
 		"category":     template.Category,
 		"categoryId":   template.CategoryID.Int64,
@@ -5380,7 +5436,7 @@ func handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[handleUpdateTemplate] templateId: %s, user: %s", templateId, claims.Username)
 
 	var req struct {
-		Title          string `json:"title"`
+		Name           string `json:"name"`
 		Content        string `json:"content"`
 		Description    string `json:"description"`
 		CategoryId     int    `json:"categoryId"`
@@ -5415,7 +5471,7 @@ func handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 	result, err := tx.Exec(`
         UPDATE pages.pages_content 
         SET 
-            title = $1,
+            name = $1,
             content = $2,
             description = $3,
             template_category_id = $4,
@@ -5430,7 +5486,7 @@ func handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
             WHERE om.organization_id = $7
             AND om.user_id = $5
         )
-    `, req.Title, req.Content, req.Description, req.CategoryId, userId, templateId, req.OrganizationID)
+    `, req.Name, req.Content, req.Description, req.CategoryId, userId, templateId, req.OrganizationID)
 	if err != nil {
 		log.Printf("[handleUpdateTemplate] Error updating template: %v", err)
 		http.Error(w, "Failed to update template", http.StatusInternalServerError)

@@ -95,7 +95,7 @@ interface PageEditorProps {
     id: string, 
     content: string, 
     templateDetails?: {
-      title: string;
+      name: string;
       description: string;
       categoryId: number | null;
     }
@@ -393,7 +393,7 @@ const PageEditor = ({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [contentWidth, setContentWidth] = useState('auto');
-  const [currentTitle, setCurrentTitle] = useState(page.title);
+  const [currentTitle, setCurrentTitle] = useState(page.name);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -748,7 +748,7 @@ const PageEditor = ({
   }, []);
 
   const [stagingTemplateDetails, setStagingTemplateDetails] = useState({
-    title: page.title,
+    name: page.name,
     description: page.description || '',
     categoryId: page.categoryId || null
   });
@@ -768,7 +768,7 @@ const PageEditor = ({
   const colorInputRef = useRef<HTMLInputElement>(null);
   const [isSearchMenuOpen, setIsSearchMenuOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
-  const [newName, setNewName] = useState(page.title);
+  const [newName, setNewName] = useState(page.name);
   const [_isContextMenuOpen, setIsContextMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -1444,7 +1444,7 @@ const PageEditor = ({
                 if (editMode) {
                   // In edit mode, save directly without dialog
                   onSave(page.id, editor.getHTML(), {
-                    title: stagingTemplateDetails.title,
+                    name: stagingTemplateDetails.name,
                     description: stagingTemplateDetails.description,
                     categoryId: stagingTemplateDetails.categoryId
                   });
@@ -1452,7 +1452,7 @@ const PageEditor = ({
                   // In create mode, show confirmation dialog
                   setIsEditing(false);
                   setShowTemplateDialog(true);
-                  setTemplateName(stagingTemplateDetails.title || page.title);
+                  setTemplateName(stagingTemplateDetails.name || page.name);
                   setTemplateDescription(stagingTemplateDetails.description || '');
                   setSelectedCategoryId(stagingTemplateDetails.categoryId);
                 }
@@ -1466,7 +1466,7 @@ const PageEditor = ({
               onClick={() => {
                 setIsEditing(true);
                 setShowTemplateDialog(true);
-                setTemplateName(stagingTemplateDetails.title || page.title);
+                setTemplateName(stagingTemplateDetails.name || page.name);
                 setTemplateDescription(stagingTemplateDetails.description || '');
                 setSelectedCategoryId(stagingTemplateDetails.categoryId);
               }}
@@ -1786,7 +1786,7 @@ const PageEditor = ({
                   if (isEditing) {
                     // For Edit mode - just update staging details
                     setStagingTemplateDetails({
-                      title: templateName,
+                      name: templateName,
                       description: templateDescription,
                       categoryId: selectedCategoryId
                     });
@@ -1794,7 +1794,7 @@ const PageEditor = ({
                   } else {
                     // For Save mode - actually save the template
                     onSave(page.id, editor.getHTML(), {
-                      title: templateName,
+                      name: templateName,
                       description: templateDescription,
                       categoryId: selectedCategoryId
                     });

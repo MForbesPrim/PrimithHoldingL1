@@ -39,7 +39,7 @@ export function EditTemplate() {
   const handleEditorSave = async (
     templateId: string,
     editorContent: string,
-    templateDetails?: { title: string; description: string; categoryId: number | null }
+    templateDetails?: { name: string; description: string; categoryId: number | null } // Change title to name
   ) => {
     if (!templateDetails) {
       toast({
@@ -50,8 +50,8 @@ export function EditTemplate() {
       });
       return;
     }
-    const { title, description, categoryId } = templateDetails;
-    if (!title.trim() || !categoryId) {
+    const { name, description, categoryId } = templateDetails;
+    if (!name.trim() || !categoryId) { // Change title to name
       toast({
         title: "Error",
         description: "Please fill in all required fields",
@@ -60,14 +60,14 @@ export function EditTemplate() {
       });
       return;
     }
-
+  
     const rdmAuth = AuthService.getRdmTokens();
     const currentUserId = rdmAuth?.user.id || 'unknown';
-
+  
     try {
       await pagesService.updateTemplate(
         templateId,
-        title,
+        name, // Change title to name
         editorContent,
         description || '',
         categoryId,
@@ -80,7 +80,7 @@ export function EditTemplate() {
       });
       setTemplate(prev => prev ? {
         ...prev,
-        title,
+        name, // Change title to name
         content: editorContent,
         description,
         categoryId,

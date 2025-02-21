@@ -75,7 +75,7 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
 
   const filterTemplates = (templates: PageNode[]) => {
     return templates.filter(template => {
-      const matchesSearch = template.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      const matchesSearch = template.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (template.category?.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesFavorites = !filterFavorites || template.isFavorite;
       const matchesCategories = selectedCategories.length === 0 || 
@@ -153,7 +153,7 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
               )}
             </Button>
           </div>
-          <h3 className="text-base cursor-pointer font-bold">{template.title}</h3>
+          <h3 className="text-base cursor-pointer font-bold">{template.name}</h3>
           
           <div className={`flex justify-between items-end ${template.category ? 'mt-3' : 'mt-8'}`}>
             {template.category && (
@@ -281,7 +281,7 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
           <div className="py-6 pl-6 border-b">
             <div className="flex justify-between items-start">
               <div>
-                <h2 className="text-lg font-semibold">{selectedTemplate.title}</h2>
+                <h2 className="text-lg font-semibold">{selectedTemplate.name}</h2>
                 <p className="text-sm text-gray-500 max-w-[80%] mb-4">{selectedTemplate.description}</p>
                 <Button onClick={() => onCreatePage(selectedTemplate)}>
                   Use Template
