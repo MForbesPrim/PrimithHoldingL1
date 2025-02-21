@@ -384,7 +384,8 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
       {/* Show PageTree only when a page is selected */}
       {selectedPageId && isPageTreeVisible && (
         <PageTree
-          pages={pages}
+          pages={pages.filter(p => p.status !== 'template')}
+          folders={folders}
           onCreatePage={handleCreatePageClick}
           onDeletePage={handleDeletePage}
           onRenamePage={handleRenamePage}
@@ -497,7 +498,7 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
                   </div>
                 </div>
                 <PagesTable
-                  pages={pages}
+                  pages={pages.filter(p => p.status !== 'template')}
                   folders={folders}
                   onFolderClick={handleFolderClick}
                   currentFolderId={currentFolderId}

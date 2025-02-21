@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { 
   ChevronRight, 
   ChevronDown, 
+  Folder,
   FileText, 
   Plus, 
   Pencil, 
@@ -25,20 +26,17 @@ import {
   closestCenter
 } from '@dnd-kit/core'
 import { useToast } from "@/hooks/use-toast"
+import { PageNode, FolderNode } from "@/types/pages";
 
-interface PageNode {
-  id: string;
-  parentId: string | null;
-  title: string;
-  content: string;
-}
-
-interface ProcessedPageNode extends PageNode {
+interface ProcessedPageNode extends Omit<PageNode, 'folderId'> {
   children: ProcessedPageNode[];
+  hasChildren: boolean;
+  type: 'page' | 'folder';
 }
 
 export function PageTree({ 
   pages = [],
+  folders = [],
   onCreatePage, 
   onDeletePage,
   onRenamePage,
@@ -47,6 +45,7 @@ export function PageTree({
   selectedPageId
 }: {
   pages: PageNode[];
+  folders: FolderNode[];
   onCreatePage: (parentId: string | null) => void;
   onDeletePage: (id: string) => void;
   onRenamePage: (id: string, newTitle: string) => void;
@@ -64,31 +63,55 @@ export function PageTree({
   useEffect(() => {
     if (!pages) return;
     
-    const buildPageTree = (items: PageNode[]): ProcessedPageNode[] => {
-      const pageMap = new Map<string, ProcessedPageNode>();
-      items.forEach(item => {
-        pageMap.set(item.id, { ...item, children: [] });
+    const buildPageTree = (items: PageNode[], folders: FolderNode[]): ProcessedPageNode[] => {
+      const nodeMap = new Map<string, ProcessedPageNode>();
+      
+      // Add folders first
+      folders.forEach(folder => {
+        nodeMap.set(folder.id, {
+          ...folder,
+          title: folder.name, // Map name to title for consistency
+          type: 'folder',
+          content: '', // Required by ProcessedPageNode
+          children: [],
+          hasChildren: false,
+          status: 'folder' // Required by PageNode
+        } as ProcessedPageNode);
       });
-
-      const rootPages: ProcessedPageNode[] = [];
-      pageMap.forEach(page => {
-        if (page.parentId === null) {
-          rootPages.push(page);
+    
+      // Add pages
+      items.forEach(page => {
+        if (page.status !== 'template') {
+          nodeMap.set(page.id, {
+            ...page,
+            type: 'page',
+            children: [],
+            hasChildren: false
+          } as ProcessedPageNode);
+        }
+      });
+    
+      // Build tree structure
+      const rootNodes: ProcessedPageNode[] = [];
+      nodeMap.forEach(node => {
+        if (node.parentId === null) {
+          rootNodes.push(node);
         } else {
-          const parent = pageMap.get(page.parentId);
+          const parent = nodeMap.get(node.parentId);
           if (parent) {
-            parent.children.push(page);
+            parent.children.push(node);
+            parent.hasChildren = true;
           } else {
-            rootPages.push(page);
+            rootNodes.push(node);
           }
         }
       });
-
-      return rootPages;
+    
+      return rootNodes;
     };
 
-    setProcessedPages(buildPageTree(pages));
-  }, [pages]);
+    setProcessedPages(buildPageTree(pages, folders));
+  }, [pages, folders]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -188,12 +211,16 @@ export function PageTree({
             className="p-0 h-4 w-4"
             onClick={togglePage}
           >
-            {page.children.length > 0 && (
+            {page.hasChildren && (
               isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />
             )}
           </Button>
           <div {...attributes} {...listeners} className="cursor-move">
-            <FileText className="h-4 w-4 mx-1" />
+            {page.type === 'folder' ? (
+              <Folder className="h-4 w-4 mx-1" />
+            ) : (
+              <FileText className="h-4 w-4 mx-1" />
+            )}
           </div>
           <div
             className="flex items-center flex-1 cursor-pointer"
@@ -225,23 +252,27 @@ export function PageTree({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-40">
             <DropdownMenuItem onClick={() => onCreatePage(page.id)}>
-                <Plus className="h-4 w-4 mr-2" />
-                New Subpage
-                </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleStartRename}>
-                <Pencil className="h-4 w-4 mr-2" />
-                Rename
-              </DropdownMenuItem>
-              <DropdownMenuItem 
-                onClick={() => onDeletePage(page.id)}
-                className="text-red-600"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
+              <Folder className="h-4 w-4 mr-2" />
+              New Subfolder
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onCreatePage(page.id)}>
+              <Plus className="h-4 w-4 mr-2" />
+              New Subpage
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleStartRename}>
+              <Pencil className="h-4 w-4 mr-2" />
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuItem 
+              onClick={() => onDeletePage(page.id)}
+              className="text-red-600"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
           </DropdownMenu>
-        </div>
+          </div>
         {isExpanded && page.children.map(child => (
           <DraggablePage key={child.id} page={child} level={level + 1} />
         ))}

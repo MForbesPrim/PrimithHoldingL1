@@ -5,6 +5,9 @@ import {
   ChevronRight,
   ChevronDown,
   Folder,
+  Plus,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import { PageNode, FolderNode } from '@/types/pages';
 import { Button } from '@/components/ui/button';
@@ -266,14 +269,16 @@ export function PagesTable({
                         onCreateFolder(node.id);
                     }, 0);
                     }}>
-                    Create Subfolder
+                    <Folder className="h-4 w-4 mr-2" /> 
+                    New Subfolder
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => {
                     setTimeout(() => {
                         onCreatePage(node.id, 'New Page');
                     }, 0);
                     }}>
-                    Create Subpage
+                    <Plus className="h-4 w-4 mr-2" />      
+                    New Subpage
                     </DropdownMenuItem>
                     <DropdownMenuItem
                     onClick={() => {
@@ -285,6 +290,7 @@ export function PagesTable({
                         }, 0);
                     }}
                     >
+                    <Pencil className="h-4 w-4 mr-2" />    
                     Rename
                     </DropdownMenuItem>
                     <DropdownMenuItem
@@ -297,6 +303,7 @@ export function PagesTable({
                     }}
                     className="text-red-600"
                     >
+                    <Trash2 className="h-4 w-4 mr-2" />    
                     Delete
                     </DropdownMenuItem>
                 </>

@@ -100,7 +100,12 @@ export function Templates({ organizationId, onCreatePage, onClose }: TemplatePro
   const customTemplates = templates.filter(t => t.status === 'template');
 
   if (loading) {
-    return <div className="flex items-center justify-center h-full">Loading templates...</div>;
+    return <div className="flex items-center justify-center h-full">
+            <div className="flex items-center justify-center h-screen mr-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-4 border-gray-900 border-t-transparent"/>
+            </div>
+            Loading templates...
+            </div>;
   }
 
   const TemplateGrid = ({ templates }: { templates: PageNode[] }) => (
