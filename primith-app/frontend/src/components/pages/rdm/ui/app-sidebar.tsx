@@ -82,7 +82,7 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
             {menuItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
+                <SidebarMenuItem key={item.title} className="py-1">
                 <SidebarMenuButton asChild>
                   <Link to={item.url} onClick={() => handleItemClick(item.url, item.title)}>
                     <item.icon />
