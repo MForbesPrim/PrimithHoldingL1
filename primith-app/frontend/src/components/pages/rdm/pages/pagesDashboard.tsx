@@ -395,7 +395,7 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
         />
       )}
 
-    <div className="flex-1 p-4">
+    <div className="flex-1 p-3">
     {selectedPageId ? (
           // Show Page Editor when a page is selected
           <div>
@@ -444,7 +444,7 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
                 />
               ) : (
           // Show Pages Dashboard when no page is selected
-          <div className="flex-1 p-4">
+          <div className="flex-1 px-4 py-5">
                 <div className="flex justify-between items-center mb-4">
                   <div className="flex items-center gap-2">
                     {currentFolderId ? (

@@ -79,7 +79,7 @@ export function AppSidebar() {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <SidebarGroupContent>
+          <SidebarGroupContent className="mt-1">
             <SidebarMenu>
             {menuItems.map((item) => (
                 <SidebarMenuItem key={item.title} className="py-1">
