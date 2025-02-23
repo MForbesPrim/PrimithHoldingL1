@@ -408,6 +408,14 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
           pages={pages.filter(p => p.status !== 'template')}
           folders={folders}
           onCreatePage={handleCreatePageClick}
+          onCreateFolder={(parentId) => {
+            // Check if parent is a folder or page
+            const parentFolder = folders.find(f => f.id === parentId);            
+            setNewFolderParentId(parentId);
+            setNewFolderName("");
+            setNewFolderParentType(parentFolder ? 'folders' : 'pages');
+            setShowNewFolderDialog(true);
+          }}
           onDeletePage={handleDeletePage}
           onRenamePage={handleRenamePage}
           onMovePage={handleMovePage}

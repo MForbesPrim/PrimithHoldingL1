@@ -34,7 +34,6 @@ import {
   flexRender,
   getCoreRowModel,
   useReactTable,
-  getSortedRowModel,
   SortingState,
 } from '@tanstack/react-table';
 import {
@@ -77,7 +76,7 @@ type CombinedNode = {
 function buildCombinedTree(pages: PageNode[], folders: FolderNode[]): CombinedNode[] {
     const nodesMap = new Map<string, CombinedNode>();
 
-    // Add pages to the map
+    // Add pages to the map first
     pages.forEach(page => {
         nodesMap.set(page.id, {
             id: page.id,
@@ -92,13 +91,13 @@ function buildCombinedTree(pages: PageNode[], folders: FolderNode[]): CombinedNo
         });
     });
 
-    // Add folders to the map
+    // Add folders and build relationships
     folders.forEach(folder => {
         nodesMap.set(folder.id, {
             id: folder.id,
             parentId: folder.parentId || null,
             name: folder.name,
-            type: 'folder', // Explicitly set type as 'folder'
+            type: 'folder',
             createdBy: folder.createdBy,
             updatedAt: folder.updatedAt,
             children: [],
@@ -107,7 +106,7 @@ function buildCombinedTree(pages: PageNode[], folders: FolderNode[]): CombinedNo
         });
     });
 
-    // Build tree structure
+    // Build the tree structure
     const roots: CombinedNode[] = [];
     nodesMap.forEach((node) => {
         if (node.parentId) {
@@ -139,20 +138,44 @@ function findNodeById(nodes: CombinedNode[], id: string): CombinedNode | undefin
   return undefined;
 }
 
-function flattenTree(
-  nodes: CombinedNode[],
-  expanded: Set<string>,
-  depth = 0
-): (CombinedNode & { depth: number })[] {
-  let result: (CombinedNode & { depth: number })[] = [];
-  nodes.forEach((node) => {
-    result.push({ ...node, depth });
-    if (expanded.has(node.id) && node.hasChildren) {
-      result = result.concat(flattenTree(node.children, expanded, depth + 1));
-    }
-  });
-  return result;
-}
+function sortNodes(nodes: CombinedNode[], sortColumn: string, sortDesc: boolean): CombinedNode[] {
+    return [...nodes].sort((a, b) => {
+      let valA, valB;
+      if (sortColumn === "name") {
+        valA = a.name.toLowerCase();
+        valB = b.name.toLowerCase();
+      } else if (sortColumn === "updatedAt") {
+        valA = new Date(a.updatedAt);
+        valB = new Date(b.updatedAt);
+      } else if (sortColumn === "createdBy") {
+        valA = a.createdBy.toLowerCase();
+        valB = b.createdBy.toLowerCase();
+      } else {
+        return 0; // No sorting if column is unrecognized
+      }
+      if (valA < valB) return sortDesc ? 1 : -1;
+      if (valA > valB) return sortDesc ? -1 : 1;
+      return 0;
+    });
+  }
+
+  function flattenTree(
+    nodes: CombinedNode[],
+    expanded: Set<string>,
+    depth = 0,
+    sortColumn: string,
+    sortDesc: boolean
+  ): (CombinedNode & { depth: number })[] {
+    let result: (CombinedNode & { depth: number })[] = [];
+    const sortedNodes = sortNodes(nodes, sortColumn, sortDesc);
+    sortedNodes.forEach((node) => {
+      result.push({ ...node, depth });
+      if (expanded.has(node.id) && node.children.length > 0) {
+        result = result.concat(flattenTree(node.children, expanded, depth + 1, sortColumn, sortDesc));
+      }
+    });
+    return result;
+  }
 
 export function PagesTable({
     pages,
@@ -181,6 +204,7 @@ export function PagesTable({
     const [deleteError, setDeleteError] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState(''); 
     const tree = useMemo(() => buildCombinedTree(pages, folders), [pages, folders]);
+    
     const currentNodes = useMemo(() => {
         if (!currentFolderId) {
         return tree; // Show root nodes when no folder is selected
@@ -188,17 +212,21 @@ export function PagesTable({
         const currentFolder = findNodeById(tree, currentFolderId);
         return currentFolder ? currentFolder.children : [];
     }, [tree, currentFolderId]);
+
+    const sortColumn = sorting[0]?.id || "updatedAt"; // Default to updatedAt
+    const sortDesc = sorting[0]?.desc || false; // Default to ascending
     const flatData = useMemo(() => {
-        const result = flattenTree(currentNodes, expandedRows);
-        console.log("flatData sample:", result.slice(0, 2)); // Log first 2 items
-        return result;
-      }, [currentNodes, expandedRows]);
+    const result = flattenTree(currentNodes, expandedRows, 0, sortColumn, sortDesc);
+    console.log("flatData sample:", result.slice(0, 2)); // Optional: for debugging
+    return result;
+    }, [currentNodes, expandedRows, sorting]);
 
     const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return flatData; // Return all if no query
-    const lowercaseQuery = searchQuery.toLowerCase();
-    return flatData.filter((node) => node.name.toLowerCase().includes(lowercaseQuery));
-    }, [flatData, searchQuery]);
+        if (!searchQuery.trim()) return flatData; // Return all if no query
+        const lowercaseQuery = searchQuery.toLowerCase();
+        return flatData.filter((node) => node.name.toLowerCase().includes(lowercaseQuery));
+        }, [flatData, searchQuery]);
+    
 
     const columns: ColumnDef<CombinedNode & { depth: number }>[] = useMemo(
         () => [
@@ -233,53 +261,53 @@ export function PagesTable({
                   </div>
                 ),
                 cell: ({ row }) => {
-                  const node = row.original;
-                  const isExpanded = expandedRows.has(node.id);
-                  return (
-                    <div className="flex items-center" style={{ paddingLeft: `${node.depth * 20}px` }}>
-                      {node.hasChildren ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="p-0 h-4 w-4 mr-2"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedRows(prev => {
-                              const next = new Set(prev);
-                              if (next.has(node.id)) {
-                                next.delete(node.id);
-                              } else {
-                                next.add(node.id);
-                              }
-                              return next;
-                            });
+                    const node = row.original;
+                    const isExpanded = expandedRows.has(node.id);
+                    return (
+                      <div className="flex items-center" style={{ paddingLeft: `${node.depth * 24}px` }}>
+                        {node.hasChildren ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="p-0 h-4 w-4 mr-2"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedRows(prev => {
+                                const next = new Set(prev);
+                                if (next.has(node.id)) {
+                                  next.delete(node.id);
+                                } else {
+                                  next.add(node.id);
+                                }
+                                return next;
+                              });
+                            }}
+                          >
+                            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </Button>
+                        ) : (
+                          <div className="w-6" /> // Consistent spacing for items without children
+                        )}
+                        {node.type === 'folder' ? (
+                          <Folder className="h-4 w-4 mr-2" />
+                        ) : (
+                          <FileText className="h-4 w-4 mr-2" />
+                        )}
+                        <div
+                          className="cursor-pointer"
+                          onClick={() => {
+                            if (node.type === 'folder') {
+                              onFolderClick(node.id);
+                            } else {
+                              onPageClick(node.id);
+                            }
                           }}
                         >
-                          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                        </Button>
-                      ) : (
-                        <div className="w-6" />
-                      )}
-                      {node.type === 'folder' ? (
-                        <Folder className="h-4 w-4 mr-2" />
-                      ) : (
-                        <FileText className="h-4 w-4 mr-2" />
-                      )}
-                      <div
-                        className="cursor-pointer"
-                        onClick={() => {
-                          if (node.type === 'folder') {
-                            onFolderClick(node.id);
-                          } else {
-                            onPageClick(node.id);
-                          }
-                        }}
-                      >
-                        {node.name}
+                          {node.name}
+                        </div>
                       </div>
-                    </div>
-                  );
-                },
+                    );
+                  },
                 enableSorting: true,
               },
               {
@@ -497,7 +525,6 @@ export function PagesTable({
     data: filteredData, // Use filtered data
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
     onSortingChange: (updater) => {
       setSorting((prev) => {
         // Apply the updater function to the previous state

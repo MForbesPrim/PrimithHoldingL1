@@ -38,6 +38,7 @@ export function PageTree({
   pages = [],
   folders = [],
   onCreatePage, 
+  onCreateFolder,
   onDeletePage,
   onRenamePage,
   onMovePage,
@@ -47,6 +48,7 @@ export function PageTree({
   pages: PageNode[];
   folders: FolderNode[];
   onCreatePage: (parentId: string | null) => void;
+  onCreateFolder: (parentId: string | null) => void; 
   onDeletePage: (id: string) => void;
   onRenamePage: (id: string, newTitle: string) => void;
   onMovePage: (pageId: string, newParentId: string | null) => void;
@@ -66,22 +68,25 @@ export function PageTree({
     const buildPageTree = (items: PageNode[], folders: FolderNode[]): ProcessedPageNode[] => {
       const nodeMap = new Map<string, ProcessedPageNode>();
       
-      // Add folders first
+      // Create a Set of folder IDs for quick lookup
+      const folderIds = new Set(folders.map(folder => folder.id));
+      
+      // Add folders first with explicit type
       folders.forEach(folder => {
         nodeMap.set(folder.id, {
           ...folder,
-          title: folder.name, // Map name to title for consistency
+          title: folder.name,
           type: 'folder',
-          content: '', // Required by ProcessedPageNode
+          content: '',
           children: [],
           hasChildren: false,
-          status: 'folder' // Required by PageNode
+          status: 'folder'
         } as ProcessedPageNode);
       });
     
-      // Add pages
+      // Add pages, checking against folder IDs
       items.forEach(page => {
-        if (page.status !== 'template') {
+        if (page.status !== 'template' && !folderIds.has(page.id)) {
           nodeMap.set(page.id, {
             ...page,
             type: 'page',
@@ -109,7 +114,6 @@ export function PageTree({
     
       return rootNodes;
     };
-
     setProcessedPages(buildPageTree(pages, folders));
   }, [pages, folders]);
 
@@ -251,7 +255,7 @@ export function PageTree({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-40">
-            <DropdownMenuItem onClick={() => onCreatePage(page.id)}>
+            <DropdownMenuItem onClick={() => onCreateFolder(page.id)}>
               <Folder className="h-4 w-4 mr-2" />
               New Subfolder
             </DropdownMenuItem>
@@ -307,13 +311,22 @@ export function PageTree({
     <div className="min-w-[200px] border-r pr-4 pt-4 pb-4">
       <div className="flex items-center justify-between mb-4 ml-6">
         <h3 className="font-semibold">Pages</h3>
-        <Button
+        <div className="flex gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onCreateFolder(null)}
+          >
+            <Folder className="h-4 w-4" />
+          </Button>
+          <Button
             variant="ghost"
             size="sm"
             onClick={() => onCreatePage(null)}
-            >
+          >
             <Plus className="h-4 w-4" />
-        </Button>
+          </Button>
+        </div>
       </div>
       <DndContext
         onDragStart={({ active }) => setActiveId(active.id as string)}
