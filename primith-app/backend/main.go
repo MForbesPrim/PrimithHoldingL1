@@ -79,6 +79,29 @@ type LoginResponse struct {
 	User         UserData `json:"user,omitempty"`
 }
 
+type Project struct {
+	ID             uuid.UUID  `json:"id"`
+	Name           string     `json:"name"`
+	Description    string     `json:"description"`
+	OrganizationID uuid.UUID  `json:"organizationId"`
+	Status         string     `json:"status"`
+	StartDate      *time.Time `json:"startDate"`
+	EndDate        *time.Time `json:"endDate"`
+	CreatedBy      uuid.UUID  `json:"createdBy"`
+	UpdatedBy      *uuid.UUID `json:"updatedBy"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+}
+
+type ProjectMember struct {
+	ID        uuid.UUID `json:"id"`
+	ProjectID uuid.UUID `json:"projectId"`
+	UserID    uuid.UUID `json:"userId"`
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"createdAt"`
+	CreatedBy uuid.UUID `json:"createdBy"`
+}
+
 type contextKey string
 
 const claimsKey contextKey = "userClaims"
@@ -5515,6 +5538,253 @@ func handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Add handlers
+func handleGetProjects(w http.ResponseWriter, r *http.Request) {
+	organizationId := r.URL.Query().Get("organizationId")
+	if organizationId == "" {
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	rows, err := db.Query(`
+        SELECT p.id, p.name, p.description, p.organization_id, 
+               p.status, p.start_date, p.end_date,
+               p.created_by, p.updated_by, p.created_at, p.updated_at
+        FROM rdm.projects p
+        JOIN auth.organization_members om ON p.organization_id = om.organization_id 
+        JOIN auth.users u ON om.user_id = u.id
+        WHERE p.organization_id = $1 AND u.email = $2
+        ORDER BY p.created_at DESC
+    `, organizationId, claims.Username)
+
+	if err != nil {
+		http.Error(w, "Failed to fetch projects", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var projects []Project
+	for rows.Next() {
+		var project Project
+		err := rows.Scan(
+			&project.ID, &project.Name, &project.Description,
+			&project.OrganizationID, &project.Status, &project.StartDate,
+			&project.EndDate, &project.CreatedBy, &project.UpdatedBy,
+			&project.CreatedAt, &project.UpdatedAt,
+		)
+		if err != nil {
+			continue
+		}
+		projects = append(projects, project)
+	}
+
+	json.NewEncoder(w).Encode(projects)
+}
+
+func handleCreateProject(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name           string    `json:"name"`
+		Description    string    `json:"description"`
+		OrganizationID uuid.UUID `json:"organizationId"`
+		StartDate      *string   `json:"startDate"`
+		EndDate        *string   `json:"endDate"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	var userId uuid.UUID
+	err = tx.QueryRow(
+		"SELECT id FROM auth.users WHERE email = $1",
+		claims.Username,
+	).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	var project Project
+	err = tx.QueryRow(`
+        INSERT INTO rdm.projects 
+        (name, description, organization_id, status, created_by)
+        VALUES ($1, $2, $3, 'active', $4)
+        RETURNING id, name, description, organization_id, status, 
+                  created_by, created_at, updated_at
+    `, req.Name, req.Description, req.OrganizationID, userId).Scan(
+		&project.ID, &project.Name, &project.Description,
+		&project.OrganizationID, &project.Status, &project.CreatedBy,
+		&project.CreatedAt, &project.UpdatedAt,
+	)
+
+	if err != nil {
+		http.Error(w, "Failed to create project", http.StatusInternalServerError)
+		return
+	}
+
+	// Add creator as project owner
+	_, err = tx.Exec(`
+        INSERT INTO rdm.project_members 
+        (project_id, user_id, role, created_by)
+        VALUES ($1, $2, 'owner', $2)
+    `, project.ID, userId)
+
+	if err != nil {
+		http.Error(w, "Failed to add project owner", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(project)
+}
+
+func handleGetProjectMembers(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["id"]
+
+	rows, err := db.Query(`
+        SELECT pm.id, pm.project_id, pm.user_id, u.email,
+               CONCAT(u.first_name, ' ', u.last_name) as user_name,
+               pm.role, pm.created_at
+        FROM rdm.project_members pm
+        JOIN auth.users u ON pm.user_id = u.id
+        WHERE pm.project_id = $1
+    `, projectId)
+
+	if err != nil {
+		http.Error(w, "Failed to fetch members", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var members []map[string]interface{}
+	for rows.Next() {
+		var member struct {
+			ID        uuid.UUID
+			ProjectID uuid.UUID
+			UserID    uuid.UUID
+			Email     string
+			UserName  string
+			Role      string
+			CreatedAt time.Time
+		}
+
+		err := rows.Scan(
+			&member.ID, &member.ProjectID, &member.UserID,
+			&member.Email, &member.UserName, &member.Role,
+			&member.CreatedAt,
+		)
+		if err != nil {
+			continue
+		}
+
+		members = append(members, map[string]interface{}{
+			"id":        member.ID,
+			"projectId": member.ProjectID,
+			"userId":    member.UserID,
+			"email":     member.Email,
+			"userName":  member.UserName,
+			"role":      member.Role,
+			"createdAt": member.CreatedAt,
+		})
+	}
+
+	json.NewEncoder(w).Encode(members)
+}
+
+func handleGetProject(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var project Project
+	err := db.QueryRow(`
+        SELECT p.id, p.name, p.description, p.organization_id, 
+               p.status, p.start_date, p.end_date,
+               p.created_by, p.updated_by, p.created_at, p.updated_at
+        FROM rdm.projects p
+        JOIN auth.organization_members om ON p.organization_id = om.organization_id 
+        JOIN auth.users u ON om.user_id = u.id
+        WHERE p.id = $1 AND u.email = $2
+    `, projectId, claims.Username).Scan(
+		&project.ID, &project.Name, &project.Description,
+		&project.OrganizationID, &project.Status, &project.StartDate,
+		&project.EndDate, &project.CreatedBy, &project.UpdatedBy,
+		&project.CreatedAt, &project.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to fetch project", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(project)
+}
+
+func handleUpdateProject(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Status      string `json:"status"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	result, err := db.Exec(`
+        UPDATE rdm.projects 
+        SET name = $1, description = $2, status = $3, updated_by = $4
+        WHERE id = $5
+    `, req.Name, req.Description, req.Status, userId, projectId)
+
+	if err != nil {
+		http.Error(w, "Failed to update project", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -5706,6 +5976,17 @@ func main() {
 	r.HandleFunc("/pages/template-categories", authMiddleware(handleGetTemplateCategories)).Methods("GET")
 	r.HandleFunc("/pages/templates/{id}", authMiddleware(handleGetTemplate)).Methods("GET")
 	r.HandleFunc("/pages/templates/{id}", authMiddleware(handleUpdateTemplate)).Methods("PUT")
+
+	// Projects
+	r.HandleFunc("/projects", authMiddleware(handleGetProjects)).Methods("GET")
+	r.HandleFunc("/projects", authMiddleware(handleCreateProject)).Methods("POST")
+	r.HandleFunc("/projects/{id}", authMiddleware(handleGetProject)).Methods("GET")
+	r.HandleFunc("/projects/{id}", authMiddleware(handleUpdateProject)).Methods("PUT")
+	// r.HandleFunc("/projects/{id}", authMiddleware(handleDeleteProject)).Methods("DELETE")
+	r.HandleFunc("/projects/{id}/members", authMiddleware(handleGetProjectMembers)).Methods("GET")
+	// r.HandleFunc("/projects/{id}/members", authMiddleware(handleAddProjectMember)).Methods("POST")
+	// r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleUpdateMemberRole)).Methods("PUT")
+	// r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleRemoveProjectMember)).Methods("DELETE")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
