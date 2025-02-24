@@ -127,7 +127,7 @@ export function ProjectDetailPage() {
   }
 
   return (
-    <div className="container h-full overflow-y-auto p-4">
+    <div className="h-full overflow-y-auto p-4">
       <EditProjectDialog
         open={editingProject}
         onClose={() => setEditingProject(false)}

@@ -54,6 +54,19 @@ export function ProjectsPage() {
     }
   }, [location.state, navigate]);
 
+  function getStatusBadgeStyles(status: string) {
+    switch (status.toLowerCase()) {
+      case 'active':
+        return 'bg-green-100 text-green-800'
+      case 'completed':
+        return 'bg-blue-100 text-blue-800'
+      case 'archived':
+        return 'bg-gray-100 text-gray-800'
+      default:
+        return 'bg-gray-100 text-gray-800'
+    }
+  }
+
   async function loadProjects() {
     try {
       setLoading(true);
@@ -135,7 +148,9 @@ export function ProjectsPage() {
               <CardHeader>
                 <CardTitle>{project.name}</CardTitle>
                 <CardDescription>
-                  {project.status.charAt(0).toUpperCase() + project.status.slice(1)}
+                  <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeStyles(project.status)}`}>
+                    {project.status.charAt(0).toUpperCase() + project.status.slice(1)}
+                  </span>
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -183,7 +198,7 @@ export function ProjectsPage() {
                   <td className="px-4 py-3 text-sm">{project.name}</td>
                   <td className="px-4 py-3">
                     <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
-                      {project.status}
+                    {project.status.charAt(0).toUpperCase() + project.status.slice(1)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">
