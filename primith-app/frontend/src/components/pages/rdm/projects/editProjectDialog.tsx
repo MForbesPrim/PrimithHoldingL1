@@ -50,12 +50,22 @@ export function EditProjectDialog({ open, onClose, project, onSave }: EditProjec
     if (!project?.id) return
     setIsSaving(true)
     try {
+      const adjustDateToUTC = (dateString: string | undefined, originalDate: string | undefined) => {
+        // If the date hasn't changed, return the original value
+        if (dateString === originalDate) return dateString
+        
+        // Only adjust if it's a new date
+        if (!dateString) return undefined
+        const date = new Date(dateString)
+        return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())).toISOString()
+      }
+  
       const updatedProject: Partial<Project> = {
-        name: formData.name, // string | undefined (safe, but ensure name is required in UI)
-        description: formData.description || "", // string (empty string is fine)
-        status: formData.status, // "active" | "completed" | "archived" | undefined
-        startDate: formData.startDate || undefined, // string | undefined
-        endDate: formData.endDate || undefined,     // string | undefined
+        name: formData.name,
+        description: formData.description || "",
+        status: formData.status,
+        startDate: adjustDateToUTC(formData.startDate, project.startDate),
+        endDate: adjustDateToUTC(formData.endDate, project.endDate),
       }
       await projectService.updateProject(project.id, updatedProject)
       await onSave({ ...project, ...updatedProject, updatedAt: new Date().toISOString() })
@@ -70,8 +80,12 @@ export function EditProjectDialog({ open, onClose, project, onSave }: EditProjec
   const parseDate = (dateString: string | undefined) => {
     if (!dateString) return undefined
     const date = new Date(dateString)
-    return isNaN(date.getTime()) ? undefined : date
+    if (isNaN(date.getTime())) return undefined
+    // Adjust for timezone offset
+    const timezoneOffset = date.getTimezoneOffset() * 60000 // Convert minutes to milliseconds
+    return new Date(date.getTime() + timezoneOffset)
   }
+  
 
   const formatDate = (date: Date | undefined) => {
     if (!date) return ""

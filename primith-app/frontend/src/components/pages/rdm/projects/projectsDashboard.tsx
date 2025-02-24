@@ -198,7 +198,7 @@ export function ProjectsPage() {
                   <td className="px-4 py-3 text-sm">{project.name}</td>
                   <td className="px-4 py-3">
                     <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
-                    {project.status.charAt(0).toUpperCase() + project.status.slice(1)}
+                      {project.status.charAt(0).toUpperCase() + project.status.slice(1)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">
