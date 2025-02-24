@@ -5748,9 +5748,11 @@ func handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
 
 	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Status      string `json:"status"`
+		Name        string     `json:"name"`
+		Description string     `json:"description"`
+		Status      string     `json:"status"`
+		StartDate   *time.Time `json:"startDate"`
+		EndDate     *time.Time `json:"endDate"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -5766,10 +5768,12 @@ func handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := db.Exec(`
-        UPDATE rdm.projects 
-        SET name = $1, description = $2, status = $3, updated_by = $4
-        WHERE id = $5
-    `, req.Name, req.Description, req.Status, userId, projectId)
+      UPDATE rdm.projects 
+      SET name = $1, description = $2, status = $3, 
+          start_date = $4, end_date = $5, 
+          updated_by = $6, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $7
+    `, req.Name, req.Description, req.Status, req.StartDate, req.EndDate, userId, projectId)
 
 	if err != nil {
 		http.Error(w, "Failed to update project", http.StatusInternalServerError)
@@ -5779,6 +5783,117 @@ func handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	rowsAffected, err := result.RowsAffected()
 	if err != nil || rowsAffected == 0 {
 		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleDeleteProject(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	result, err := db.Exec(`
+		DELETE FROM rdm.projects p
+		USING auth.users u, auth.organization_members om
+		WHERE p.id = $1 
+		AND p.organization_id = om.organization_id
+		AND om.user_id = u.id 
+		AND u.email = $2
+	`, projectId, claims.Username)
+
+	if err != nil {
+		http.Error(w, "Failed to delete project", http.StatusInternalServerError)
+		return
+	}
+
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		http.Error(w, "Project not found or access denied", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleAddProjectMember(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["id"]
+
+	var req struct {
+		UserID string `json:"userId"`
+		Role   string `json:"role"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var creatorId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&creatorId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	_, err = db.Exec(`
+		INSERT INTO rdm.project_members (project_id, user_id, role, created_by)
+		VALUES ($1, $2, $3, $4)
+	`, projectId, req.UserID, req.Role, creatorId)
+
+	if err != nil {
+		http.Error(w, "Failed to add member", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
+func handleUpdateMemberRole(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["id"]
+	userId := vars["userId"]
+
+	var req struct {
+		Role string `json:"role"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	result, err := db.Exec(`
+		UPDATE rdm.project_members 
+		SET role = $1
+		WHERE project_id = $2 AND user_id = $3
+	`, req.Role, projectId, userId)
+
+	if err != nil {
+		http.Error(w, "Failed to update role", http.StatusInternalServerError)
+		return
+	}
+
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		http.Error(w, "Member not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleRemoveProjectMember(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["id"]
+	userId := vars["userId"]
+
+	result, err := db.Exec(`
+		DELETE FROM rdm.project_members
+		WHERE project_id = $1 AND user_id = $2
+	`, projectId, userId)
+
+	if err != nil {
+		http.Error(w, "Failed to remove member", http.StatusInternalServerError)
+		return
+	}
+
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		http.Error(w, "Member not found", http.StatusNotFound)
 		return
 	}
 
@@ -5982,11 +6097,11 @@ func main() {
 	r.HandleFunc("/projects", authMiddleware(handleCreateProject)).Methods("POST")
 	r.HandleFunc("/projects/{id}", authMiddleware(handleGetProject)).Methods("GET")
 	r.HandleFunc("/projects/{id}", authMiddleware(handleUpdateProject)).Methods("PUT")
-	// r.HandleFunc("/projects/{id}", authMiddleware(handleDeleteProject)).Methods("DELETE")
+	r.HandleFunc("/projects/{id}", authMiddleware(handleDeleteProject)).Methods("DELETE")
 	r.HandleFunc("/projects/{id}/members", authMiddleware(handleGetProjectMembers)).Methods("GET")
-	// r.HandleFunc("/projects/{id}/members", authMiddleware(handleAddProjectMember)).Methods("POST")
-	// r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleUpdateMemberRole)).Methods("PUT")
-	// r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleRemoveProjectMember)).Methods("DELETE")
+	r.HandleFunc("/projects/{id}/members", authMiddleware(handleAddProjectMember)).Methods("POST")
+	r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleUpdateMemberRole)).Methods("PUT")
+	r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleRemoveProjectMember)).Methods("DELETE")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

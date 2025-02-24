@@ -1,4 +1,3 @@
-// src/components/pages/rdm/projects/projectsDashboard.tsx
 import { useState, useEffect } from "react";
 import { useOrganization } from "@/components/pages/rdm/context/organizationContext";
 import { ProjectService } from "@/services/projectService";
@@ -17,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDistanceToNow } from "date-fns";
 
@@ -35,12 +34,25 @@ export function ProjectsPage() {
   const { selectedOrgId } = useOrganization();
   const projectService = new ProjectService();
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     if (selectedOrgId) {
       loadProjects();
     }
   }, [selectedOrgId]);
+
+  // Check for updated project from navigation state
+  useEffect(() => {
+    const updatedProject = location.state?.updatedProject;
+    if (updatedProject) {
+      setProjects((prev) =>
+        prev.map((p) => (p.id === updatedProject.id ? { ...p, ...updatedProject } : p))
+      );
+      // Clear the navigation state to prevent re-processing
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, navigate]);
 
   async function loadProjects() {
     try {
@@ -62,8 +74,7 @@ export function ProjectsPage() {
         ...newProject,
         organizationId: selectedOrgId
       });
-      
-      setProjects(prev => [...prev, createdProject]);
+      setProjects((prev) => Array.isArray(prev) ? [...prev, createdProject] : [createdProject]);
       setShowNewProjectDialog(false);
       setNewProject({
         name: "",
@@ -80,7 +91,7 @@ export function ProjectsPage() {
   }
 
   return (
-    <div className="container mx-auto p-4">
+    <div className="h-full overflow-y-auto px-6 py-8">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Projects</h1>
         <Button onClick={() => setShowNewProjectDialog(true)}>
@@ -88,14 +99,12 @@ export function ProjectsPage() {
           New Project
         </Button>
       </div>
-
       <Tabs value={currentView} onValueChange={(value) => setCurrentView(value as "card" | "list")} className="mb-6">
         <TabsList>
           <TabsTrigger value="card">Card View</TabsTrigger>
           <TabsTrigger value="list">List View</TabsTrigger>
         </TabsList>
       </Tabs>
-
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3, 4, 5, 6].map((i) => (
@@ -171,7 +180,7 @@ export function ProjectsPage() {
                   className="border-b hover:bg-gray-50 cursor-pointer"
                   onClick={() => handleProjectClick(project.id)}
                 >
-                  <td className="px-4 py-3">{project.name}</td>
+                  <td className="px-4 py-3 text-sm">{project.name}</td>
                   <td className="px-4 py-3">
                     <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
                       {project.status}
@@ -196,8 +205,6 @@ export function ProjectsPage() {
           </table>
         </div>
       )}
-
-      {/* New Project Dialog */}
       <Dialog open={showNewProjectDialog} onOpenChange={setShowNewProjectDialog}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
@@ -206,7 +213,6 @@ export function ProjectsPage() {
               Enter the details for your new project.
             </DialogDescription>
           </DialogHeader>
-          
           <div className="grid gap-4 py-4">
             <div>
               <label htmlFor="name" className="text-sm font-medium mb-1 block">
@@ -219,7 +225,6 @@ export function ProjectsPage() {
                 placeholder="Enter project name"
               />
             </div>
-            
             <div>
               <label htmlFor="description" className="text-sm font-medium mb-1 block">
                 Description
@@ -233,7 +238,6 @@ export function ProjectsPage() {
               />
             </div>
           </div>
-          
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowNewProjectDialog(false)}>
               Cancel

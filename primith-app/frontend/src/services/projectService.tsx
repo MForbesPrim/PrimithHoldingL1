@@ -65,8 +65,17 @@ export class ProjectService {
       headers,
       body: JSON.stringify(project)
     });
-    if (!response.ok) throw new Error('Failed to update project');
-    return response.json();
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to update project: ${response.status} - ${errorText || 'Unknown error'}`);
+    }
+    // If backend returns the updated project, parse it; otherwise, fetch it separately or return the input
+    try {
+      return await response.json();
+    } catch (e) {
+      // Backend doesn't return a body, so fetch the updated project
+      return this.getProjectById(projectId);
+    }
   }
 
   async deleteProject(projectId: string): Promise<void> {
@@ -237,5 +246,17 @@ export class ProjectService {
       headers
     });
     if (!response.ok) throw new Error('Failed to remove project member');
+  }
+
+  async updateArtifact(artifactId: string, data: Partial<ProjectArtifact>): Promise<ProjectArtifact> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/artifacts/${artifactId}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to update artifact');
+    return response.json();
   }
 }
