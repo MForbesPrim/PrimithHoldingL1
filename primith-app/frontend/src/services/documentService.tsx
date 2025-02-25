@@ -49,11 +49,12 @@ export class DocumentService {
     };
   }
   
-  async getDocuments(folderId: string | null = null, organizationId: string): Promise<DocumentMetadata[]> {
+  async getDocuments(folderId: string | null = null, organizationId: string, projectId: string | null = null): Promise<DocumentMetadata[]> {
     const url = new URL(`${this.baseUrl}/documents`);
     if (folderId) url.searchParams.append('folderId', folderId);
     url.searchParams.append('organizationId', organizationId);
-
+    if (projectId) url.searchParams.append('projectId', projectId);
+  
     const headers = await this.getAuthHeader();
     const response = await fetch(url.toString(), {
       credentials: 'include',
@@ -61,6 +62,20 @@ export class DocumentService {
     });
     if (!response.ok) throw new Error('Failed to fetch documents');
     return response.json();
+  }
+
+  async associateDocumentWithProject(documentId: string, projectId: string | null): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/documents/${documentId}/project`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify({ projectId }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to ${projectId ? 'associate' : 'unlink'} document with project: ${errorText}`);
+    }
   }
 
   async uploadDocument(file: File, folderId: string | null, organizationId: string): Promise<DocumentMetadata> {

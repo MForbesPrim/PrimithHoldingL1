@@ -13,21 +13,24 @@ import { DocumentsTable } from "@/components/pages/rdm/documentManagement/docume
 import { FolderContentsTable } from "@/components/pages/rdm/documentManagement/folderContentsTable"
 import { TrashView } from '@/components/pages/rdm/documentManagement/dmTrashView';
 import { useCallback } from 'react';
+import { useProject } from '@/components/pages/rdm/context/projectContext';
+import { useToast } from "@/hooks/use-toast";
 
 export function DocumentManagement() {
- const [documents, setDocuments] = useState<DocumentMetadata[]>([])
- const [folders, setFolders] = useState<FolderNode[]>([])
- const [folderMetadata, setFolderMetadata] = useState<FolderMetadata[]>([])
- const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
- const [viewMode, setViewMode] = useState<"dashboard" | "documents" | "folders" | "trash" | "folderContents" | "overview">("dashboard");
- const [_isUploading, _setIsUploading] = useState(false)
- const [isSidebarVisible, setIsSidebarVisible] = useState(false)
- const [folderHistory, setFolderHistory] = useState<string[]>([])
+  const [documents, setDocuments] = useState<DocumentMetadata[]>([])
+  const [folders, setFolders] = useState<FolderNode[]>([])
+  const [folderMetadata, setFolderMetadata] = useState<FolderMetadata[]>([])
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<"dashboard" | "documents" | "folders" | "trash" | "folderContents" | "overview">("dashboard");
+  const [_isUploading, _setIsUploading] = useState(false)
+  const [isSidebarVisible, setIsSidebarVisible] = useState(false)
+  const [folderHistory, setFolderHistory] = useState<string[]>([])
+  const { selectedProjectId } = useProject();
+  const { toast } = useToast();
+  const { selectedOrgId } = useOrganization()
+  const documentService = new DocumentService()
 
- const { selectedOrgId } = useOrganization()
- const documentService = new DocumentService()
-
- useEffect(() => {
+  useEffect(() => {
     if (!selectedOrgId) {
       setFolders([])
       setDocuments([])
@@ -38,20 +41,20 @@ export function DocumentManagement() {
     }
     loadFolderData(selectedOrgId)
     loadDocuments(selectedOrgId, null)
-  }, [selectedOrgId])
+  }, [selectedOrgId, selectedProjectId])
 
- useEffect(() => {
-   if (selectedOrgId && selectedFolderId) {
-     loadDocuments(selectedOrgId, selectedFolderId)
-   }
- }, [selectedFolderId])
+  useEffect(() => {
+    if (selectedOrgId && selectedFolderId) {
+      loadDocuments(selectedOrgId, selectedFolderId)
+    }
+  }, [selectedFolderId])
 
   async function loadFolderData(orgId: string) {
     try {
       const folderData = await documentService.getFolders(orgId)
       console.log('Raw folder data:', folderData)
       setFolders(folderData ?? [])
-  
+
       const metadata = (folderData ?? []).map(folder => {
         const folderMetadata = {
           id: folder.id,
@@ -64,7 +67,7 @@ export function DocumentManagement() {
         console.log('Processing folder:', folderMetadata)
         return folderMetadata
       })
-  
+
       console.log('Final folderMetadata:', metadata)
       setFolderMetadata(metadata)
     } catch (error) {
@@ -72,13 +75,64 @@ export function DocumentManagement() {
     }
   }
 
-  async function loadDocuments(orgId: string, folderId: string | null) {
+  async function loadDocuments(orgId: string, folderId: string | null, projectId: string | null = null) {
     try {
-      const docs = await documentService.getDocuments(folderId, orgId)
-      setDocuments(docs ?? [])
+      const docs = await documentService.getDocuments(folderId, orgId, projectId);
+      setDocuments(docs ?? []);
     } catch (error) {
-      console.error("Failed to load documents:", error)
-      setDocuments([])
+      console.error("Failed to load documents:", error);
+      setDocuments([]);
+    }
+  }
+
+  async function handleAssociateWithProject(documentId: string) {
+    if (!selectedProjectId) {
+      toast({
+        title: "Error",
+        description: "Please select a project first",
+        variant: "destructive",
+        duration: 5000
+      });
+      return;
+    }
+    try {
+      await documentService.associateDocumentWithProject(documentId, selectedProjectId);
+      await loadDocuments(selectedOrgId, selectedFolderId, selectedProjectId);
+      toast({
+        title: "Success",
+        description: "Document added to project successfully",
+        duration: 5000
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to add document to project",
+        variant: "destructive",
+        duration: 5000
+      });
+      console.error(error);
+    }
+  }
+
+  async function handleUnassignFromProject(documentId: string) {
+    if (!selectedProjectId) return;
+    try {
+      await documentService.associateDocumentWithProject(documentId, null);
+      // Refresh documents to reflect the change
+      await loadDocuments(selectedOrgId, selectedFolderId, selectedProjectId);
+      toast({
+        title: "Success",
+        description: "Document removed from project successfully",
+        duration: 5000
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to remove document from project",
+        variant: "destructive",
+        duration: 5000
+      });
+      console.error("Failed to unassign document from project:", error);
     }
   }
 
@@ -92,7 +146,7 @@ export function DocumentManagement() {
       console.error("Failed to trash documents:", error);
     }
   }, [selectedOrgId, handleTrashItem, loadFolderData, loadDocuments, selectedFolderId]);
-  
+
   const handleTrashFolders = useCallback(async (folderIds: string[]) => {
     if (!selectedOrgId) return;
     try {
@@ -114,7 +168,7 @@ export function DocumentManagement() {
       console.error(`Failed to trash ${type}:`, error);
     }
   }
-  
+
   async function handleRestoreItem(id: string, type: 'folder' | 'document') {
     if (!selectedOrgId) return;
     try {
@@ -125,7 +179,7 @@ export function DocumentManagement() {
       console.error(`Failed to restore ${type}:`, error);
     }
   }
-  
+
   async function handlePermanentDelete(id: string, type: 'folder' | 'document') {
     if (!selectedOrgId) return;
     try {
@@ -135,15 +189,15 @@ export function DocumentManagement() {
     }
   }
 
- async function handleCreateFolder(parentId: string | null, suggestedName: string) {
+  async function handleCreateFolder(parentId: string | null, suggestedName: string) {
     if (!selectedOrgId) return
     try {
       const effectiveParentId = viewMode === "folders" ? null : parentId;
-      
+
       const baseName = suggestedName || "New Folder"
       let counter = 1
       let uniqueName = baseName
-  
+
       const siblingFolders = folders.filter((f) => f.parentId === effectiveParentId)
       while (true) {
         const nameExists = siblingFolders.some(
@@ -152,7 +206,7 @@ export function DocumentManagement() {
         if (!nameExists) break
         uniqueName = `${baseName} (${counter++})`
       }
-  
+
       await documentService.createFolder(uniqueName, effectiveParentId, selectedOrgId)
       await loadFolderData(selectedOrgId)
       // Add this to refresh documents at root level for dashboard view
@@ -164,17 +218,17 @@ export function DocumentManagement() {
     }
   }
 
- async function handleDeleteFolder(folderId: string) {
-   if (!selectedOrgId) return
-   try {
-     await documentService.deleteFolder(folderId, selectedOrgId)
-     await loadFolderData(selectedOrgId)
-   } catch (error) {
-     console.error("Failed to delete folder:", error)
-   }
- }
+  async function handleDeleteFolder(folderId: string) {
+    if (!selectedOrgId) return
+    try {
+      await documentService.deleteFolder(folderId, selectedOrgId)
+      await loadFolderData(selectedOrgId)
+    } catch (error) {
+      console.error("Failed to delete folder:", error)
+    }
+  }
 
- async function handleDeleteFolders(folderIds: string[]) {
+  async function handleDeleteFolders(folderIds: string[]) {
     if (!selectedOrgId) return
     try {
       await Promise.all(folderIds.map(id => 
@@ -186,50 +240,50 @@ export function DocumentManagement() {
     }
   }
 
- async function handleRenameFolder(folderId: string, newName: string) {
-   if (!selectedOrgId) return
-   try {
-     const trimmedNewName = newName.trim()
-     const folder = folders.find((f) => f.id === folderId)
-     if (!folder || folder.name === trimmedNewName) return
+  async function handleRenameFolder(folderId: string, newName: string) {
+    if (!selectedOrgId) return
+    try {
+      const trimmedNewName = newName.trim()
+      const folder = folders.find((f) => f.id === folderId)
+      if (!folder || folder.name === trimmedNewName) return
 
-     const siblings = folders.filter(
-       (f) => f.parentId === folder.parentId && f.id !== folder.id
-     )
-     const nameExists = siblings.some(
-       (f) => f.name.toLowerCase() === trimmedNewName.toLowerCase()
-     )
+      const siblings = folders.filter(
+        (f) => f.parentId === folder.parentId && f.id !== folder.id
+      )
+      const nameExists = siblings.some(
+        (f) => f.name.toLowerCase() === trimmedNewName.toLowerCase()
+      )
 
-     if (nameExists) {
-       let counter = 1
-       let uniqueName = trimmedNewName
-       while (
-         siblings.some((f) => f.name.toLowerCase() === uniqueName.toLowerCase())
-       ) {
-         uniqueName = `${trimmedNewName} (${counter++})`
-       }
-       await documentService.renameFolder(folderId, uniqueName, selectedOrgId)
-     } else {
-       await documentService.renameFolder(folderId, trimmedNewName, selectedOrgId)
-     }
+      if (nameExists) {
+        let counter = 1
+        let uniqueName = trimmedNewName
+        while (
+          siblings.some((f) => f.name.toLowerCase() === uniqueName.toLowerCase())
+        ) {
+          uniqueName = `${trimmedNewName} (${counter++})`
+        }
+        await documentService.renameFolder(folderId, uniqueName, selectedOrgId)
+      } else {
+        await documentService.renameFolder(folderId, trimmedNewName, selectedOrgId)
+      }
 
-     await loadFolderData(selectedOrgId)
-   } catch (error) {
-     console.error("Failed to rename folder:", error)
-   }
- }
+      await loadFolderData(selectedOrgId)
+    } catch (error) {
+      console.error("Failed to rename folder:", error)
+    }
+  }
 
- async function handleMoveFolder(folderId: string, newParentId: string | null) {
-   if (!selectedOrgId) return
-   try {
-     await documentService.moveFolder(folderId, newParentId, selectedOrgId)
-     await loadFolderData(selectedOrgId)
-   } catch (error) {
-     console.error("Failed to move folder:", error)
-   }
- }
+  async function handleMoveFolder(folderId: string, newParentId: string | null) {
+    if (!selectedOrgId) return
+    try {
+      await documentService.moveFolder(folderId, newParentId, selectedOrgId)
+      await loadFolderData(selectedOrgId)
+    } catch (error) {
+      console.error("Failed to move folder:", error)
+    }
+  }
 
- async function handleFileUpload(file: File) {
+  async function handleFileUpload(file: File) {
     if (!selectedOrgId) return
     try {
       await documentService.uploadDocument(file, selectedFolderId, selectedOrgId)
@@ -261,12 +315,12 @@ export function DocumentManagement() {
     }
   }
 
- function getFolderName(folderId: string): string {
-   const folder = folders.find((f) => f.id === folderId)
-   return folder ? folder.name : ""
- }
+  function getFolderName(folderId: string): string {
+    const folder = folders.find((f) => f.id === folderId)
+    return folder ? folder.name : ""
+  }
 
- async function handleRenameDocument(documentId: string, newName: string) {
+  async function handleRenameDocument(documentId: string, newName: string) {
     if (!selectedOrgId) return;
     try {
       await documentService.renameDocument(documentId, newName, selectedOrgId);
@@ -276,7 +330,7 @@ export function DocumentManagement() {
     }
   }
 
- const handleFolderClick = (folderId: string) => {
+  const handleFolderClick = (folderId: string) => {
     setFolderHistory(prev => [...prev, selectedFolderId].filter(Boolean) as string[])
     setSelectedFolderId(folderId)
     setViewMode("folderContents")
@@ -322,14 +376,14 @@ export function DocumentManagement() {
   const handleCreateFolderWrapper = useCallback((parentId: string | null, name: string) => 
     handleCreateFolder(parentId, name),
     [handleCreateFolder]
-    );
+  );
 
   const handleRenameDocumentWrapper = useCallback((documentId: string, newName: string) => 
     handleRenameDocument(documentId, newName),
     [handleRenameDocument]
   );
 
- return (
+  return (
     <div className="flex h-full">
       {isSidebarVisible && (
         <FolderTree
@@ -343,8 +397,8 @@ export function DocumentManagement() {
         />
       )}
       
-    {/* Main Content */}
-    <div className="flex-1 p-4">
+      {/* Main Content */}
+      <div className="flex-1 p-4">
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-2">
             <Button
@@ -415,7 +469,7 @@ export function DocumentManagement() {
             onDownload={handleDownloadWrapper}
         />
         ) : viewMode === "dashboard" ? (
-            <DashboardTable 
+          <DashboardTable 
             documents={documents}
             folders={folderMetadata.filter(f => f.parentId === null)}
             onDocumentDownload={handleDownloadWrapper}
@@ -427,7 +481,10 @@ export function DocumentManagement() {
             onFileUpload={handleFileUploadWrapper}
             onRenameDocument={handleRenameDocumentWrapper}
             onRenameFolder={handleRenameFolder}
-        />
+            currentProjectId={selectedProjectId}
+            onAssociateWithProject={handleAssociateWithProject}
+            onUnassignFromProject={handleUnassignFromProject}
+          />
         ) : viewMode === "folders" ? (
             <FoldersTable 
                 folders={folderMetadata}

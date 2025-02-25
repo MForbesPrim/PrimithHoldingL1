@@ -2506,6 +2506,7 @@ func handleMoveFolderStructure(w http.ResponseWriter, r *http.Request) {
 func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 	organizationId := r.URL.Query().Get("organizationId")
 	folderId := r.URL.Query().Get("folderId")
+	projectId := r.URL.Query().Get("projectId")
 
 	if organizationId == "" {
 		http.Error(w, "Organization ID is required", http.StatusBadRequest)
@@ -2530,26 +2531,29 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build the query based on whether a folder ID is provided
+	// Base query
 	query := `
     SELECT 
-        d.id,
-        d.name,
-        d.file_type,
-        d.file_size,
-        d.version,
-        d.updated_at,
-        d.folder_id,
-        d.organization_id
+        d.id, d.name, d.file_type, d.file_size, d.version, d.updated_at, d.folder_id, d.organization_id, d.project_id
     FROM rdm.documents d
     WHERE d.organization_id = $1
     AND d.deleted_at IS NULL
-	`
+    `
 	args := []interface{}{organizationId}
+	paramCount := 1
 
+	// Add folder filter if provided
 	if folderId != "" {
-		query += " AND d.folder_id = $2"
+		paramCount++
+		query += fmt.Sprintf(" AND d.folder_id = $%d", paramCount)
 		args = append(args, folderId)
+	}
+
+	// Add project filter if provided
+	if projectId != "" {
+		paramCount++
+		query += fmt.Sprintf(" AND d.project_id = $%d", paramCount)
+		args = append(args, projectId)
 	}
 
 	query += " ORDER BY d.updated_at DESC"
@@ -2571,6 +2575,7 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt      time.Time `json:"updatedAt"`
 		FolderID       *string   `json:"folderId"`
 		OrganizationID string    `json:"organizationId"`
+		ProjectID      *string   `json:"projectId"` // Added to handle NULL values
 	}
 
 	var documents []Document
@@ -2586,6 +2591,7 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 			&doc.UpdatedAt,
 			&doc.FolderID,
 			&doc.OrganizationID,
+			&doc.ProjectID, // Scan the project_id
 		); err != nil {
 			log.Printf("Error scanning document row: %v", err)
 			continue
@@ -2594,7 +2600,11 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(documents)
+	if err := json.NewEncoder(w).Encode(documents); err != nil {
+		log.Printf("Error encoding documents: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 func handleUploadDocument(w http.ResponseWriter, r *http.Request) {
@@ -3700,12 +3710,16 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[handleGetPages] Starting request handling")
 
 	organizationId := r.URL.Query().Get("organizationId")
+	projectId := r.URL.Query().Get("projectId")
 	if organizationId == "" {
 		log.Printf("[handleGetPages] Error: Missing organizationId in request")
 		http.Error(w, "Organization ID is required", http.StatusBadRequest)
 		return
 	}
 	log.Printf("[handleGetPages] Requested organizationId: %s", organizationId)
+	if projectId != "" {
+		log.Printf("[handleGetPages] Filtering by projectId: %s", projectId)
+	}
 
 	claims := r.Context().Value(claimsKey).(*Claims)
 	log.Printf("[handleGetPages] User email from claims: %s", claims.Username)
@@ -3786,8 +3800,8 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[handleGetPages] Access authorized for user %s to organization %s",
 		claims.Username, organizationId)
 
-	// Rest of the code to fetch pages...
-	rows, err := db.Query(`
+	// Build query with parameters
+	query := `
         SELECT 
             pc.id, 
             pc.parent_id,
@@ -3806,9 +3820,22 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
         LEFT JOIN auth.users db ON pc.deleted_by = db.id
         WHERE pc.organization_id = $1
         AND pc.deleted_at IS NULL
-        ORDER BY pc.created_at DESC
-    `, organizationId)
+    `
+	args := []interface{}{organizationId}
+	paramCount := 1
 
+	// Add project filter if provided
+	if projectId != "" {
+		paramCount++
+		query += fmt.Sprintf(" AND pc.project_id = $%d", paramCount)
+		args = append(args, projectId)
+		log.Printf("[handleGetPages] Added project filter to query")
+	}
+
+	query += " ORDER BY pc.created_at DESC"
+
+	// Execute the query with the appropriate arguments
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		log.Printf("[handleGetPages] Error fetching pages: %v", err)
 		http.Error(w, "Failed to fetch pages", http.StatusInternalServerError)
@@ -3866,9 +3893,212 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 		pages = append(pages, pageMap)
 	}
 
-	log.Printf("Returning %d pages", len(pages)) // Add logging
+	log.Printf("[handleGetPages] Returning %d pages (projectId filter: %s)", len(pages), projectId)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(pages)
+}
+
+// Associate document with project
+func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	documentId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var req struct {
+		ProjectID *string `json:"projectId"` // Use pointer to allow null
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Get document's organization and current project
+	var orgId string
+	var currentProjectId sql.NullString
+	err = tx.QueryRow(`
+        SELECT organization_id, project_id
+        FROM rdm.documents
+        WHERE id = $1 AND deleted_at IS NULL
+    `, documentId).Scan(&orgId, &currentProjectId)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Document not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to fetch document", http.StatusInternalServerError)
+		return
+	}
+
+	// Verify user has access to the organization
+	var authorized bool
+	err = tx.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, orgId).Scan(&authorized)
+	if err != nil || !authorized {
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err = tx.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Get the document's name for artifact creation (if linking)
+	var docName string
+	err = tx.QueryRow(`
+        SELECT name
+        FROM rdm.documents
+        WHERE id = $1 AND deleted_at IS NULL
+    `, documentId).Scan(&docName)
+	if err != nil {
+		http.Error(w, "Failed to fetch document name", http.StatusInternalServerError)
+		return
+	}
+
+	if req.ProjectID != nil {
+		// Linking to a project
+		var projectOrgId string
+		err = tx.QueryRow(`
+            SELECT organization_id
+            FROM rdm.projects
+            WHERE id = $1
+        `, *req.ProjectID).Scan(&projectOrgId)
+		if err == sql.ErrNoRows {
+			http.Error(w, "Project not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "Failed to verify project", http.StatusInternalServerError)
+			return
+		}
+		if projectOrgId != orgId {
+			http.Error(w, "Project does not belong to the same organization", http.StatusForbidden)
+			return
+		}
+
+		// Verify user is a member of the project
+		var isMember bool
+		err = tx.QueryRow(`
+            SELECT EXISTS (
+                SELECT 1 
+                FROM rdm.project_members pm
+                JOIN auth.users u ON pm.user_id = u.id
+                WHERE pm.project_id = $1 AND u.email = $2
+            )
+        `, *req.ProjectID, claims.Username).Scan(&isMember)
+		if err != nil || !isMember {
+			http.Error(w, "User is not a member of the project", http.StatusForbidden)
+			return
+		}
+
+		// Update document's project_id
+		_, err = tx.Exec(`
+            UPDATE rdm.documents 
+            SET project_id = $1,
+                updated_at = CURRENT_TIMESTAMP,
+                updated_by = $2
+            WHERE id = $3
+        `, *req.ProjectID, userId, documentId)
+		if err != nil {
+			http.Error(w, "Failed to associate document with project", http.StatusInternalServerError)
+			return
+		}
+
+		// Insert into project_artifacts with the document's actual name
+		_, err = tx.Exec(`
+            INSERT INTO rdm.project_artifacts (
+                project_id, name, type, status, document_id, created_by, updated_by
+            ) VALUES ($1, $2, 'document', 'draft', $3, $4, $4)
+        `, *req.ProjectID, docName, documentId, userId)
+		if err != nil {
+			http.Error(w, "Failed to create artifact", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Unlinking from a project (set project_id to NULL and remove artifact)
+		_, err = tx.Exec(`
+            UPDATE rdm.documents 
+            SET project_id = NULL,
+                updated_at = CURRENT_TIMESTAMP,
+                updated_by = $1
+            WHERE id = $2
+        `, userId, documentId)
+		if err != nil {
+			http.Error(w, "Failed to unlink document from project", http.StatusInternalServerError)
+			return
+		}
+
+		// Delete the corresponding artifact entry
+		_, err = tx.Exec(`
+            DELETE FROM rdm.project_artifacts
+            WHERE document_id = $1
+        `, documentId)
+		if err != nil {
+			http.Error(w, "Failed to remove artifact association", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	var message string
+	if req.ProjectID != nil {
+		message = fmt.Sprintf("Document associated with project %s", *req.ProjectID)
+	} else {
+		message = "Document unlinked from project"
+	}
+	json.NewEncoder(w).Encode(Response{Success: true, Message: message})
+}
+
+// Similar function for pages
+func handleAssociatePageWithProject(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	pageId := vars["id"]
+
+	var req struct {
+		ProjectID string `json:"projectId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Update page's project_id
+	_, err := db.Exec(`
+        UPDATE pages.pages_content 
+        SET project_id = $1, 
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+    `, req.ProjectID, pageId)
+
+	if err != nil {
+		http.Error(w, "Failed to associate page with project", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(Response{Success: true, Message: "Page associated with project"})
 }
 
 // Handler for creating a new page
@@ -5538,6 +5768,91 @@ func handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func handleGetProjectArtifacts(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("Fetching artifacts for projectId: %s, user: %s", projectId, claims.Username)
+
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+	if err != nil {
+		log.Printf("Error checking project membership: %v", err)
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
+		log.Printf("User %s is not a member of project %s", claims.Username, projectId)
+		http.Error(w, "Access denied to project artifacts", http.StatusForbidden)
+		return
+	}
+	log.Printf("User %s is a member of project %s", claims.Username, projectId)
+
+	rows, err := db.Query(`
+        SELECT id, project_id, name, type, status, assigned_to, due_date,
+               document_id, page_id, created_by, updated_by, created_at, updated_at
+        FROM rdm.project_artifacts
+        WHERE project_id = $1
+    `, projectId)
+	if err != nil {
+		log.Printf("Error fetching artifacts: %v", err)
+		http.Error(w, "Failed to fetch artifacts", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	log.Printf("Successfully queried artifacts for project %s", projectId)
+
+	var artifacts []map[string]interface{}
+	for rows.Next() {
+		var a struct {
+			ID, ProjectID                  uuid.UUID      // UUIDs
+			Name, Type, Status             string         // Strings
+			AssignedTo, DocumentID, PageID sql.NullString // Nullable UUIDs or strings
+			CreatedBy, UpdatedBy           uuid.UUID      // UUIDs
+			DueDate                        sql.NullTime   // Nullable timestamp
+			CreatedAt, UpdatedAt           time.Time      // Timestamps
+		}
+		err := rows.Scan(&a.ID, &a.ProjectID, &a.Name, &a.Type, &a.Status, &a.AssignedTo, &a.DueDate,
+			&a.DocumentID, &a.PageID, &a.CreatedBy, &a.UpdatedBy, &a.CreatedAt, &a.UpdatedAt)
+		if err != nil {
+			log.Printf("Error scanning artifact row: %v", err)
+			http.Error(w, "Failed to scan artifact", http.StatusInternalServerError)
+			return
+		}
+		artifacts = append(artifacts, map[string]interface{}{
+			"id":         a.ID.String(),
+			"projectId":  a.ProjectID.String(),
+			"name":       a.Name,
+			"type":       a.Type,
+			"status":     a.Status,
+			"assignedTo": a.AssignedTo.String,
+			"dueDate":    a.DueDate.Time,
+			"documentId": a.DocumentID.String,
+			"pageId":     a.PageID.String,
+			"createdBy":  a.CreatedBy.String(),
+			"updatedBy":  a.UpdatedBy.String(),
+			"createdAt":  a.CreatedAt,
+			"updatedAt":  a.UpdatedAt,
+		})
+	}
+	log.Printf("Found %d artifacts for project %s", len(artifacts), projectId)
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(artifacts); err != nil {
+		log.Printf("Error encoding artifacts: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Successfully sent artifacts response for project %s", projectId)
+}
+
 // Add handlers
 func handleGetProjects(w http.ResponseWriter, r *http.Request) {
 	organizationId := r.URL.Query().Get("organizationId")
@@ -6066,6 +6381,7 @@ func main() {
 	r.HandleFunc("/documents/{id}/trash", authMiddleware(handleTrashDocument)).Methods("PUT")
 	r.HandleFunc("/documents/{id}/restore", authMiddleware(handleRestoreDocument)).Methods("PUT")
 	r.HandleFunc("/documents/{id}/rename", authMiddleware(handleRenameDocument)).Methods("PUT")
+	r.HandleFunc("/documents/{id}/project", authMiddleware(handleAssociateDocumentWithProject)).Methods("PUT")
 	r.HandleFunc("/folders/{id}/trash", authMiddleware(handleTrashFolder)).Methods("PUT")
 	r.HandleFunc("/folders/{id}/restore", authMiddleware(handleRestoreFolder)).Methods("PUT")
 	r.HandleFunc("/trash", authMiddleware(handleGetTrashItems)).Methods("GET")
@@ -6091,6 +6407,7 @@ func main() {
 	r.HandleFunc("/pages/template-categories", authMiddleware(handleGetTemplateCategories)).Methods("GET")
 	r.HandleFunc("/pages/templates/{id}", authMiddleware(handleGetTemplate)).Methods("GET")
 	r.HandleFunc("/pages/templates/{id}", authMiddleware(handleUpdateTemplate)).Methods("PUT")
+	r.HandleFunc("/pages/{id}/project", authMiddleware(handleAssociatePageWithProject)).Methods("PUT")
 
 	// Projects
 	r.HandleFunc("/projects", authMiddleware(handleGetProjects)).Methods("GET")
@@ -6102,6 +6419,7 @@ func main() {
 	r.HandleFunc("/projects/{id}/members", authMiddleware(handleAddProjectMember)).Methods("POST")
 	r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleUpdateMemberRole)).Methods("PUT")
 	r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleRemoveProjectMember)).Methods("DELETE")
+	r.HandleFunc("/projects/{projectId}/artifacts", authMiddleware(handleGetProjectArtifacts)).Methods("GET")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

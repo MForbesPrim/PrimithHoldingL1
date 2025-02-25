@@ -3,7 +3,7 @@ export interface DocumentMetadata {
     name: string;
     description?: string;
     folderId: string | null;
-    projectId: string;
+    projectId: string | null;
     fileType: string;
     fileSize: number;
     version: number;
@@ -50,6 +50,7 @@ export interface DocumentMetadata {
     name: string;
     type: 'folder' | 'document';
     fileType?: string;
+    projectId?: string;
     fileSize?: number;
     version?: number;
     fileCount?: number;

@@ -3,10 +3,22 @@
 import { useState, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { ProjectService } from "@/services/projectService"
+import { DocumentService } from "@/services/documentService"
+import { PagesService } from "@/services/pagesService"
 import type { Project, ProjectArtifact, RoadmapItem } from "@/types/projects"
+import type { DocumentMetadata } from "@/types/document"
+import type { PageNode } from "@/types/pages"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import {
   ChevronLeft,
   Edit,
@@ -22,7 +34,7 @@ import {
   Variable,
 } from "lucide-react"
 import { RoadmapView } from "@/components/pages/rdm/projects/roadmapView"
-import { ArtifactsTable } from "@/components/pages/rdm/projects/artifactsTable"
+import { ArtifactsPage } from "@/components/pages/rdm/projects/artifactsTable"
 import { ProjectVariablesPanel } from "@/components/pages/rdm/projects/projectVariables"
 import { EditProjectDialog } from "@/components/pages/rdm/projects/editProjectDialog"
 
@@ -38,11 +50,15 @@ export function ProjectDetailPage() {
   const [artifacts, setArtifacts] = useState<ProjectArtifact[]>([])
   const [roadmapItems, setRoadmapItems] = useState<RoadmapItem[]>([])
   const [recentActivity, setRecentActivity] = useState<ProjectActivity[]>([])
+  const [associatedDocuments, setAssociatedDocuments] = useState<DocumentMetadata[]>([])
+  const [associatedPages, setAssociatedPages] = useState<PageNode[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState("overview")
   const [editingProject, setEditingProject] = useState(false)
 
   const projectService = new ProjectService()
+  const documentService = new DocumentService()
+  const pagesService = new PagesService()
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -55,18 +71,61 @@ export function ProjectDetailPage() {
     try {
       if (!projectId) return
       setLoading(true)
+      
+      // Load project details
       const projectData = await projectService.getProjectById(projectId)
       setProject(projectData)
+      
+      // Load artifacts
       const artifactsData = await projectService.getProjectArtifacts(projectId)
       setArtifacts(artifactsData)
+      
+      // Load roadmap items
       const roadmapData = await projectService.getRoadmapItems(projectId)
       setRoadmapItems(roadmapData)
-      const activityData: ProjectActivity[] = [] // Replace with actual service call if available
+      
+      // Load associated documents & pages
+      loadAssociatedDocuments()
+      loadAssociatedPages()
+      
+      // Mock activity data - replace with actual service call when available
+      const activityData: ProjectActivity[] = [
+        {
+          id: "1",
+          description: "Project created",
+          timestamp: new Date(projectData.createdAt).toISOString()
+        },
+        {
+          id: "2", 
+          description: "Status updated to " + projectData.status,
+          timestamp: new Date(projectData.updatedAt).toISOString()
+        }
+      ]
       setRecentActivity(activityData)
     } catch (error) {
       console.error("Failed to load project data:", error)
     } finally {
       setLoading(false)
+    }
+  }
+  
+  async function loadAssociatedDocuments() {
+    if (!projectId || !project?.organizationId) return;
+    try {
+      const docs = await documentService.getDocuments(null, project.organizationId, projectId);
+      setAssociatedDocuments(docs);
+    } catch (error) {
+      console.error("Failed to load associated documents:", error);
+    }
+  }
+  
+  async function loadAssociatedPages() {
+    if (!projectId || !project?.organizationId) return;
+    try {
+      const pages = await pagesService.getPages(project.organizationId, projectId);
+      setAssociatedPages(pages);
+    } catch (error) {
+      console.error("Failed to load associated pages:", error);
     }
   }
 
@@ -86,6 +145,22 @@ export function ProjectDetailPage() {
 
   function handleBackClick() {
     navigate("/rdm/projects", { state: { updatedProject: project } });
+  }
+  
+  async function handleDownloadDocument(documentId: string, fileName: string) {
+    try {
+      const blob = await documentService.downloadDocument(documentId);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error("Download failed:", error);
+    }
   }
 
   if (loading) {
@@ -225,7 +300,7 @@ export function ProjectDetailPage() {
                 </Button>
               </CardHeader>
               <CardContent>
-                {artifacts.length > 0 ? (
+              {artifacts && artifacts.length > 0 ? (
                   <div className="space-y-4">
                     {artifacts.slice(0, 5).map((artifact) => (
                       <div
@@ -298,7 +373,7 @@ export function ProjectDetailPage() {
                 Add Artifact
               </Button>
             </div>
-            <ArtifactsTable
+            <ArtifactsPage
               artifacts={artifacts}
               onStatusChange={async (artifactId: string, status: string) => {
                 await projectService.updateArtifactStatus(artifactId, status)
@@ -307,6 +382,93 @@ export function ProjectDetailPage() {
             />
           </div>
         </TabsContent>
+        <TabsContent value="documents">
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-semibold">Project Documents</h2>
+              <Button onClick={() => navigate("/rdm/documents")}>
+                Browse Documents
+              </Button>
+            </div>
+            
+            {associatedDocuments.length > 0 ? (
+              <div className="border rounded-md">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Last Modified</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {associatedDocuments.map(doc => (
+                      <TableRow key={doc.id}>
+                        <TableCell className="font-medium">{doc.name}</TableCell>
+                        <TableCell>{doc.fileType}</TableCell>
+                        <TableCell>{new Date(doc.updatedAt).toLocaleDateString()}</TableCell>
+                        <TableCell>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => handleDownloadDocument(doc.id, doc.name)}
+                          >
+                            Download
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-center p-8 border rounded-md bg-gray-50">
+                <p className="text-gray-500 mb-4">No documents associated with this project yet.</p>
+                <Button onClick={() => navigate("/rdm/documents")}>
+                  Add Documents
+                </Button>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+        
+        <TabsContent value="pages">
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-semibold">Project Pages</h2>
+              <Button onClick={() => navigate("/rdm/pages")}>
+                Browse Pages
+              </Button>
+            </div>
+            
+            {associatedPages.length > 0 ? (
+              <div className="grid gap-4">
+                {associatedPages.map(page => (
+                  <Card key={page.id} className="p-4 cursor-pointer" onClick={() => navigate(`/rdm/pages?pageId=${page.id}`)}>
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-5 w-5 text-gray-400" />
+                      <div>
+                        <h3 className="font-medium">{page.name}</h3>
+                        <p className="text-sm text-gray-500">
+                          Updated {new Date(page.updatedAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center p-8 border rounded-md bg-gray-50">
+                <p className="text-gray-500 mb-4">No pages associated with this project yet.</p>
+                <Button onClick={() => navigate("/rdm/pages")}>
+                  Add Pages
+                </Button>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+        
         <TabsContent value="roadmap">
           <RoadmapView
             items={roadmapItems}

@@ -61,6 +61,7 @@ import {
 import { cn } from "@/lib/utils"
 import { ProjectService } from "@/services/projectService"
 import { Project } from "@/types/projects"
+import { useProject } from '@/components/pages/rdm/context/projectContext';
 
 // OrgCombobox component inline
 function OrgCombobox({
@@ -219,6 +220,7 @@ export function RdmHeader() {
 
  // State for projects and selected project
  const [projects, setProjects] = useState<Project[]>([])
+ const { setSelectedProjectId: setContextProjectId } = useProject();
  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
  const projectService = new ProjectService()
 
@@ -304,26 +306,28 @@ export function RdmHeader() {
  }
 
  function handleProjectChange(projectId: string | null) {
-   setSelectedProjectId(projectId)
-   if (projectId) {
-     localStorage.setItem('selectedProjectId', projectId)
-     const selectedProject = projects.find((project) => project.id === projectId)
-     if (selectedProject) {
-       toast({
-         title: "Project Changed",
-         description: `Switched to ${selectedProject.name}`,
-         duration: 5000
-       })
-     }
-   } else {
-     localStorage.removeItem('selectedProjectId') // Remove from localStorage when cleared
-     toast({
-       title: "Project Cleared",
-       description: "No project selected",
-       duration: 5000
-     })
-   }
- }
+  setSelectedProjectId(projectId);
+  setContextProjectId(projectId); // Update the global project context
+  
+  if (projectId) {
+    localStorage.setItem('selectedProjectId', projectId);
+    const selectedProject = projects.find((project) => project.id === projectId);
+    if (selectedProject) {
+      toast({
+        title: "Project Changed",
+        description: `Switched to ${selectedProject.name}`,
+        duration: 5000
+      });
+    }
+  } else {
+    localStorage.removeItem('selectedProjectId');
+    toast({
+      title: "Project Cleared",
+      description: "No project selected",
+      duration: 5000
+    });
+  }
+}
 
  const getInitials = (firstName: string, lastName: string) => {
    return `${firstName[0]}${lastName[0]}`

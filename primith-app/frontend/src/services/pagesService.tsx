@@ -24,7 +24,7 @@ export class PagesService {
     };
   }
 
-  async getPages(organizationId: string): Promise<PageNode[]> {
+  async getPages(organizationId: string, projectId: string | null = null): Promise<PageNode[]> {
     try {
       if (!organizationId) {
         console.error('No organization ID provided');
@@ -32,35 +32,35 @@ export class PagesService {
       }
   
       const headers = await this.getAuthHeader();
-      console.log('Fetching pages for org:', organizationId);
+      const url = new URL(`${this.baseUrl}/pages`);
+      url.searchParams.append('organizationId', organizationId);
+      if (projectId) url.searchParams.append('projectId', projectId);
       
-      const response = await fetch(`${this.baseUrl}/pages?organizationId=${organizationId}`, {
+      const response = await fetch(url.toString(), {
         credentials: 'include',
         headers
       });
       
-      if (response.status === 403) {
-        console.error('Access forbidden to organization:', organizationId);
-        throw new Error('Access denied to organization');
-      }
-      
       if (!response.ok) {
-        console.error('Failed to fetch pages:', {
-          status: response.status,
-          statusText: response.statusText
-        });
-        const errorText = await response.text();
-        console.error('Error response:', errorText);
         throw new Error(`Failed to fetch pages: ${response.status}`);
       }
       
-      const data = await response.json();
-      console.log('Received pages:', data);
-      return data;
+      return await response.json();
     } catch (error) {
       console.error('Error in getPages:', error);
       throw error;
     }
+  }
+
+  async associatePageWithProject(pageId: string, projectId: string | null): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/pages/${pageId}/project`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify({ projectId }),
+    });
+    if (!response.ok) throw new Error('Failed to associate page with project');
   }
 
   async createPage(

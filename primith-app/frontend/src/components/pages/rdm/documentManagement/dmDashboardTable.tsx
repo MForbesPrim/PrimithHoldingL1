@@ -67,6 +67,9 @@ interface DocumentsTableProps {
     onFileUpload?: (file: File) => Promise<void>;
     onRenameDocument?: (documentId: string, newName: string) => Promise<void>;
     onRenameFolder?: (folderId: string, newName: string) => Promise<void>;
+    currentProjectId?: string | null;
+    onAssociateWithProject?: (documentId: string) => Promise<void>;
+    onUnassignFromProject?: (documentId: string) => Promise<void>;
 }
 
 export const DashboardTable = memo(function DashboardTable({
@@ -81,6 +84,9 @@ export const DashboardTable = memo(function DashboardTable({
     onFileUpload,
     onRenameDocument,
     onRenameFolder,
+    currentProjectId,
+    onAssociateWithProject,
+    onUnassignFromProject,
 }: DocumentsTableProps) {
     const [sorting, setSorting] = useState<SortingState>([
         { id: "updatedAt", desc: true }
@@ -95,6 +101,8 @@ export const DashboardTable = memo(function DashboardTable({
     const [itemToRename, setItemToRename] = useState<{id: string, name: string, type: 'document' | 'folder'} | null>(null)
     const [newName, setNewName] = useState('')
     const [showNewFolderDialog, setShowNewFolderDialog] = useState(false)
+    const [showUnassignDialog, setShowUnassignDialog] = useState(false);
+    const [documentToUnassign, setDocumentToUnassign] = useState<string | null>(null);
     const [newFolderName, setNewFolderName] = useState("")
     const [itemsToDelete, setItemsToDelete] = useState<{
         documents: string[];
@@ -118,6 +126,7 @@ export const DashboardTable = memo(function DashboardTable({
             fileSize: doc.fileSize,
             version: doc.version,
             updatedAt: new Date(doc.updatedAt).toISOString(),
+            projectId: doc.projectId,
         }))
     ] as TableItem[], [folders, documents])
 
@@ -205,6 +214,11 @@ export const DashboardTable = memo(function DashboardTable({
             setShowRenameDialog(true);
         };
 
+        const isAssignedToProject = row.original.type === 'document' && 
+        currentProjectId && 
+        row.original.projectId != null && 
+        row.original.projectId === currentProjectId;
+
         return (
             <ContextMenu>
                 <ContextMenuTrigger asChild>
@@ -216,6 +230,26 @@ export const DashboardTable = memo(function DashboardTable({
                     <ContextMenuItem onClick={handleRenameClick}>
                         Rename
                     </ContextMenuItem>
+                    {currentProjectId && onAssociateWithProject && row.original.type === 'document' && (
+                        !isAssignedToProject ? (
+                            <ContextMenuItem
+                                onClick={() => onAssociateWithProject(row.original.id)}
+                            >
+                                Add to Current Project
+                            </ContextMenuItem>
+                        ) : (
+                            onUnassignFromProject && (
+                                <ContextMenuItem
+                                onClick={() => {
+                                    setShowUnassignDialog(true);
+                                    setDocumentToUnassign(row.original.id);
+                                }}
+                            >
+                                Remove from Current Project
+                            </ContextMenuItem>
+                            )
+                        )
+                    )}
                     <ContextMenuItem
                         onClick={() => handleDeleteClick(row.original)}
                         className="text-destructive"
@@ -311,6 +345,10 @@ export const DashboardTable = memo(function DashboardTable({
         {
             id: "actions",
             cell: ({ row }) => {
+                const isAssignedToProject = row.original.type === 'document' && 
+                    currentProjectId && 
+                    row.original.projectId === currentProjectId;
+
                 return (
                     <div className="flex items-center gap-2">
                         {showDownloadButton && row.original.type === 'document' && (
@@ -345,6 +383,26 @@ export const DashboardTable = memo(function DashboardTable({
                                 >
                                     Rename
                                 </DropdownMenuItem>
+                                {currentProjectId && onAssociateWithProject && row.original.type === 'document' && (
+                                    !isAssignedToProject ? (
+                                        <DropdownMenuItem
+                                            onClick={() => onAssociateWithProject(row.original.id)}
+                                        >
+                                            Add to Current Project
+                                        </DropdownMenuItem>
+                                    ) : (
+                                        onUnassignFromProject && (
+                                        <DropdownMenuItem
+                                            onClick={() => {
+                                                setDocumentToUnassign(row.original.id);
+                                                setShowUnassignDialog(true);
+                                            }}
+                                        >
+                                            Remove from Current Project
+                                        </DropdownMenuItem>
+                                        )
+                                    )
+                                )}
                                 <DropdownMenuItem
                                     onClick={() => handleDeleteClick(row.original)}
                                     className="text-destructive"
@@ -359,7 +417,7 @@ export const DashboardTable = memo(function DashboardTable({
             enableHiding: true,
         },
     ];
-  
+
     const table = useReactTable<TableItem>({ 
         data: items,
         columns,
@@ -409,6 +467,7 @@ export const DashboardTable = memo(function DashboardTable({
                         }
                         className="max-w-sm text-xs"
                     />
+                    
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button variant="outline" size="sm" className="ml-2">
@@ -571,6 +630,32 @@ export const DashboardTable = memo(function DashboardTable({
             </div>
             <DataTablePagination table={table} />
 
+            {showUnassignDialog && (
+                <AlertDialog open={showUnassignDialog} onOpenChange={setShowUnassignDialog}>
+                    <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Remove from Current Project</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                Are you sure you want to remove this document from the current project?
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                                onClick={() => {
+                                    if (documentToUnassign && onUnassignFromProject) {
+                                        onUnassignFromProject(documentToUnassign);
+                                    }
+                                    setShowUnassignDialog(false);
+                                }}
+                            >
+                                Remove
+                            </AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
+            )}
+
             {showDeleteDialog && (
                 <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
                     <AlertDialogContent>
@@ -655,7 +740,6 @@ export const DashboardTable = memo(function DashboardTable({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-            {/* New Folder Dialog */}
             <Dialog open={showNewFolderDialog} onOpenChange={setShowNewFolderDialog}>
                 <DialogContent>
                     <DialogHeader>
