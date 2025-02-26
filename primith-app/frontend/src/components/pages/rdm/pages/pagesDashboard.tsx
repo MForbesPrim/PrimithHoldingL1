@@ -18,7 +18,8 @@ import { useOrganization } from "@/components/pages/rdm/context/organizationCont
 import { PagesTable } from './pagesTable';
 import { Templates } from './pageTemplates';
 import { useNavigate, useLocation } from 'react-router-dom';
-
+import { useProject } from '@/components/pages/rdm/context/projectContext';
+import { useToast } from '@/hooks/use-toast';
 import { Switch } from '@/components/ui/switch';
 
 export function PagesDashboard() {
@@ -50,6 +51,10 @@ export function PagesDashboard() {
   const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
   const [_newPageParentType, setNewPageParentType] = useState<'page' | 'folder' | undefined>();
   const [newFolderParentType, setNewFolderParentType] = useState<'pages' | 'folders' | null>(null);
+  const [showUnassignDialog, setShowUnassignDialog] = useState(false);
+  const [pageToUnassign, setPageToUnassign] = useState<string | null>(null);
+  const { selectedProjectId } = useProject();
+  const { toast } = useToast();
 
   const handleTemplatesClick = () => {
     navigate('/rdm/pages/templates');
@@ -117,6 +122,60 @@ export function PagesDashboard() {
     } catch (error) {
         console.error('Failed to create folder:', error);
     }
+};
+
+const handleAssociatePageWithProject = async (pageId: string) => {
+  if (!selectedProjectId) {
+    toast({
+      title: "Error",
+      description: "Please select a project first",
+      variant: "destructive",
+      duration: 5000
+    });
+    return;
+  }
+  
+  try {
+    await pagesService.associatePageWithProject(pageId, selectedProjectId);
+    // Refresh pages to reflect the change
+    await loadPages();
+    toast({
+      title: "Success",
+      description: "Page added to project successfully",
+      duration: 5000
+    });
+  } catch (error) {
+    toast({
+      title: "Error",
+      description: "Failed to add page to project",
+      variant: "destructive",
+      duration: 5000
+    });
+    console.error("Failed to associate page with project:", error);
+  }
+};
+
+const handleUnassignPageFromProject = async (pageId: string) => {
+  if (!selectedProjectId) return;
+  
+  try {
+    await pagesService.associatePageWithProject(pageId, null);
+    // Refresh pages to reflect the change
+    await loadPages();
+    toast({
+      title: "Success",
+      description: "Page removed from project successfully",
+      duration: 5000
+    });
+  } catch (error) {
+    toast({
+      title: "Error",
+      description: "Failed to remove page from project",
+      variant: "destructive",
+      duration: 5000
+    });
+    console.error("Failed to unassign page from project:", error);
+  }
 };
 
 const handleRenameFolder = async (folderId: string, newName: string) => {
@@ -535,10 +594,10 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
                   onCreatePage={handleCreatePageClick}
                   onDeletePage={handleDeletePage}
                   onRenamePage={handleRenamePage}
-                  onCreateFolder={(parentId, parentType?) => {  // Make parentType optional
+                  onCreateFolder={(parentId, parentType?) => {
                     setNewFolderParentId(parentId || null);
                     setNewFolderName("");
-                    setNewFolderParentType(parentType || null);  // Handle undefined case
+                    setNewFolderParentType(parentType || null);
                     setShowNewFolderDialog(true);
                   }}
                   onRenameFolder={(id, name) => {
@@ -549,6 +608,9 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
                     });
                   }}
                   onDeleteFolder={handleDeleteFolder}
+                  currentProjectId={selectedProjectId}
+                  onAssociateWithProject={handleAssociatePageWithProject}
+                  onUnassignFromProject={handleUnassignPageFromProject}
                 />
           </div>
         )}
@@ -707,6 +769,33 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
               disabled={!newFolderName.trim()}
             >
               Rename
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showUnassignDialog} onOpenChange={setShowUnassignDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove from Project</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove this page from the current project?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowUnassignDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (pageToUnassign) {
+                  handleUnassignPageFromProject(pageToUnassign);
+                  setPageToUnassign(null);
+                  setShowUnassignDialog(false);
+                }
+              }}
+            >
+              Remove
             </Button>
           </DialogFooter>
         </DialogContent>

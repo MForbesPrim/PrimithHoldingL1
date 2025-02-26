@@ -2,6 +2,7 @@ export interface PageNode {
   id: string;
   parentId: string | null;
   folderId?: string | null;
+  projectId?: string | null;
   type: 'page' | 'folder' | 'template' | 'system_template';
   name: string;
   content: string;

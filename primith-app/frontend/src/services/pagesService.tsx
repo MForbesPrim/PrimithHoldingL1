@@ -52,15 +52,30 @@ export class PagesService {
     }
   }
 
-  async associatePageWithProject(pageId: string, projectId: string | null): Promise<void> {
+  async associatePageWithProject(pageId: string, projectId: string | null, options?: {
+    name?: string;
+    type?: string;
+    status?: string;
+    description?: string;
+  }): Promise<void> {
     const headers = await this.getAuthHeader();
     const response = await fetch(`${this.baseUrl}/pages/${pageId}/project`, {
       method: 'PUT',
       credentials: 'include',
       headers,
-      body: JSON.stringify({ projectId }),
+      body: JSON.stringify({ 
+        projectId,
+        name: options?.name,
+        type: options?.type || "page",
+        status: options?.status || "draft",
+        description: options?.description
+      }),
     });
-    if (!response.ok) throw new Error('Failed to associate page with project');
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to ${projectId ? 'associate' : 'unlink'} page with project: ${errorText}`);
+    }
   }
 
   async createPage(

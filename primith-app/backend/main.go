@@ -4332,35 +4332,197 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Similar function for pages
 func handleAssociatePageWithProject(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	pageId := vars["id"]
-
+	claims := r.Context().Value(claimsKey).(*Claims)
+  
+	// Define request struct with optional fields
 	var req struct {
-		ProjectID string `json:"projectId"`
+	  ProjectID   *string `json:"projectId"`
+	  Name        *string `json:"name"`
+	  Type        *string `json:"type"`
+	  Status      *string `json:"status"`
+	  Description *string `json:"description"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	  http.Error(w, "Invalid request body", http.StatusBadRequest)
+	  return
 	}
-
-	// Update page's project_id
-	_, err := db.Exec(`
-        UPDATE pages.pages_content 
-        SET project_id = $1, 
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $2
-    `, req.ProjectID, pageId)
-
+  
+	// Start transaction
+	tx, err := db.Begin()
 	if err != nil {
+	  http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+	  return
+	}
+	defer tx.Rollback()
+  
+	// Get page's organization ID
+	var orgId string
+	err = tx.QueryRow(`
+		SELECT organization_id
+		FROM pages.pages_content
+		WHERE id = $1 AND deleted_at IS NULL
+	`, pageId).Scan(&orgId)
+	if err == sql.ErrNoRows {
+	  http.Error(w, "Page not found", http.StatusNotFound)
+	  return
+	}
+	if err != nil {
+	  http.Error(w, "Failed to fetch page", http.StatusInternalServerError)
+	  return
+	}
+  
+	// Verify user has access to the organization
+	var authorized bool
+	err = tx.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 
+			FROM auth.organization_members om
+			JOIN auth.users u ON u.id = om.user_id
+			WHERE u.email = $1 AND om.organization_id = $2
+		)
+	`, claims.Username, orgId).Scan(&authorized)
+	if err != nil || !authorized {
+	  http.Error(w, "Access denied to organization", http.StatusForbidden)
+	  return
+	}
+  
+	// Get user ID
+	var userId string
+	err = tx.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+	  http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+	  return
+	}
+  
+	// Get the page's name
+	var pageName string
+	err = tx.QueryRow(`
+		SELECT name
+		FROM pages.pages_content
+		WHERE id = $1 AND deleted_at IS NULL
+	`, pageId).Scan(&pageName)
+	if err != nil {
+	  http.Error(w, "Failed to fetch page name", http.StatusInternalServerError)
+	  return
+	}
+  
+	if req.ProjectID != nil {
+	  // Linking to a project - first verify project exists and user has access
+	  var projectOrgId string
+	  err = tx.QueryRow(`
+		  SELECT organization_id
+		  FROM rdm.projects
+		  WHERE id = $1
+	  `, *req.ProjectID).Scan(&projectOrgId)
+	  if err == sql.ErrNoRows {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	  }
+	  if err != nil {
+		http.Error(w, "Failed to verify project", http.StatusInternalServerError)
+		return
+	  }
+	  if projectOrgId != orgId {
+		http.Error(w, "Project does not belong to the same organization", http.StatusForbidden)
+		return
+	  }
+  
+	  // Verify user is a member of the project
+	  var isMember bool
+	  err = tx.QueryRow(`
+		  SELECT EXISTS (
+			  SELECT 1 
+			  FROM rdm.project_members pm
+			  JOIN auth.users u ON pm.user_id = u.id
+			  WHERE pm.project_id = $1 AND u.email = $2
+		  )
+	  `, *req.ProjectID, claims.Username).Scan(&isMember)
+	  if err != nil || !isMember {
+		http.Error(w, "User is not a member of the project", http.StatusForbidden)
+		return
+	  }
+  
+	  // Update page's project_id
+	  _, err = tx.Exec(`
+		  UPDATE pages.pages_content 
+		  SET project_id = $1,
+			  updated_at = CURRENT_TIMESTAMP,
+			  updated_by = $2
+		  WHERE id = $3
+	  `, *req.ProjectID, userId, pageId)
+	  if err != nil {
 		http.Error(w, "Failed to associate page with project", http.StatusInternalServerError)
 		return
+	  }
+  
+	  // Determine artifact name
+	  artifactName := pageName
+	  if req.Name != nil && *req.Name != "" {
+		artifactName = *req.Name
+	  }
+  
+	  // Set artifact type and status with defaults
+	  artifactType := "page"
+	  if req.Type != nil && *req.Type != "" {
+		artifactType = *req.Type
+	  }
+	  artifactStatus := "draft"
+	  if req.Status != nil && *req.Status != "" {
+		artifactStatus = *req.Status
+	  }
+  
+	  // Insert into project_artifacts
+	  _, err = tx.Exec(`
+		  INSERT INTO rdm.project_artifacts (
+			  project_id, name, type, status, page_id, description, created_by, updated_by
+		  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+	  `, *req.ProjectID, artifactName, artifactType, artifactStatus, pageId, req.Description, userId)
+	  if err != nil {
+		http.Error(w, "Failed to create artifact", http.StatusInternalServerError)
+		return
+	  }
+	} else {
+	  // Unlinking from a project
+	  _, err = tx.Exec(`
+		  UPDATE pages.pages_content 
+		  SET project_id = NULL,
+			  updated_at = CURRENT_TIMESTAMP,
+			  updated_by = $1
+		  WHERE id = $2
+	  `, userId, pageId)
+	  if err != nil {
+		http.Error(w, "Failed to unlink page from project", http.StatusInternalServerError)
+		return
+	  }
+  
+	  // Delete the corresponding artifact entry
+	  _, err = tx.Exec(`
+		  DELETE FROM rdm.project_artifacts
+		  WHERE page_id = $1
+	  `, pageId)
+	  if err != nil {
+		http.Error(w, "Failed to remove artifact association", http.StatusInternalServerError)
+		return
+	  }
 	}
-
+  
+	if err = tx.Commit(); err != nil {
+	  http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+	  return
+	}
+  
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(Response{Success: true, Message: "Page associated with project"})
-}
+	var message string
+	if req.ProjectID != nil {
+	  message = fmt.Sprintf("Page associated with project %s", *req.ProjectID)
+	} else {
+	  message = "Page unlinked from project"
+	}
+	json.NewEncoder(w).Encode(Response{Success: true, Message: message})
+  }
 
 // Handler for creating a new page
 func handleCreatePage(w http.ResponseWriter, r *http.Request) {

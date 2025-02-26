@@ -18,7 +18,7 @@ export interface Project {
     projectId: string;
     name: string;
     description?: string;
-    type: 'document' | 'task' | 'page'| 'image'| 'milestone' | 'deliverable';
+    type: 'document' | 'image';
     status: 'draft' | 'in_review' | 'approved' | 'rejected';
     assignedTo?: string;
     documentId?: string;

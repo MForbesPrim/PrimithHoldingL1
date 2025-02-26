@@ -37,7 +37,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useEffect, useMemo, useState, useRef } from "react"
 import { DocumentMetadata, FolderMetadata, TableItem } from "@/types/document"
 import { DataTablePagination } from "./dataTablePagination"
-import { File, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus, Upload, Folder, Settings2, Download, Trash2, MoreHorizontal } from "lucide-react"
+import { File, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus, Upload, Link2, Unlink, Folder, Settings2, Download, Trash2, MoreHorizontal, Pen } from "lucide-react"
 import {
     DropdownMenu,
     DropdownMenuCheckboxItem,
@@ -232,6 +232,7 @@ export const DashboardTable = memo(function DashboardTable({
                 </ContextMenuTrigger>
                 <ContextMenuContent>
                     <ContextMenuItem onClick={handleRenameClick}>
+                    <Pen className="w-4 h-4 mr-2" /> 
                         Rename
                     </ContextMenuItem>
                     {currentProjectId && onAssociateWithProject && row.original.type === 'document' && (
@@ -239,6 +240,7 @@ export const DashboardTable = memo(function DashboardTable({
                             <ContextMenuItem
                                 onClick={() => onAssociateWithProject(row.original.id)}
                             >
+                                <Link2 className="w-4 h-4 mr-2" />
                                 Add to Current Project
                             </ContextMenuItem>
                         ) : (
@@ -249,6 +251,7 @@ export const DashboardTable = memo(function DashboardTable({
                                     setDocumentToUnassign(row.original.id);
                                 }}
                             >
+                            <Unlink className="w-4 h-4 mr-2" />       
                                 Remove from Current Project
                             </ContextMenuItem>
                             )
@@ -258,6 +261,7 @@ export const DashboardTable = memo(function DashboardTable({
                         onClick={() => handleDeleteClick(row.original)}
                         className="text-destructive"
                     >
+                    <Trash2 className="w-4 h-4 mr-2" />    
                         Delete
                     </ContextMenuItem>
                 </ContextMenuContent>
@@ -385,6 +389,7 @@ export const DashboardTable = memo(function DashboardTable({
                                         setShowRenameDialog(true);
                                     }}
                                 >
+                                <Pen className="w-4 h-4" /> 
                                     Rename
                                 </DropdownMenuItem>
                                 {currentProjectId && onAssociateWithProject && row.original.type === 'document' && (
@@ -392,6 +397,7 @@ export const DashboardTable = memo(function DashboardTable({
                                         <DropdownMenuItem
                                             onClick={() => onAssociateWithProject(row.original.id)}
                                         >
+                                        <Link2 className="w-4 h-4" />    
                                             Add to Current Project
                                         </DropdownMenuItem>
                                     ) : (
@@ -402,6 +408,7 @@ export const DashboardTable = memo(function DashboardTable({
                                                 setShowUnassignDialog(true);
                                             }}
                                         >
+                                        <Unlink className="w-4 h-4" />        
                                             Remove from Current Project
                                         </DropdownMenuItem>
                                         )
@@ -411,6 +418,7 @@ export const DashboardTable = memo(function DashboardTable({
                                     onClick={() => handleDeleteClick(row.original)}
                                     className="text-destructive"
                                 >
+                                <Trash2 className="w-4 h-4" /> 
                                     Delete
                                 </DropdownMenuItem>
                             </DropdownMenuContent>

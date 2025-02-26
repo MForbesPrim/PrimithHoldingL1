@@ -23,11 +23,13 @@ import {
   Edit,
   Calendar,
   Clock,
+  Flag,
   FileText,
   CheckSquare,
   List,
   SquareGanttChartIcon as SquareChartGantt,
   Settings,
+  Package,
   Plus,
   Activity,
   Variable,
@@ -76,7 +78,7 @@ export function ProjectDetailPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [newArtifact, setNewArtifact] = useState({
     name: "",
-    type: "document" as "document" | "task" | "page" | "image" | "milestone" | "deliverable",
+    type: "document" as "document" | "image",
     status: "draft" as "draft" | "in_review" | "approved" | "rejected",
     description: "",
     file: null as File | null,
@@ -89,11 +91,7 @@ export function ProjectDetailPage() {
 
   const artifactTypes = [
     { value: "document", label: "Document" },
-    { value: "task", label: "Task" },
-    { value: "page", label: "Page" },
     { value: "image", label: "Image" },
-    { value: "milestone", label: "Milestone" },
-    { value: "deliverable", label: "Deliverable" },
   ];
 
   const artifactStatuses = [
@@ -360,7 +358,7 @@ export function ProjectDetailPage() {
       <Dialog open={showAddArtifactDialog} onOpenChange={setShowAddArtifactDialog}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Add Artifact to {project.name}</DialogTitle>
+            <DialogTitle>Add File Artifact to {project.name}</DialogTitle>
             <DialogDescription>Upload a file and provide details for the new artifact.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -400,7 +398,7 @@ export function ProjectDetailPage() {
                 onValueChange={(value) =>
                   setNewArtifact((prev) => ({
                     ...prev,
-                    type: value as "document" | "task" | "page" | "image" | "milestone" | "deliverable",
+                    type: value as "document" | "image",
                   }))
                 }
                 disabled={isUploading}
@@ -510,6 +508,18 @@ export function ProjectDetailPage() {
             <SquareChartGantt className="h-4 w-4 mr-2" />
             Roadmap
           </TabsTrigger>
+          <TabsTrigger value="tasks" className="rounded-t-lg">
+            <CheckSquare className="h-4 w-4 mr-2" />
+            Tasks
+          </TabsTrigger>
+          <TabsTrigger value="milestones" className="rounded-t-lg">
+            <Flag className="h-4 w-4 mr-2" />
+            Milestones
+          </TabsTrigger>
+          <TabsTrigger value="deliverables" className="rounded-t-lg">
+            <Package className="h-4 w-4 mr-2" />
+            Deliverables
+          </TabsTrigger>
           <TabsTrigger value="variables" className="rounded-t-lg">
             <Variable className="h-4 w-4 mr-2" />
             Variables
@@ -518,6 +528,7 @@ export function ProjectDetailPage() {
             <ActivityIcon className="h-4 w-4 mr-2" />
             Activity
           </TabsTrigger>
+
         </TabsList>
         <TabsContent value="overview" className="py-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -565,7 +576,7 @@ export function ProjectDetailPage() {
                 <CardTitle className="text-base font-medium">Recent Artifacts</CardTitle>
                 <Button variant="outline" size="sm" onClick={handleAddArtifactClick}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Add New
+                  Add File
                 </Button>
               </CardHeader>
               <CardContent>
@@ -651,22 +662,22 @@ export function ProjectDetailPage() {
           </div>
         </TabsContent>
         <TabsContent value="artifacts">
-          <div className="space-y-4 mt-4">
-            <div className="flex justify-between items-center">
-              <h2 className="text-md font-semibold">All Artifacts</h2>
-              <Button onClick={handleAddArtifactClick}>
-                <Plus className="h-4 w-4 mr-1" />
-                Add Artifact
-              </Button>
+            <div className="space-y-4 mt-4">
+                <div className="flex justify-between items-center">
+                <h2 className="text-md font-semibold">All Artifacts</h2>
+                <Button size="sm" onClick={handleAddArtifactClick}>
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add File
+                </Button>
+                </div>
+                <ArtifactsPage
+                artifacts={artifacts}
+                onStatusChange={async (artifactId: string, status: string) => {
+                    await projectService.updateArtifactStatus(artifactId, status);
+                    loadProjectData();
+                }}
+                />
             </div>
-            <ArtifactsPage
-              artifacts={artifacts}
-              onStatusChange={async (artifactId: string, status: string) => {
-                await projectService.updateArtifactStatus(artifactId, status);
-                loadProjectData();
-              }}
-            />
-          </div>
         </TabsContent>
         <TabsContent value="documents">
           <div className="space-y-4">
@@ -771,6 +782,41 @@ export function ProjectDetailPage() {
         <TabsContent value="variables">
           <ProjectVariablesPanel projectId={project.id} projectService={projectService} />
         </TabsContent>
+        <TabsContent value="activity">
+            <div className="space-y-4 mt-4">
+                <div className="flex justify-between items-center">
+                <h2 className="text-md font-semibold">Project Activity</h2>
+                </div>
+                {recentActivity.length > 0 ? (
+                <div className="border rounded-md">
+                    <Table>
+                    <TableHeader>
+                        <TableRow>
+                        <TableHead>Description</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Time</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {recentActivity.map((activity) => (
+                        <TableRow key={activity.id}>
+                            <TableCell className="text-xs">{activity.description}</TableCell>
+                            <TableCell className="text-xs">{new Date(activity.timestamp).toLocaleDateString()}</TableCell>
+                            <TableCell className="text-xs">{new Date(activity.timestamp).toLocaleTimeString()}</TableCell>
+                        </TableRow>
+                        ))}
+                    </TableBody>
+                    </Table>
+                </div>
+                ) : (
+                <div className="text-center p-8 border rounded-md bg-gray-50">
+                    <Activity className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-500 mb-2">No activity recorded for this project yet.</p>
+                    <p className="text-gray-400 text-sm">Activity will be tracked as changes are made to the project.</p>
+                </div>
+                )}
+            </div>
+            </TabsContent>
       </Tabs>
     </div>
   );

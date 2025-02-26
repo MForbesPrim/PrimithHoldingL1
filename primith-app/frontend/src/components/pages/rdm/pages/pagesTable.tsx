@@ -5,13 +5,16 @@ import {
   ChevronRight,
   ChevronDown,
   Folder,
+  FilePen,
+  FolderPen,
+  Link2,
   Plus,
-  Pencil,
   Trash2,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  Search, 
+  Search,
+  Unlink, 
 } from 'lucide-react';
 import { PageNode, FolderNode } from '@/types/pages';
 import { Button } from '@/components/ui/button';
@@ -45,6 +48,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 
 interface PagesTableProps {
   pages: PageNode[];
@@ -58,6 +62,9 @@ interface PagesTableProps {
   onDeleteFolder: (id: string) => Promise<void>;
   onRenameFolder: (id: string, title: string) => void;
   currentFolderId: string | null;
+  currentProjectId?: string | null;
+  onAssociateWithProject?: (pageId: string) => Promise<void>;
+  onUnassignFromProject?: (pageId: string) => Promise<void>;
 }
 
 type CombinedNode = {
@@ -70,6 +77,7 @@ type CombinedNode = {
     children: CombinedNode[];
     organizationId?: string;
     hasChildren: boolean;
+    projectId?: string | null; // Added for project association
   };
 
 // In PagesTable component
@@ -88,6 +96,7 @@ function buildCombinedTree(pages: PageNode[], folders: FolderNode[]): CombinedNo
             children: [],
             organizationId: page.organizationId,
             hasChildren: false,
+            projectId: page.projectId || null, // Include projectId from page
         });
     });
 
@@ -103,6 +112,7 @@ function buildCombinedTree(pages: PageNode[], folders: FolderNode[]): CombinedNo
             children: [],
             organizationId: folder.organizationId,
             hasChildren: false,
+            projectId: null, // Folders don't have project associations
         });
     });
 
@@ -189,6 +199,9 @@ export function PagesTable({
     onDeleteFolder,
     onRenameFolder,
     currentFolderId,
+    currentProjectId,
+    onAssociateWithProject,
+    onUnassignFromProject,
   }: PagesTableProps) {
     const [sorting, setSorting] = useState<SortingState>([
         { id: "updatedAt", desc: true },
@@ -203,6 +216,8 @@ export function PagesTable({
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState(''); 
+    const [showUnassignDialog, setShowUnassignDialog] = useState(false);
+    const [pageToUnassign, setPageToUnassign] = useState<string | null>(null);
     const tree = useMemo(() => buildCombinedTree(pages, folders), [pages, folders]);
     
     const currentNodes = useMemo(() => {
@@ -227,6 +242,66 @@ export function PagesTable({
         return flatData.filter((node) => node.name.toLowerCase().includes(lowercaseQuery));
         }, [flatData, searchQuery]);
     
+    const TableRowWithContext = ({ row, children }: { row: any; children: React.ReactNode }) => {
+        const node = row.original;
+        const handleRenameClick = () => {
+            setRenameTargetId(node.id);
+            setNewName(node.name);
+            setIsTargetFolder(node.type === 'folder');
+            setIsRenameDialogOpen(true);
+        };
+
+        const isAssignedToProject = node.type !== 'folder' && 
+            currentProjectId && 
+            node.projectId === currentProjectId;
+
+        return (
+            <ContextMenu>
+                <ContextMenuTrigger asChild>
+                    <TableRow data-state={row.getIsSelected() && 'selected'}>
+                        {children}
+                    </TableRow>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                    <ContextMenuItem onClick={handleRenameClick}>
+                        Rename
+                    </ContextMenuItem>
+                    {currentProjectId && onAssociateWithProject && node.type !== 'folder' && (
+                        !isAssignedToProject ? (
+                            <ContextMenuItem
+                                onClick={() => onAssociateWithProject(node.id)}
+                            >
+                            <Link2 className="h-4 w-4 mr-2" />
+                                Add to Current Project
+                            </ContextMenuItem>
+                        ) : (
+                            onUnassignFromProject && (
+                                <ContextMenuItem
+                                onClick={() => {
+                                    setPageToUnassign(node.id);
+                                    setShowUnassignDialog(true);
+                                }}
+                            >
+                            <Unlink className="w-4 h-4" />                 
+                                Remove from Current Project
+                            </ContextMenuItem>
+                            )
+                        )
+                    )}
+                    <ContextMenuItem
+                        onClick={() => {
+                            setDeleteTargetId(node.id);
+                            setIsTargetFolder(node.type === 'folder');
+                            setIsDeleteDialogOpen(true);
+                        }}
+                        className="text-red-600"
+                    >
+                        Delete
+                    </ContextMenuItem>
+                </ContextMenuContent>
+            </ContextMenu>
+        );
+    };
 
     const columns: ColumnDef<CombinedNode & { depth: number }>[] = useMemo(
         () => [
@@ -305,6 +380,11 @@ export function PagesTable({
                         >
                           {node.name}
                         </div>
+                        {node.type !== 'folder' && node.projectId === currentProjectId && (
+                          <span className="ml-2 px-1.5 py-0.5 bg-primary/10 text-primary text-xs rounded-sm">
+                            Project
+                          </span>
+                        )}
                       </div>
                     );
                   },
@@ -381,6 +461,10 @@ export function PagesTable({
         id: 'actions',
         cell: ({ row }) => {
           const node = row.original;
+          const isAssignedToProject = node.type !== 'folder' && 
+            currentProjectId && 
+            node.projectId === currentProjectId;
+            
           return (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -433,7 +517,7 @@ export function PagesTable({
                         }, 0);
                     }}
                     >
-                    <Pencil className="h-4 w-4 mr-2" />    
+                    <FolderPen className="h-4 w-4 mr-2" />    
                     Rename
                     </DropdownMenuItem>
                     <DropdownMenuItem
@@ -494,9 +578,39 @@ export function PagesTable({
                         }, 0);
                     }}
                     >
-                    <Pencil className="h-4 w-4 mr-2" />       
+                    <FilePen className="h-4 w-4 mr-2" />       
                     Rename
                     </DropdownMenuItem>
+                    {currentProjectId && onAssociateWithProject && (
+                      !isAssignedToProject ? (
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setTimeout(() => {
+                              if (onAssociateWithProject) {
+                                onAssociateWithProject(node.id);
+                              }
+                            }, 0);
+                          }}
+                        >
+                        <Link2 className="h-4 w-4 mr-2" />    
+                          Add to Current Project
+                        </DropdownMenuItem>
+                      ) : (
+                        onUnassignFromProject && (
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setTimeout(() => {
+                                setPageToUnassign(node.id);
+                                setShowUnassignDialog(true);
+                              }, 0);
+                            }}
+                          >
+                            <Unlink className="w-4 h-4" />
+                            Remove from Current Project
+                          </DropdownMenuItem>
+                        )
+                      )
+                    )}
                     <DropdownMenuItem
                     onClick={() => {
                         setTimeout(() => {
@@ -518,7 +632,7 @@ export function PagesTable({
         },
       },
     ],
-    [expandedRows, onPageClick, onFolderClick, onCreateFolder, onCreatePage]
+    [expandedRows, onPageClick, onFolderClick, onCreateFolder, onCreatePage, currentProjectId, onAssociateWithProject, onUnassignFromProject]
   );
 
   const table = useReactTable({
@@ -614,13 +728,13 @@ export function PagesTable({
           <TableBody>
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id} data-state={row.getIsSelected() && 'selected'}>
+                <TableRowWithContext key={row.id} row={row}>
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}
-                </TableRow>
+                </TableRowWithContext>
               ))
             ) : (
               <TableRow>
@@ -659,6 +773,7 @@ export function PagesTable({
         </DialogContent>
       </Dialog>
 
+      {/* Delete Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={handleDeleteDialogOpenChange}>
         <DialogContent>
           <DialogHeader>
@@ -674,6 +789,34 @@ export function PagesTable({
             </Button>
             <Button onClick={handleDelete} disabled={isDeleting}>
               {isDeleting ? 'Deleting...' : 'Confirm'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Unassign from Project Dialog */}
+      <Dialog open={showUnassignDialog} onOpenChange={setShowUnassignDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove from Project</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove this page from the current project?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowUnassignDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (pageToUnassign && onUnassignFromProject) {
+                  onUnassignFromProject(pageToUnassign);
+                  setPageToUnassign(null);
+                }
+                setShowUnassignDialog(false);
+              }}
+            >
+              Remove
             </Button>
           </DialogFooter>
         </DialogContent>
