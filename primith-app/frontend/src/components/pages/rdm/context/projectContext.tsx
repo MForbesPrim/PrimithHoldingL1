@@ -24,9 +24,9 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [loadingProject, setLoadingProject] = useState(false);
-  
+
   const projectService = new ProjectService();
-  
+
   useEffect(() => {
     if (selectedProjectId) {
       localStorage.setItem('selectedProjectId', selectedProjectId);
@@ -36,7 +36,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setCurrentProject(null);
     }
   }, [selectedProjectId]);
-  
+
   const loadProject = async (projectId: string) => {
     try {
       setLoadingProject(true);
@@ -44,19 +44,24 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setCurrentProject(project);
     } catch (error) {
       console.error("Failed to load project:", error);
-      setCurrentProject(null);
+      if (error instanceof Error && error.message === 'Authentication required. Please login again.') {
+        setSelectedProjectId(null); // Clear selectedProjectId to stop useEffect
+        window.location.href = '/login'; // Redirect to login page
+      } else {
+        setCurrentProject(null); // Handle other errors as before
+      }
     } finally {
       setLoadingProject(false);
     }
   };
-  
+
   return (
-    <ProjectContext.Provider 
-      value={{ 
-        selectedProjectId, 
-        setSelectedProjectId, 
-        currentProject, 
-        loadingProject 
+    <ProjectContext.Provider
+      value={{
+        selectedProjectId,
+        setSelectedProjectId,
+        currentProject,
+        loadingProject,
       }}
     >
       {children}

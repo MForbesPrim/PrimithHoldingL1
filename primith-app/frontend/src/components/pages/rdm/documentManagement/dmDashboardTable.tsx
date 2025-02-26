@@ -29,6 +29,7 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
+import { DocumentService } from "@/services/documentService"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -91,6 +92,7 @@ export const DashboardTable = memo(function DashboardTable({
     const [sorting, setSorting] = useState<SortingState>([
         { id: "updatedAt", desc: true }
     ])
+    const documentService = new DocumentService();
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
     const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
     const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
@@ -161,8 +163,10 @@ export const DashboardTable = memo(function DashboardTable({
     }
 
     const handleRename = (id: string, newBaseName: string, originalName: string, type: 'document' | 'folder') => {
-        const ext = type === 'document' ? `.${originalName.split('.').pop()}` : '';
-        const finalName = `${newBaseName}${ext}`;
+        // Only modify the name if it's a document
+        const finalName = type === 'document' 
+          ? documentService.ensureFileExtension(newBaseName, originalName) 
+          : newBaseName;
 
         if (type === 'document' && onRenameDocument) {
             onRenameDocument(id, finalName)

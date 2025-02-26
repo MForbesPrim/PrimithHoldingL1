@@ -3,6 +3,28 @@ import AuthService from '@/services/auth'
 
 export class DocumentService {
   private baseUrl = import.meta.env.VITE_API_URL;
+
+  ensureFileExtension(newName: string, originalName: string): string {
+    if (!originalName || !originalName.includes('.')) return newName;
+    
+    const originalExt = this.getFileExtension(originalName);
+    // If newName already ends with the correct extension (case insensitive)
+    if (originalExt && newName.toLowerCase().endsWith(originalExt.toLowerCase())) {
+      return newName;
+    }
+    
+    // Remove any existing extension from newName
+    const newExt = this.getFileExtension(newName);
+    const baseName = newExt ? newName.slice(0, -newExt.length) : newName;
+    
+    // Add the original extension
+    return baseName + originalExt;
+  }
+  
+  getFileExtension(filename: string): string {
+    if (!filename || !filename.includes('.')) return '';
+    return '.' + filename.split('.').pop()!.toLowerCase();
+  }
   
   private async getAuthHeader() {
     let rdmAuth = AuthService.getRdmTokens();

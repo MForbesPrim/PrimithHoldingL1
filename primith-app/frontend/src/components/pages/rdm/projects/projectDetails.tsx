@@ -1,16 +1,14 @@
-"use client"
-
-import { useState, useEffect } from "react"
-import { useParams, useNavigate } from "react-router-dom"
-import { ProjectService } from "@/services/projectService"
-import { DocumentService } from "@/services/documentService"
-import { PagesService } from "@/services/pagesService"
-import type { Project, ProjectArtifact, RoadmapItem } from "@/types/projects"
-import type { DocumentMetadata } from "@/types/document"
-import type { PageNode } from "@/types/pages"
-import { Button } from "@/components/ui/button"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { ProjectService } from "@/services/projectService";
+import { DocumentService } from "@/services/documentService";
+import { PagesService } from "@/services/pagesService";
+import type { Project, ProjectArtifact, RoadmapItem } from "@/types/projects";
+import type { DocumentMetadata } from "@/types/document";
+import type { PageNode } from "@/types/pages";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -18,8 +16,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
+} from "@/components/ui/table";
 import {
+  Activity as ActivityIcon,
   ChevronLeft,
   Edit,
   Calendar,
@@ -32,126 +31,174 @@ import {
   Plus,
   Activity,
   Variable,
-} from "lucide-react"
-import { RoadmapView } from "@/components/pages/rdm/projects/roadmapView"
-import { ArtifactsPage } from "@/components/pages/rdm/projects/artifactsTable"
-import { ProjectVariablesPanel } from "@/components/pages/rdm/projects/projectVariables"
-import { EditProjectDialog } from "@/components/pages/rdm/projects/editProjectDialog"
+  Loader2,
+} from "lucide-react";
+import { RoadmapView } from "@/components/pages/rdm/projects/roadmapView";
+import { ArtifactsPage } from "@/components/pages/rdm/projects/artifactsTable";
+import { ProjectVariablesPanel } from "@/components/pages/rdm/projects/projectVariables";
+import { EditProjectDialog } from "@/components/pages/rdm/projects/editProjectDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface ProjectActivity {
-  id: string
-  description: string
-  timestamp: string
+  id: string;
+  description: string;
+  timestamp: string;
 }
 
 export function ProjectDetailPage() {
-  const { projectId } = useParams<{ projectId: string }>()
-  const [project, setProject] = useState<Project | null>(null)
-  const [artifacts, setArtifacts] = useState<ProjectArtifact[]>([])
-  const [roadmapItems, setRoadmapItems] = useState<RoadmapItem[]>([])
-  const [recentActivity, setRecentActivity] = useState<ProjectActivity[]>([])
-  const [associatedDocuments, setAssociatedDocuments] = useState<DocumentMetadata[]>([])
-  const [associatedPages, setAssociatedPages] = useState<PageNode[]>([])
-  const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState("overview")
-  const [editingProject, setEditingProject] = useState(false)
+  const { projectId } = useParams<{ projectId: string }>();
+  const [project, setProject] = useState<Project | null>(null);
+  const [artifacts, setArtifacts] = useState<ProjectArtifact[]>([]);
+  const [roadmapItems, setRoadmapItems] = useState<RoadmapItem[]>([]);
+  const [recentActivity, setRecentActivity] = useState<ProjectActivity[]>([]);
+  const [associatedDocuments, setAssociatedDocuments] = useState<DocumentMetadata[]>([]);
+  const [associatedPages, setAssociatedPages] = useState<PageNode[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [editingProject, setEditingProject] = useState(false);
+  const [showAddArtifactDialog, setShowAddArtifactDialog] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [newArtifact, setNewArtifact] = useState({
+    name: "",
+    type: "document" as "document" | "task" | "page" | "image" | "milestone" | "deliverable",
+    status: "draft" as "draft" | "in_review" | "approved" | "rejected",
+    description: "",
+    file: null as File | null,
+  });
 
-  const projectService = new ProjectService()
-  const documentService = new DocumentService()
-  const pagesService = new PagesService()
-  const navigate = useNavigate()
+  const projectService = new ProjectService();
+  const documentService = new DocumentService();
+  const pagesService = new PagesService();
+  const navigate = useNavigate();
+
+  const artifactTypes = [
+    { value: "document", label: "Document" },
+    { value: "task", label: "Task" },
+    { value: "page", label: "Page" },
+    { value: "image", label: "Image" },
+    { value: "milestone", label: "Milestone" },
+    { value: "deliverable", label: "Deliverable" },
+  ];
+
+  const artifactStatuses = [
+    { value: "draft", label: "Draft" },
+    { value: "in_review", label: "In Review" },
+    { value: "approved", label: "Approved" },
+    { value: "rejected", label: "Rejected" },
+  ];
 
   useEffect(() => {
     if (projectId) {
-      loadProjectData()
+      loadProjectData();
     }
-  }, [projectId])
+  }, [projectId]);
 
   async function loadProjectData() {
     try {
-      if (!projectId) return
-      setLoading(true)
-      
-      // Load project details
-      const projectData = await projectService.getProjectById(projectId)
-      setProject(projectData)
-      
-      // Load artifacts
-      const artifactsData = await projectService.getProjectArtifacts(projectId)
-      setArtifacts(artifactsData)
-      
-      // Load roadmap items
-      const roadmapData = await projectService.getRoadmapItems(projectId)
-      setRoadmapItems(roadmapData)
-      
-      // Load associated documents & pages
-      loadAssociatedDocuments()
-      loadAssociatedPages()
-      
-      // Mock activity data - replace with actual service call when available
+      if (!projectId) return;
+      setLoading(true);
+
+      const projectData = await projectService.getProjectById(projectId);
+      console.log("Loaded project:", projectData);
+      setProject(projectData);
+
+      const artifactsData = await projectService.getProjectArtifacts(projectId);
+      console.log("Loaded artifacts:", artifactsData);
+      setArtifacts([...(Array.isArray(artifactsData) ? artifactsData : [])]);
+
+      try {
+        const roadmapData = await projectService.getRoadmapItems(projectId);
+        console.log("Loaded roadmap items:", roadmapData);
+        setRoadmapItems(Array.isArray(roadmapData) ? roadmapData : []);
+      } catch (roadmapError) {
+        console.warn("Failed to load roadmap items:", roadmapError);
+        setRoadmapItems([]);
+      }
+
+      await loadAssociatedDocuments();
+      await loadAssociatedPages();
+
       const activityData: ProjectActivity[] = [
         {
           id: "1",
           description: "Project created",
-          timestamp: new Date(projectData.createdAt).toISOString()
+          timestamp: new Date(projectData.createdAt).toISOString(),
         },
         {
-          id: "2", 
+          id: "2",
           description: "Status updated to " + projectData.status,
-          timestamp: new Date(projectData.updatedAt).toISOString()
-        }
-      ]
-      setRecentActivity(activityData)
+          timestamp: new Date(projectData.updatedAt).toISOString(),
+        },
+      ];
+      console.log("Set recent activity:", activityData);
+      setRecentActivity(activityData);
     } catch (error) {
-      console.error("Failed to load project data:", error)
+      console.error("Failed to load project data:", error);
+      setArtifacts([]);
+      setRoadmapItems([]);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
-  
+
   async function loadAssociatedDocuments() {
     if (!projectId || !project?.organizationId) return;
     try {
       const docs = await documentService.getDocuments(null, project.organizationId, projectId);
-      setAssociatedDocuments(docs);
+      setAssociatedDocuments(Array.isArray(docs) ? docs : []);
     } catch (error) {
       console.error("Failed to load associated documents:", error);
+      setAssociatedDocuments([]);
     }
   }
-  
+
   async function loadAssociatedPages() {
     if (!projectId || !project?.organizationId) return;
     try {
       const pages = await pagesService.getPages(project.organizationId, projectId);
-      setAssociatedPages(pages);
+      setAssociatedPages(Array.isArray(pages) ? pages : []);
     } catch (error) {
       console.error("Failed to load associated pages:", error);
+      setAssociatedPages([]);
     }
   }
 
   const handleUpdateProject = async (updatedProject: Partial<Project>) => {
     try {
-      if (!project?.id) return
-      // Update project in the database
-      await projectService.updateProject(project.id, updatedProject)
-      // Update local state with the new project data
-      setProject((prev) => prev ? { ...prev, ...updatedProject } : null)
-      setEditingProject(false)
+      if (!project?.id) return;
+      await projectService.updateProject(project.id, updatedProject);
+      setProject((prev) => (prev ? { ...prev, ...updatedProject } : null));
+      setEditingProject(false);
     } catch (error) {
-      console.error("Failed to update project:", error)
-      // Optionally, add error feedback UI here
+      console.error("Failed to update project:", error);
     }
-  }
+  };
 
   function handleBackClick() {
     navigate("/rdm/projects", { state: { updatedProject: project } });
   }
-  
+
   async function handleDownloadDocument(documentId: string, fileName: string) {
     try {
       const blob = await documentService.downloadDocument(documentId);
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = url;
       a.download = fileName;
       document.body.appendChild(a);
@@ -162,6 +209,107 @@ export function ProjectDetailPage() {
       console.error("Download failed:", error);
     }
   }
+
+  const handleAddArtifactClick = () => {
+    setNewArtifact({
+      name: "",
+      type: "document",
+      status: "draft",
+      description: "",
+      file: null,
+    });
+    setShowAddArtifactDialog(true);
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null;
+    setNewArtifact((prev) => ({
+      ...prev,
+      file,
+      name: file ? file.name : prev.name,
+    }));
+  };
+
+  const handleCreateArtifact = async () => {
+    if (!projectId || !project?.organizationId || !newArtifact.file) return;
+
+    setIsUploading(true);
+
+    try {
+      console.log("Starting artifact creation with projectId:", projectId, "and newArtifact:", newArtifact);
+      const uploadedDoc = await documentService.uploadDocument(newArtifact.file, null, project.organizationId);
+      console.log("Document uploaded:", uploadedDoc);
+
+      await documentService.associateDocumentWithProject(uploadedDoc.id, projectId);
+      console.log("Document associated with project");
+
+      // Wait briefly to ensure the artifact is created on the backend
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const updatedArtifacts = await projectService.getProjectArtifacts(projectId);
+      console.log("Fetched updated artifacts:", updatedArtifacts);
+
+      const newArtifactEntry = updatedArtifacts.find((artifact) => artifact.documentId === uploadedDoc.id);
+      console.log("New artifact entry found:", newArtifactEntry);
+
+      if (!newArtifactEntry) {
+        throw new Error("New artifact entry not found in updated artifacts");
+      }
+
+      let finalName = newArtifact.name.trim() || uploadedDoc.name;
+      const fileExtension = newArtifact.file.name.includes(".")
+        ? "." + newArtifact.file.name.split(".").pop()
+        : "";
+
+      if (fileExtension && !finalName.toLowerCase().endsWith(fileExtension.toLowerCase())) {
+        finalName += fileExtension;
+      }
+
+      console.log("Final artifact name before update:", finalName);
+      const updatedArtifactResponse = await projectService.updateArtifact(projectId, newArtifactEntry.id, {
+        name: finalName,
+        type: newArtifact.type,
+        status: newArtifact.status,
+        description: newArtifact.description,
+        documentId: uploadedDoc.id,
+      });
+      console.log("Artifact updated successfully:", updatedArtifactResponse);
+
+      // Ensure updatedArtifact has all fields, falling back to newArtifact values if needed
+      const updatedArtifact: ProjectArtifact = {
+        ...newArtifactEntry, // Base from fetched artifact
+        name: finalName,
+        type: newArtifact.type, // Use dialog value
+        status: newArtifact.status, // Use dialog value
+        description: newArtifact.description || "",
+        documentId: uploadedDoc.id,
+        id: newArtifactEntry.id,
+        projectId: projectId,
+        createdAt: newArtifactEntry.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        // Add other required fields if missing from response
+      };
+
+      // Update artifacts with the fully populated artifact
+      setArtifacts((prev) => {
+        const newList = prev.filter((artifact) => artifact.id !== updatedArtifact.id);
+        return [...newList, updatedArtifact];
+      });
+
+      // Update associated documents with the renamed file
+      setAssociatedDocuments((prev) => {
+        const newDocs = prev.filter((doc) => doc.id !== uploadedDoc.id);
+        return [...newDocs, { ...uploadedDoc, name: finalName }];
+      });
+
+      setShowAddArtifactDialog(false);
+    } catch (error) {
+      console.error("Failed to create artifact with file:", error);
+      alert(`Failed to create artifact: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -178,7 +326,7 @@ export function ProjectDetailPage() {
           <div className="h-48 bg-gray-200 rounded mb-4"></div>
         </div>
       </div>
-    )
+    );
   }
 
   if (!project) {
@@ -198,7 +346,7 @@ export function ProjectDetailPage() {
           <Button onClick={handleBackClick}>Go Back to Projects</Button>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -209,6 +357,123 @@ export function ProjectDetailPage() {
         project={project}
         onSave={handleUpdateProject}
       />
+      <Dialog open={showAddArtifactDialog} onOpenChange={setShowAddArtifactDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Add Artifact to {project.name}</DialogTitle>
+            <DialogDescription>Upload a file and provide details for the new artifact.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div>
+              <label htmlFor="artifact-file" className="text-sm font-medium mb-1 block">
+                File
+              </label>
+              <Input
+                id="artifact-file"
+                type="file"
+                onChange={handleFileChange}
+                className="cursor-pointer"
+                disabled={isUploading}
+              />
+              {newArtifact.file && (
+                <p className="text-sm text-gray-500 mt-1">Selected: {newArtifact.file.name}</p>
+              )}
+            </div>
+            <div>
+              <label htmlFor="artifact-name" className="text-sm font-medium mb-1 block">
+                Name
+              </label>
+              <Input
+                id="artifact-name"
+                value={newArtifact.name}
+                onChange={(e) => setNewArtifact((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="Enter artifact name (defaults to filename)"
+                disabled={isUploading}
+              />
+            </div>
+            <div>
+              <label htmlFor="artifact-type" className="text-sm font-medium mb-1 block">
+                Type
+              </label>
+              <Select
+                value={newArtifact.type}
+                onValueChange={(value) =>
+                  setNewArtifact((prev) => ({
+                    ...prev,
+                    type: value as "document" | "task" | "page" | "image" | "milestone" | "deliverable",
+                  }))
+                }
+                disabled={isUploading}
+              >
+                <SelectTrigger id="artifact-type">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {artifactTypes.map((type) => (
+                    <SelectItem key={type.value} value={type.value} className="hover:bg-gray-100">
+                      {type.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label htmlFor="artifact-status" className="text-sm font-medium mb-1 block">
+                Status
+              </label>
+              <Select
+                value={newArtifact.status}
+                onValueChange={(value) =>
+                  setNewArtifact((prev) => ({
+                    ...prev,
+                    status: value as "draft" | "in_review" | "approved" | "rejected",
+                  }))
+                }
+                disabled={isUploading}
+              >
+                <SelectTrigger id="artifact-status">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {artifactStatuses.map((status) => (
+                    <SelectItem key={status.value} value={status.value} className="hover:bg-gray-100">
+                      {status.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label htmlFor="artifact-description" className="text-sm font-medium mb-1 block">
+                Description
+              </label>
+              <Textarea
+                id="artifact-description"
+                value={newArtifact.description}
+                onChange={(e) => setNewArtifact((prev) => ({ ...prev, description: e.target.value }))}
+                placeholder="Enter artifact description"
+                rows={3}
+                disabled={isUploading}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddArtifactDialog(false)} disabled={isUploading}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateArtifact} disabled={!newArtifact.file || isUploading}>
+              {isUploading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Uploading...
+                </>
+              ) : (
+                "Upload and Add Artifact"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <div className="mb-4">
         <div className="flex justify-between items-center mb-4">
           <Button variant="outline" size="sm" onClick={handleBackClick} className="flex items-center">
@@ -249,6 +514,10 @@ export function ProjectDetailPage() {
             <Variable className="h-4 w-4 mr-2" />
             Variables
           </TabsTrigger>
+          <TabsTrigger value="activity" className="rounded-t-lg">
+            <ActivityIcon className="h-4 w-4 mr-2" />
+            Activity
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="py-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -259,7 +528,7 @@ export function ProjectDetailPage() {
                   <div>
                     <h3 className="text-sm font-medium">Start Date</h3>
                     <p className="text-xs">
-                    {project.startDate ? project.startDate.split('T')[0] : "Not set"}
+                      {project.startDate ? project.startDate.split("T")[0] : "Not set"}
                     </p>
                   </div>
                 </div>
@@ -272,7 +541,7 @@ export function ProjectDetailPage() {
                   <div>
                     <h3 className="text-sm font-medium">End Date</h3>
                     <p className="text-xs">
-                    {project.endDate ? project.endDate.split('T')[0] : "Not set"}
+                      {project.endDate ? project.endDate.split("T")[0] : "Not set"}
                     </p>
                   </div>
                 </div>
@@ -294,14 +563,14 @@ export function ProjectDetailPage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-base font-medium">Recent Artifacts</CardTitle>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={handleAddArtifactClick}>
                   <Plus className="mr-2 h-4 w-4" />
                   Add New
                 </Button>
               </CardHeader>
               <CardContent>
-              {artifacts && artifacts.length > 0 ? (
-                  <div className="space-y-4">
+                {artifacts.length > 0 ? (
+                  <div className="space-y-2">
                     {artifacts.slice(0, 5).map((artifact) => (
                       <div
                         key={artifact.id}
@@ -309,8 +578,8 @@ export function ProjectDetailPage() {
                       >
                         <div className="flex justify-between items-center">
                           <div>
-                            <h4 className="font-medium">{artifact.name}</h4>
-                            <p className="text-sm text-gray-500">
+                            <h4 className="text-sm">{artifact.name}</h4>
+                            <p className="text-xs text-gray-500">
                               {artifact.type} • {artifact.status}
                             </p>
                           </div>
@@ -320,7 +589,13 @@ export function ProjectDetailPage() {
                         </div>
                       </div>
                     ))}
-                    <Button variant="outline" className="w-full mt-4">
+                    <Button
+                      variant="outline"
+                      className="w-full mt-4"
+                      onClick={() => {
+                        setActiveTab("artifacts");
+                      }}
+                    >
                       View All Artifacts
                     </Button>
                   </div>
@@ -333,24 +608,35 @@ export function ProjectDetailPage() {
               </CardContent>
             </Card>
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
                 <CardTitle className="text-base font-medium">Recent Activity</CardTitle>
               </CardHeader>
               <CardContent>
                 {recentActivity.length > 0 ? (
-                  <div className="space-y-4">
+                  <div className="space-y-2">
                     {recentActivity.slice(0, 5).map((activity) => (
-                      <div key={activity.id} className="p-3 rounded-md border hover:bg-gray-50 transition-colors">
+                      <div
+                        key={activity.id}
+                        className="p-3 rounded-md border hover:bg-gray-50 transition-colors"
+                      >
                         <div className="flex justify-between items-center">
                           <div>
                             <p className="text-sm">{activity.description}</p>
-                            <p className="text-xs text-gray-500">{new Date(activity.timestamp).toLocaleString()}</p>
+                            <p className="text-xs text-gray-500">
+                              {new Date(activity.timestamp).toLocaleString()}
+                            </p>
                           </div>
                           <Activity className="h-4 w-4 text-gray-400" />
                         </div>
                       </div>
                     ))}
-                    <Button variant="outline" className="w-full mt-4">
+                    <Button
+                      variant="outline"
+                      className="w-full mt-4"
+                      onClick={() => {
+                        setActiveTab("activity");
+                      }}
+                    >
                       View All Activity
                     </Button>
                   </div>
@@ -368,7 +654,7 @@ export function ProjectDetailPage() {
           <div className="space-y-4 mt-4">
             <div className="flex justify-between items-center">
               <h2 className="text-md font-semibold">All Artifacts</h2>
-              <Button>
+              <Button onClick={handleAddArtifactClick}>
                 <Plus className="h-4 w-4 mr-1" />
                 Add Artifact
               </Button>
@@ -376,8 +662,8 @@ export function ProjectDetailPage() {
             <ArtifactsPage
               artifacts={artifacts}
               onStatusChange={async (artifactId: string, status: string) => {
-                await projectService.updateArtifactStatus(artifactId, status)
-                loadProjectData()
+                await projectService.updateArtifactStatus(artifactId, status);
+                loadProjectData();
               }}
             />
           </div>
@@ -390,7 +676,6 @@ export function ProjectDetailPage() {
                 Browse Documents
               </Button>
             </div>
-            
             {associatedDocuments.length > 0 ? (
               <div className="border rounded-md">
                 <Table>
@@ -403,15 +688,15 @@ export function ProjectDetailPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {associatedDocuments.map(doc => (
+                    {associatedDocuments.map((doc) => (
                       <TableRow key={doc.id}>
                         <TableCell className="font-medium">{doc.name}</TableCell>
                         <TableCell>{doc.fileType}</TableCell>
                         <TableCell>{new Date(doc.updatedAt).toLocaleDateString()}</TableCell>
                         <TableCell>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => handleDownloadDocument(doc.id, doc.name)}
                           >
                             Download
@@ -432,7 +717,6 @@ export function ProjectDetailPage() {
             )}
           </div>
         </TabsContent>
-        
         <TabsContent value="pages">
           <div className="space-y-4">
             <div className="flex justify-between items-center">
@@ -441,11 +725,14 @@ export function ProjectDetailPage() {
                 Browse Pages
               </Button>
             </div>
-            
             {associatedPages.length > 0 ? (
               <div className="grid gap-4">
-                {associatedPages.map(page => (
-                  <Card key={page.id} className="p-4 cursor-pointer" onClick={() => navigate(`/rdm/pages?pageId=${page.id}`)}>
+                {associatedPages.map((page) => (
+                  <Card
+                    key={page.id}
+                    className="p-4 cursor-pointer"
+                    onClick={() => navigate(`/rdm/pages?pageId=${page.id}`)}
+                  >
                     <div className="flex items-center gap-2">
                       <FileText className="h-5 w-5 text-gray-400" />
                       <div>
@@ -468,17 +755,16 @@ export function ProjectDetailPage() {
             )}
           </div>
         </TabsContent>
-        
         <TabsContent value="roadmap">
           <RoadmapView
             items={roadmapItems}
             onItemCreate={async (item: Partial<RoadmapItem>) => {
-              await projectService.createRoadmapItem(item)
-              loadProjectData()
+              await projectService.createRoadmapItem(item);
+              loadProjectData();
             }}
             onItemUpdate={async (itemId: string, item: Partial<RoadmapItem>) => {
-              await projectService.updateRoadmapItem(itemId, item)
-              loadProjectData()
+              await projectService.updateRoadmapItem(itemId, item);
+              loadProjectData();
             }}
           />
         </TabsContent>
@@ -487,5 +773,5 @@ export function ProjectDetailPage() {
         </TabsContent>
       </Tabs>
     </div>
-  )
+  );
 }

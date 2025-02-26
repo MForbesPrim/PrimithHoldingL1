@@ -3589,14 +3589,27 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Loop over each document in the folder tree and delete its blobs
+		// Loop over each document in the folder tree and delete its blobs and artifacts
 		for rows.Next() {
 			var docId, blobUrl string
 			if err := rows.Scan(&docId, &blobUrl); err != nil {
 				log.Printf("[PermanentDelete] Error scanning document row: %v", err)
 				continue
 			}
-			log.Printf("[PermanentDelete] Attempting to delete blob(s) for document id=%s, blobUrl=%s", docId, blobUrl)
+			log.Printf("[PermanentDelete] Processing document id=%s", docId)
+
+			// Delete associated project_artifacts
+			_, err = tx.Exec(`
+                DELETE FROM rdm.project_artifacts
+                WHERE document_id = $1
+            `, docId)
+			if err != nil {
+				log.Printf("[PermanentDelete] Failed to delete project_artifacts for document %s: %v", docId, err)
+				http.Error(w, "Failed to delete associated artifacts", http.StatusInternalServerError)
+				return
+			}
+
+			// Delete blobs
 			if err := deleteDocumentBlobs(client, containerName, docId, blobUrl); err != nil {
 				log.Printf("[PermanentDelete] Error deleting blobs for document %s: %v", docId, err)
 			} else {
@@ -3625,9 +3638,9 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		affected, _ := res.RowsAffected()
 		log.Printf("[PermanentDelete] Deleted %d folder rows", affected)
-	} else {
+	} else if itemType == "document" {
 		log.Printf("[PermanentDelete] Processing permanent deletion for document id=%s", itemId)
-		// Delete document blob
+		// Get document blob URL
 		var blobUrl string
 		err := tx.QueryRow(
 			"SELECT file_path FROM rdm.documents WHERE id = $1",
@@ -3639,12 +3652,28 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("[PermanentDelete] Retrieved blob URL for document %s: %s", itemId, blobUrl)
+
+		// Initialize blob client
 		client, containerName, err := getBlobClient(organizationId)
 		if err != nil {
 			log.Printf("[PermanentDelete] Failed to initialize blob storage client: %v", err)
 			http.Error(w, "Failed to initialize storage", http.StatusInternalServerError)
 			return
 		}
+
+		// Delete associated project_artifacts
+		_, err = tx.Exec(`
+            DELETE FROM rdm.project_artifacts
+            WHERE document_id = $1
+        `, itemId)
+		if err != nil {
+			log.Printf("[PermanentDelete] Failed to delete project_artifacts for document %s: %v", itemId, err)
+			http.Error(w, "Failed to delete associated artifacts", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("[PermanentDelete] Deleted project_artifacts for document %s", itemId)
+
+		// Delete blobs
 		if err := deleteDocumentBlobs(client, containerName, itemId, blobUrl); err != nil {
 			log.Printf("[PermanentDelete] Error deleting blobs for document %s: %v", itemId, err)
 		} else {
@@ -3661,6 +3690,10 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		affected, _ := res.RowsAffected()
 		log.Printf("[PermanentDelete] Deleted %d document row(s)", affected)
+	} else {
+		log.Printf("[PermanentDelete] Invalid item type: %s", itemType)
+		http.Error(w, "Invalid item type", http.StatusBadRequest)
+		return
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -3671,6 +3704,10 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[PermanentDelete] Permanent deletion succeeded for %s id=%s", itemType, itemId)
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(Response{
+		Success: true,
+		Message: fmt.Sprintf("%s permanently deleted", itemType),
+	})
 }
 
 func getBlobClient(organizationID string) (*azblob.Client, string, error) {
@@ -3904,10 +3941,16 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 	documentId := vars["id"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
+	// Define request struct with optional fields
 	var req struct {
-		ProjectID *string `json:"projectId"` // Use pointer to allow null
+		ProjectID   *string `json:"projectId"`
+		Name        *string `json:"name"`
+		Type        *string `json:"type"`
+		Status      *string `json:"status"`
+		Description *string `json:"description"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Invalid request body: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -3915,6 +3958,7 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 	// Start transaction
 	tx, err := db.Begin()
 	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
 		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
 		return
 	}
@@ -3929,10 +3973,12 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
         WHERE id = $1 AND deleted_at IS NULL
     `, documentId).Scan(&orgId, &currentProjectId)
 	if err == sql.ErrNoRows {
+		log.Printf("Document %s not found", documentId)
 		http.Error(w, "Document not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {
+		log.Printf("Failed to fetch document: %v", err)
 		http.Error(w, "Failed to fetch document", http.StatusInternalServerError)
 		return
 	}
@@ -3948,6 +3994,7 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
         )
     `, claims.Username, orgId).Scan(&authorized)
 	if err != nil || !authorized {
+		log.Printf("Access denied for user %s to organization %s: %v", claims.Username, orgId, err)
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
 		return
 	}
@@ -3956,11 +4003,12 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 	var userId string
 	err = tx.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
 	if err != nil {
+		log.Printf("Failed to get user ID for %s: %v", claims.Username, err)
 		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
 		return
 	}
 
-	// Get the document's name for artifact creation (if linking)
+	// Get the document's original name
 	var docName string
 	err = tx.QueryRow(`
         SELECT name
@@ -3968,6 +4016,7 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
         WHERE id = $1 AND deleted_at IS NULL
     `, documentId).Scan(&docName)
 	if err != nil {
+		log.Printf("Failed to fetch document name for %s: %v", documentId, err)
 		http.Error(w, "Failed to fetch document name", http.StatusInternalServerError)
 		return
 	}
@@ -3981,14 +4030,17 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
             WHERE id = $1
         `, *req.ProjectID).Scan(&projectOrgId)
 		if err == sql.ErrNoRows {
+			log.Printf("Project %s not found", *req.ProjectID)
 			http.Error(w, "Project not found", http.StatusNotFound)
 			return
 		}
 		if err != nil {
+			log.Printf("Failed to verify project %s: %v", *req.ProjectID, err)
 			http.Error(w, "Failed to verify project", http.StatusInternalServerError)
 			return
 		}
 		if projectOrgId != orgId {
+			log.Printf("Project %s does not belong to organization %s", *req.ProjectID, orgId)
 			http.Error(w, "Project does not belong to the same organization", http.StatusForbidden)
 			return
 		}
@@ -4004,6 +4056,7 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
             )
         `, *req.ProjectID, claims.Username).Scan(&isMember)
 		if err != nil || !isMember {
+			log.Printf("User %s is not a member of project %s: %v", claims.Username, *req.ProjectID, err)
 			http.Error(w, "User is not a member of the project", http.StatusForbidden)
 			return
 		}
@@ -4017,22 +4070,71 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
             WHERE id = $3
         `, *req.ProjectID, userId, documentId)
 		if err != nil {
+			log.Printf("Failed to associate document %s with project %s: %v", documentId, *req.ProjectID, err)
 			http.Error(w, "Failed to associate document with project", http.StatusInternalServerError)
 			return
 		}
 
-		// Insert into project_artifacts with the document's actual name
+		// Determine artifact name with extension preservation
+		artifactName := docName
+		if req.Name != nil && *req.Name != "" {
+			// Get original extension (convert to lowercase for comparison)
+			originalExt := ""
+			if lastDotIndex := strings.LastIndex(docName, "."); lastDotIndex != -1 {
+				originalExt = strings.ToLower(docName[lastDotIndex:])
+			}
+
+			// Check if proposed name already has an extension
+			proposedName := *req.Name
+			hasExtension := false
+
+			if lastDotIndex := strings.LastIndex(proposedName, "."); lastDotIndex != -1 {
+				proposedExt := strings.ToLower(proposedName[lastDotIndex:])
+				// Check if the proposed extension matches a known file extension format
+				if len(proposedExt) >= 2 && len(proposedExt) <= 5 {
+					hasExtension = true
+
+					// If the extensions don't match, replace with the original
+					if originalExt != "" && proposedExt != originalExt {
+						log.Printf("Extension mismatch: original=%s, proposed=%s. Using original extension.",
+							originalExt, proposedExt)
+						proposedName = proposedName[:lastDotIndex] + originalExt
+					}
+				}
+			}
+
+			// If the proposed name doesn't have a valid extension but original does, add it
+			if !hasExtension && originalExt != "" {
+				proposedName = proposedName + originalExt
+				log.Printf("Added extension %s to artifact name: %s", originalExt, proposedName)
+			}
+
+			artifactName = proposedName
+		}
+
+		// Set artifact type and status with defaults
+		artifactType := "document"
+		if req.Type != nil && *req.Type != "" {
+			artifactType = *req.Type
+		}
+		artifactStatus := "draft"
+		if req.Status != nil && *req.Status != "" {
+			artifactStatus = *req.Status
+		}
+
+		// Insert into project_artifacts with preserved extension
 		_, err = tx.Exec(`
             INSERT INTO rdm.project_artifacts (
-                project_id, name, type, status, document_id, created_by, updated_by
-            ) VALUES ($1, $2, 'document', 'draft', $3, $4, $4)
-        `, *req.ProjectID, docName, documentId, userId)
+                project_id, name, type, status, document_id, description, created_by, updated_by
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+        `, *req.ProjectID, artifactName, artifactType, artifactStatus, documentId, req.Description, userId)
 		if err != nil {
+			log.Printf("Failed to create artifact for document %s in project %s: %v", documentId, *req.ProjectID, err)
 			http.Error(w, "Failed to create artifact", http.StatusInternalServerError)
 			return
 		}
 	} else {
-		// Unlinking from a project (set project_id to NULL and remove artifact)
+		// Unlinking from a project
 		_, err = tx.Exec(`
             UPDATE rdm.documents 
             SET project_id = NULL,
@@ -4041,6 +4143,7 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
             WHERE id = $2
         `, userId, documentId)
 		if err != nil {
+			log.Printf("Failed to unlink document %s from project: %v", documentId, err)
 			http.Error(w, "Failed to unlink document from project", http.StatusInternalServerError)
 			return
 		}
@@ -4051,12 +4154,14 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
             WHERE document_id = $1
         `, documentId)
 		if err != nil {
+			log.Printf("Failed to remove artifact for document %s: %v", documentId, err)
 			http.Error(w, "Failed to remove artifact association", http.StatusInternalServerError)
 			return
 		}
 	}
 
 	if err = tx.Commit(); err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
 		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
 		return
 	}
@@ -4069,6 +4174,162 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 		message = "Document unlinked from project"
 	}
 	json.NewEncoder(w).Encode(Response{Success: true, Message: message})
+}
+
+func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	artifactId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	log.Printf("[handleUpdateArtifact] Received update request for artifact %s by user %s", artifactId, claims.Username)
+
+	var updateData struct {
+		Name        string  `json:"name"`
+		Type        string  `json:"type"`
+		Status      string  `json:"status"`
+		Description *string `json:"description"`
+		DocumentId  *string `json:"documentId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
+		log.Printf("[handleUpdateArtifact] Invalid request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("[handleUpdateArtifact] Update data received: %+v", updateData)
+
+	// Verify artifact exists and get project ID and document ID
+	var projectId string
+	var documentId sql.NullString
+	err := db.QueryRow(`
+        SELECT project_id, document_id FROM rdm.project_artifacts WHERE id = $1
+    `, artifactId).Scan(&projectId, &documentId)
+	if err == sql.ErrNoRows {
+		log.Printf("[handleUpdateArtifact] Artifact %s not found - returning 404", artifactId)
+		http.Error(w, "Artifact not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		log.Printf("[handleUpdateArtifact] Database error checking artifact: %v", err)
+		http.Error(w, "Failed to check artifact", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user is a super admin or a project member
+	var isSuperAdmin bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.user_roles ur
+            JOIN auth.roles r ON ur.role_id = r.id
+            JOIN auth.users u ON ur.user_id = u.id
+            WHERE u.email = $1 
+            AND r.name = 'super_admin'
+        )
+    `, claims.Username).Scan(&isSuperAdmin)
+	if err != nil {
+		log.Printf("[handleUpdateArtifact] Database error checking super admin status: %v", err)
+		http.Error(w, "Failed to check super admin status", http.StatusInternalServerError)
+		return
+	}
+
+	var isMember bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+	if err != nil {
+		log.Printf("[handleUpdateArtifact] Database error checking membership: %v", err)
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+
+	if !isSuperAdmin && !isMember {
+		log.Printf("[handleUpdateArtifact] Access denied for user %s to project %s (not super admin or member)", claims.Username, projectId)
+		http.Error(w, "Access denied to update artifact", http.StatusForbidden)
+		return
+	}
+
+	// If it's a document-type artifact, preserve the extension if the new name lacks one
+	if updateData.Type == "document" && documentId.Valid {
+		var docName string
+		err = db.QueryRow(`
+            SELECT name FROM rdm.documents WHERE id = $1
+        `, documentId.String).Scan(&docName)
+		if err == nil {
+			originalExt := ""
+			if lastDotIndex := strings.LastIndex(docName, "."); lastDotIndex != -1 {
+				originalExt = strings.ToLower(docName[lastDotIndex:])
+			}
+			if originalExt != "" && !strings.HasSuffix(strings.ToLower(updateData.Name), originalExt) {
+				updateData.Name += originalExt
+				log.Printf("[handleUpdateArtifact] Preserved extension %s for artifact name: %s", originalExt, updateData.Name)
+			}
+		}
+	}
+
+	// Start a transaction to update both tables atomically
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("[handleUpdateArtifact] Failed to start transaction: %v", err)
+		http.Error(w, "Failed to update artifact", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback() // Rollback if not committed
+
+	// Update rdm.project_artifacts
+	_, err = tx.Exec(`
+        UPDATE rdm.project_artifacts
+        SET name = $1, type = $2, status = $3, description = $4, document_id = $5,
+            updated_at = CURRENT_TIMESTAMP,
+            updated_by = (SELECT id FROM auth.users WHERE email = $6)
+        WHERE id = $7
+    `, updateData.Name, updateData.Type, updateData.Status, updateData.Description, updateData.DocumentId, claims.Username, artifactId)
+	if err != nil {
+		log.Printf("[handleUpdateArtifact] Failed to update project_artifacts: %v", err)
+		http.Error(w, "Failed to update artifact", http.StatusInternalServerError)
+		return
+	}
+
+	// If there's a document_id, update rdm.documents.name as well
+	if documentId.Valid {
+		result, err := tx.Exec(`
+            UPDATE rdm.documents
+            SET name = $1,
+                updated_at = CURRENT_TIMESTAMP,
+                updated_by = (SELECT id FROM auth.users WHERE email = $2)
+            WHERE id = $3
+        `, updateData.Name, claims.Username, documentId.String)
+		if err != nil {
+			log.Printf("[handleUpdateArtifact] Failed to update documents: %v", err)
+			http.Error(w, "Failed to update document", http.StatusInternalServerError)
+			return
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil || rowsAffected == 0 {
+			log.Printf("[handleUpdateArtifact] No document rows affected or error: %v", err)
+		} else {
+			log.Printf("[handleUpdateArtifact] Updated document %s with name %s", documentId.String, updateData.Name)
+		}
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		log.Printf("[handleUpdateArtifact] Failed to commit transaction: %v", err)
+		http.Error(w, "Failed to update artifact", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Artifact updated successfully",
+		"name":    updateData.Name,
+	})
 }
 
 // Similar function for pages
@@ -6062,10 +6323,11 @@ func handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	projectId := vars["id"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
+	// Define request struct with pointers for optional fields
 	var req struct {
-		Name        string     `json:"name"`
-		Description string     `json:"description"`
-		Status      string     `json:"status"`
+		Name        *string    `json:"name"`
+		Description *string    `json:"description"`
+		Status      *string    `json:"status"`
 		StartDate   *time.Time `json:"startDate"`
 		EndDate     *time.Time `json:"endDate"`
 	}
@@ -6075,6 +6337,7 @@ func handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get user ID for updated_by
 	var userId string
 	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
 	if err != nil {
@@ -6082,14 +6345,55 @@ func handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := db.Exec(`
-      UPDATE rdm.projects 
-      SET name = $1, description = $2, status = $3, 
-          start_date = $4, end_date = $5, 
-          updated_by = $6, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $7
-    `, req.Name, req.Description, req.Status, req.StartDate, req.EndDate, userId, projectId)
+	// Build dynamic update query
+	updates := []string{}
+	args := []interface{}{}
+	argCount := 1
 
+	if req.Name != nil {
+		updates = append(updates, fmt.Sprintf("name = $%d", argCount))
+		args = append(args, *req.Name)
+		argCount++
+	}
+	if req.Description != nil {
+		updates = append(updates, fmt.Sprintf("description = $%d", argCount))
+		args = append(args, *req.Description)
+		argCount++
+	}
+	if req.Status != nil {
+		updates = append(updates, fmt.Sprintf("status = $%d", argCount))
+		args = append(args, *req.Status)
+		argCount++
+	}
+	if req.StartDate != nil {
+		updates = append(updates, fmt.Sprintf("start_date = $%d", argCount))
+		args = append(args, *req.StartDate)
+		argCount++
+	}
+	if req.EndDate != nil {
+		updates = append(updates, fmt.Sprintf("end_date = $%d", argCount))
+		args = append(args, *req.EndDate)
+		argCount++
+	}
+
+	// If no fields provided, reject the request
+	if len(updates) == 0 {
+		http.Error(w, "No fields to update", http.StatusBadRequest)
+		return
+	}
+
+	// Always update updated_by and updated_at
+	updates = append(updates, fmt.Sprintf("updated_by = $%d", argCount))
+	args = append(args, userId)
+	argCount++
+	updates = append(updates, "updated_at = CURRENT_TIMESTAMP")
+
+	// Construct and execute the query
+	query := fmt.Sprintf("UPDATE rdm.projects SET %s WHERE id = $%d",
+		strings.Join(updates, ", "), argCount)
+	args = append(args, projectId)
+
+	result, err := db.Exec(query, args...)
 	if err != nil {
 		http.Error(w, "Failed to update project", http.StatusInternalServerError)
 		return
@@ -6213,6 +6517,482 @@ func handleRemoveProjectMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleCreateProjectArtifact handles creating a new project artifact
+func handleCreateProjectArtifact(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user is a member of the project with appropriate permissions
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+            AND (pm.role = 'owner' OR pm.role = 'admin' OR pm.role = 'member')
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+	if err != nil {
+		log.Printf("Error checking project membership: %v", err)
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
+		http.Error(w, "Access denied to create artifacts", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Name        string  `json:"name"`
+		Description *string `json:"description"` // Optional
+		Type        string  `json:"type"`        // 'document', 'task', 'page', etc.
+		Status      string  `json:"status"`      // 'draft', 'in_review', etc.
+		AssignedTo  *string `json:"assignedTo"`  // Optional, UUID of user
+		DocumentId  *string `json:"documentId"`  // Optional, UUID of document
+		PageId      *string `json:"pageId"`      // Optional, UUID of page
+		DueDate     *string `json:"dueDate"`     // Optional, ISO date string
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.Name == "" || req.Type == "" || req.Status == "" {
+		http.Error(w, "Name, type, and status are required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate type and status against allowed values
+	validTypes := []string{"document", "task", "page", "image", "milestone", "deliverable"}
+	validStatuses := []string{"draft", "in_review", "approved", "rejected"}
+	if !contains(validTypes, req.Type) {
+		http.Error(w, "Invalid artifact type", http.StatusBadRequest)
+		return
+	}
+	if !contains(validStatuses, req.Status) {
+		http.Error(w, "Invalid artifact status", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID for created_by and updated_by
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Prepare due_date (convert string to time if provided)
+	var dueDate *time.Time
+	if req.DueDate != nil {
+		parsedDate, err := time.Parse("2006-01-02", *req.DueDate) // Assuming ISO date format YYYY-MM-DD
+		if err != nil {
+			http.Error(w, "Invalid due date format. Use YYYY-MM-DD", http.StatusBadRequest)
+			return
+		}
+		dueDate = &parsedDate
+	}
+
+	// Insert into project_artifacts
+	_, err = db.Exec(`
+        INSERT INTO rdm.project_artifacts (
+            id, project_id, name, description, type, status, assigned_to, document_id, 
+            page_id, due_date, created_by, updated_by, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `, uuid.New(), projectId, req.Name, req.Description, req.Type, req.Status,
+		req.AssignedTo, req.DocumentId, req.PageId, dueDate, userId, userId)
+	if err != nil {
+		log.Printf("Failed to create artifact: %v", err)
+		http.Error(w, "Failed to create artifact", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Artifact created successfully",
+	})
+}
+
+// Helper function to check if a slice contains a string
+func contains(s []string, str string) bool {
+	for _, v := range s {
+		if v == str {
+			return true
+		}
+	}
+	return false
+}
+
+func handleGetRoadmapItems(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims) // Use claimsKey instead of "claims"
+
+	// Verify user is a project member
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+	if err != nil {
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
+		http.Error(w, "Access denied to project roadmap", http.StatusForbidden)
+		return
+	}
+
+	// Rest of the function remains unchanged
+	rows, err := db.Query(`
+        SELECT id, project_id, title, description, start_date, end_date, status, 
+               priority, parent_id, created_by, updated_by, created_at, updated_at
+        FROM rdm.project_roadmap_items
+        WHERE project_id = $1
+        ORDER BY created_at DESC
+    `, projectId)
+	if err != nil {
+		http.Error(w, "Failed to fetch roadmap items", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var items []map[string]interface{}
+	for rows.Next() {
+		var id, projectId, createdBy uuid.UUID
+		var title, status string
+		var description sql.NullString
+		var startDate, endDate sql.NullTime
+		var priority int
+		var parentId, updatedBy sql.NullString
+		var createdAt, updatedAt time.Time
+
+		err := rows.Scan(&id, &projectId, &title, &description, &startDate, &endDate, &status,
+			&priority, &parentId, &createdBy, &updatedBy, &createdAt, &updatedAt)
+		if err != nil {
+			continue
+		}
+
+		item := map[string]interface{}{
+			"id":          id.String(),
+			"projectId":   projectId.String(),
+			"title":       title,
+			"description": nullString(description),
+			"startDate":   nullTime(startDate),
+			"endDate":     nullTime(endDate),
+			"status":      status,
+			"priority":    priority,
+			"parentId":    nullString(parentId),
+			"createdBy":   createdBy.String(),
+			"updatedBy":   nullString(updatedBy),
+			"createdAt":   createdAt,
+			"updatedAt":   updatedAt,
+		}
+		items = append(items, item)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
+}
+
+func handleCreateRoadmapItem(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has permission (member or higher)
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+	if err != nil {
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
+		http.Error(w, "Access denied to create roadmap items", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Title       string  `json:"title"`
+		Description *string `json:"description"`
+		StartDate   *string `json:"startDate"`
+		EndDate     *string `json:"endDate"`
+		Status      string  `json:"status"`
+		Priority    *int    `json:"priority"`
+		ParentId    *string `json:"parentId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Title == "" || req.Status == "" {
+		http.Error(w, "Title and status are required", http.StatusBadRequest)
+		return
+	}
+
+	validStatuses := []string{"planned", "in_progress", "completed", "delayed"}
+	if !contains(validStatuses, req.Status) {
+		http.Error(w, "Invalid status", http.StatusBadRequest)
+		return
+	}
+
+	var userId uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	var startDate *time.Time
+	if req.StartDate != nil {
+		parsed, err := time.Parse("2006-01-02", *req.StartDate)
+		if err != nil {
+			http.Error(w, "Invalid start date format (YYYY-MM-DD)", http.StatusBadRequest)
+			return
+		}
+		startDate = &parsed
+	}
+
+	var endDate *time.Time
+	if req.EndDate != nil {
+		parsed, err := time.Parse("2006-01-02", *req.EndDate)
+		if err != nil {
+			http.Error(w, "Invalid end date format (YYYY-MM-DD)", http.StatusBadRequest)
+			return
+		}
+		endDate = &parsed
+	}
+
+	priority := 0
+	if req.Priority != nil {
+		priority = *req.Priority
+	}
+
+	var itemId uuid.UUID
+	err = db.QueryRow(`
+        INSERT INTO rdm.project_roadmap_items (
+            project_id, title, description, start_date, end_date, status, priority, parent_id, created_by, updated_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
+        RETURNING id
+    `, projectId, req.Title, req.Description, startDate, endDate, req.Status, priority, req.ParentId, userId).Scan(&itemId)
+	if err != nil {
+		http.Error(w, "Failed to create roadmap item", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"id": itemId.String()})
+}
+
+func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	itemId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has permission
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+	if err != nil {
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
+		http.Error(w, "Access denied to update roadmap items", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Title       *string `json:"title"`
+		Description *string `json:"description"`
+		StartDate   *string `json:"startDate"`
+		EndDate     *string `json:"endDate"`
+		Status      *string `json:"status"`
+		Priority    *int    `json:"priority"`
+		ParentId    *string `json:"parentId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	var updates []string
+	var args []interface{}
+	argCount := 1
+
+	if req.Title != nil {
+		updates = append(updates, "title = $"+string(rune(argCount)))
+		args = append(args, *req.Title)
+		argCount++
+	}
+	if req.Description != nil {
+		updates = append(updates, "description = $"+string(rune(argCount)))
+		args = append(args, *req.Description)
+		argCount++
+	}
+	if req.StartDate != nil {
+		var startDate *time.Time
+		if *req.StartDate != "" {
+			parsed, err := time.Parse("2006-01-02", *req.StartDate)
+			if err != nil {
+				http.Error(w, "Invalid start date format (YYYY-MM-DD)", http.StatusBadRequest)
+				return
+			}
+			startDate = &parsed
+		}
+		updates = append(updates, "start_date = $"+string(rune(argCount)))
+		args = append(args, startDate)
+		argCount++
+	}
+	if req.EndDate != nil {
+		var endDate *time.Time
+		if *req.EndDate != "" {
+			parsed, err := time.Parse("2006-01-02", *req.EndDate)
+			if err != nil {
+				http.Error(w, "Invalid end date format (YYYY-MM-DD)", http.StatusBadRequest)
+				return
+			}
+			endDate = &parsed
+		}
+		updates = append(updates, "end_date = $"+string(rune(argCount)))
+		args = append(args, endDate)
+		argCount++
+	}
+	if req.Status != nil {
+		validStatuses := []string{"planned", "in_progress", "completed", "delayed"}
+		if !contains(validStatuses, *req.Status) {
+			http.Error(w, "Invalid status", http.StatusBadRequest)
+			return
+		}
+		updates = append(updates, "status = $"+string(rune(argCount)))
+		args = append(args, *req.Status)
+		argCount++
+	}
+	if req.Priority != nil {
+		updates = append(updates, "priority = $"+string(rune(argCount)))
+		args = append(args, *req.Priority)
+		argCount++
+	}
+	if req.ParentId != nil {
+		updates = append(updates, "parent_id = $"+string(rune(argCount)))
+		args = append(args, *req.ParentId)
+		argCount++
+	}
+
+	if len(updates) == 0 {
+		http.Error(w, "No fields to update", http.StatusBadRequest)
+		return
+	}
+
+	var userId uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	updates = append(updates, "updated_by = $"+string(rune(argCount)))
+	args = append(args, userId)
+	argCount++
+	updates = append(updates, "updated_at = CURRENT_TIMESTAMP")
+	args = append(args, itemId)
+
+	query := "UPDATE rdm.project_roadmap_items SET " + strings.Join(updates, ", ") + " WHERE id = $" + string(rune(argCount))
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		http.Error(w, "Failed to update roadmap item", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Roadmap item not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleDeleteRoadmapItem(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	itemId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has permission (e.g., owner or admin)
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+            AND pm.role IN ('owner', 'admin')
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+	if err != nil {
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
+		http.Error(w, "Access denied to delete roadmap items", http.StatusForbidden)
+		return
+	}
+
+	result, err := db.Exec("DELETE FROM rdm.project_roadmap_items WHERE id = $1 AND project_id = $2", itemId, projectId)
+	if err != nil {
+		http.Error(w, "Failed to delete roadmap item", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Roadmap item not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// Helper functions to handle nullable fields
+func nullString(ns sql.NullString) interface{} {
+	if ns.Valid {
+		return ns.String
+	}
+	return nil
+}
+
+func nullTime(nt sql.NullTime) interface{} {
+	if nt.Valid {
+		return nt.Time.Format("2006-01-02")
+	}
+	return nil
 }
 
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
@@ -6420,6 +7200,12 @@ func main() {
 	r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleUpdateMemberRole)).Methods("PUT")
 	r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleRemoveProjectMember)).Methods("DELETE")
 	r.HandleFunc("/projects/{projectId}/artifacts", authMiddleware(handleGetProjectArtifacts)).Methods("GET")
+	r.HandleFunc("/projects/{projectId}/artifacts", authMiddleware(handleCreateProjectArtifact)).Methods("POST")
+	r.HandleFunc("/projects/{projectId}/artifacts/{id}", authMiddleware(handleUpdateArtifact)).Methods("PUT")
+	r.HandleFunc("/projects/{projectId}/roadmap", authMiddleware(handleGetRoadmapItems)).Methods("GET")
+	r.HandleFunc("/projects/{projectId}/roadmap", authMiddleware(handleCreateRoadmapItem)).Methods("POST")
+	r.HandleFunc("/projects/{projectId}/roadmap/{id}", authMiddleware(handleUpdateRoadmapItem)).Methods("PUT")
+	r.HandleFunc("/projects/{projectId}/roadmap/{id}", authMiddleware(handleDeleteRoadmapItem)).Methods("DELETE")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
