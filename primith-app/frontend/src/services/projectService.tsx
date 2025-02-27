@@ -1,27 +1,49 @@
     import AuthService from '@/services/auth'
-    import { Project, ProjectArtifact, ProjectVariable, RoadmapItem, ArtifactReview, ProjectMember } from '@/types/projects'
+    import { Project, ProjectArtifact, ProjectVariable, RoadmapItem, ArtifactReview, ProjectMember, ProjectActivity} from '@/types/projects'
 
     export class ProjectService {
     private baseUrl = import.meta.env.VITE_API_URL;
     
     private async getAuthHeader() {
-        let rdmAuth = AuthService.getRdmTokens();
+        // Flag to prevent multiple refresh attempts in the same call
+        let hasAttemptedRefresh = false;
         
-        if (!rdmAuth?.tokens) {
-        const refreshed = await AuthService.refreshRdmAccessToken();
-        if (!refreshed) {
-            throw new Error('No RDM authentication tokens available');
+        try {
+            // First, check if we have tokens
+            let rdmAuth = AuthService.getRdmTokens();
+            
+            // If no tokens or they're expired, try refreshing once
+            if (!rdmAuth?.tokens) {
+                if (hasAttemptedRefresh) {
+                    // We've already tried refreshing, fail gracefully
+                    throw new Error('No RDM authentication tokens available');
+                }
+                
+                hasAttemptedRefresh = true;
+                console.log("Attempting to refresh RDM tokens...");
+                
+                const refreshed = await AuthService.refreshRdmAccessToken();
+                if (!refreshed) {
+                    throw new Error('Failed to refresh RDM tokens');
+                }
+                
+                // Get the fresh tokens
+                rdmAuth = AuthService.getRdmTokens();
+                if (!rdmAuth?.tokens) {
+                    throw new Error('Failed to get RDM tokens after refresh');
+                }
+            }
+            
+            // Return the headers with tokens
+            return {
+                'Authorization': `Bearer ${rdmAuth.tokens.token}`,
+                'Content-Type': 'application/json'
+            };
+        } catch (error) {
+            // Log the error but don't redirect here
+            console.error("Authentication error in getAuthHeader:", error);
+            throw error;
         }
-        rdmAuth = AuthService.getRdmTokens();
-        if (!rdmAuth) {
-            throw new Error('Failed to get RDM tokens after refresh');
-        }
-        }
-    
-        return {
-        'Authorization': `Bearer ${rdmAuth.tokens.token}`,
-        'Content-Type': 'application/json'
-        };
     }
 
     // Projects CRUD
@@ -283,4 +305,30 @@
             throw new Error(errorMessage);
         }
     }
+
+    async getProjectActivity(
+        projectId: string, 
+        offset: number = 0, 
+        limit: number = 20
+      ): Promise<{activities: ProjectActivity[], pagination: {total: number, offset: number, limit: number}}> {
+        const headers = await this.getAuthHeader();
+        try {
+          const response = await fetch(
+            `${this.baseUrl}/projects/${projectId}/activity?offset=${offset}&limit=${limit}`, 
+            {
+              credentials: 'include',
+              headers
+            }
+          );
+          
+          if (!response.ok) {
+            throw new Error(`Failed to fetch project activity: ${response.status}`);
+          }
+          
+          return await response.json();
+        } catch (error) {
+          console.error('Error fetching project activity:', error);
+          throw error;
+        }
+      }
     }

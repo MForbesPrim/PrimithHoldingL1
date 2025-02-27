@@ -96,3 +96,35 @@ export interface ProjectMember {
     createdAt: string;
     updatedAt: string;
    }
+
+   export interface ProjectActivity {
+    id: string;
+    projectId: string;
+    userId: string;
+    userEmail: string;
+    userName: string;
+    activityType: 'create' | 'update' | 'delete' | 'review' | 'status_change';
+    entityType: 'project' | 'artifact' | 'roadmap' | 'variable' | 'member' | 'page' | 'artifact_review';
+    entityId: string;
+    description: string;
+    timestamp: string;
+    createdAt: string;
+    formattedDate: string;
+    formattedTime: string;
+    oldValues?: {
+      [key: string]: any;
+    };
+    newValues?: {
+      [key: string]: any;
+    };
+    metadata?: {
+      [key: string]: any;
+    };
+  }
+
+  export interface Pagination {
+    total: number;
+    offset: number;
+    limit: number;
+  }
+  

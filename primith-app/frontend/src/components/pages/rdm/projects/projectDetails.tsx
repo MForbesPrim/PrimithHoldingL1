@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ProjectService } from "@/services/projectService";
 import { DocumentService } from "@/services/documentService";
 import { PagesService } from "@/services/pagesService";
-import type { Project, ProjectArtifact, RoadmapItem } from "@/types/projects";
+import type { Project, ProjectArtifact, RoadmapItem, ProjectActivity } from "@/types/projects";
 import type { DocumentMetadata } from "@/types/document";
 import type { PageNode } from "@/types/pages";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,8 @@ import {
 import {
   Activity as ActivityIcon,
   ChevronLeft,
+  ChevronUp,
+  ChevronDown,
   Edit,
   Calendar,
   Clock,
@@ -57,11 +59,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-interface ProjectActivity {
-  id: string;
-  description: string;
-  timestamp: string;
-}
+import { 
+  Pagination, 
+  PaginationContent, 
+  PaginationItem, 
+  PaginationNext, 
+  PaginationPrevious 
+} from "@/components/ui/pagination";
 
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -83,6 +87,18 @@ export function ProjectDetailPage() {
     description: "",
     file: null as File | null,
   });
+  const [activities, setActivities] = useState<ProjectActivity[]>([]);
+  const [activityPagination, setActivityPagination] = useState({
+    total: 0,
+    limit: 20,
+    offset: 0
+  });
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityTypeFilter, setActivityTypeFilter] = useState('all');
+  const [entityTypeFilter, setEntityTypeFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortColumn, setSortColumn] = useState('createdAt');
+  const [sortDirection, setSortDirection] = useState('desc');
 
   const projectService = new ProjectService();
   const documentService = new DocumentService();
@@ -106,6 +122,41 @@ export function ProjectDetailPage() {
       loadProjectData();
     }
   }, [projectId]);
+
+  const loadProjectActivity = async (offset = 0, limit = 20) => {
+    if (!projectId) return;
+    
+    setActivityLoading(true);
+    try {
+      const response = await projectService.getProjectActivity(projectId, offset, limit);
+      
+      if (response && Array.isArray(response.activities)) {
+        setActivities(response.activities);
+        
+        if (response.pagination) {
+          setActivityPagination(response.pagination);
+        }
+        
+        if (offset === 0) {
+          setRecentActivity(response.activities.slice(0, 5));
+        }
+      } else {
+        console.warn('Received invalid activity data format:', response);
+        setActivities([]);
+        if (offset === 0) {
+          setRecentActivity([]);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load project activity:", error);
+      setActivities([]);
+      if (offset === 0) {
+        setRecentActivity([]);
+      }
+    } finally {
+      setActivityLoading(false);
+    }
+  };
 
   async function loadProjectData() {
     try {
@@ -131,29 +182,30 @@ export function ProjectDetailPage() {
 
       await loadAssociatedDocuments();
       await loadAssociatedPages();
-
-      const activityData: ProjectActivity[] = [
-        {
-          id: "1",
-          description: "Project created",
-          timestamp: new Date(projectData.createdAt).toISOString(),
-        },
-        {
-          id: "2",
-          description: "Status updated to " + projectData.status,
-          timestamp: new Date(projectData.updatedAt).toISOString(),
-        },
-      ];
-      console.log("Set recent activity:", activityData);
-      setRecentActivity(activityData);
+      
+      await loadProjectActivity();
+      
     } catch (error) {
       console.error("Failed to load project data:", error);
       setArtifacts([]);
       setRoadmapItems([]);
+      setActivities([]);
     } finally {
       setLoading(false);
     }
   }
+
+  const handleNextPage = () => {
+    const newOffset = activityPagination.offset + activityPagination.limit;
+    if (newOffset < activityPagination.total) {
+      loadProjectActivity(newOffset, activityPagination.limit);
+    }
+  };
+  
+  const handlePrevPage = () => {
+    const newOffset = Math.max(0, activityPagination.offset - activityPagination.limit);
+    loadProjectActivity(newOffset, activityPagination.limit);
+  };
 
   async function loadAssociatedDocuments() {
     if (!projectId || !project?.organizationId) return;
@@ -183,6 +235,8 @@ export function ProjectDetailPage() {
       await projectService.updateProject(project.id, updatedProject);
       setProject((prev) => (prev ? { ...prev, ...updatedProject } : null));
       setEditingProject(false);
+      
+      loadProjectActivity();
     } catch (error) {
       console.error("Failed to update project:", error);
     }
@@ -241,7 +295,6 @@ export function ProjectDetailPage() {
       await documentService.associateDocumentWithProject(uploadedDoc.id, projectId);
       console.log("Document associated with project");
 
-      // Wait briefly to ensure the artifact is created on the backend
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       const updatedArtifacts = await projectService.getProjectArtifacts(projectId);
@@ -273,39 +326,81 @@ export function ProjectDetailPage() {
       });
       console.log("Artifact updated successfully:", updatedArtifactResponse);
 
-      // Ensure updatedArtifact has all fields, falling back to newArtifact values if needed
       const updatedArtifact: ProjectArtifact = {
-        ...newArtifactEntry, // Base from fetched artifact
+        ...newArtifactEntry,
         name: finalName,
-        type: newArtifact.type, // Use dialog value
-        status: newArtifact.status, // Use dialog value
+        type: newArtifact.type,
+        status: newArtifact.status,
         description: newArtifact.description || "",
         documentId: uploadedDoc.id,
         id: newArtifactEntry.id,
         projectId: projectId,
+        createdBy: newArtifactEntry.createdBy || "",
+        updatedBy: newArtifactEntry.updatedBy || "",
         createdAt: newArtifactEntry.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        // Add other required fields if missing from response
       };
 
-      // Update artifacts with the fully populated artifact
       setArtifacts((prev) => {
         const newList = prev.filter((artifact) => artifact.id !== updatedArtifact.id);
         return [...newList, updatedArtifact];
       });
 
-      // Update associated documents with the renamed file
       setAssociatedDocuments((prev) => {
         const newDocs = prev.filter((doc) => doc.id !== uploadedDoc.id);
         return [...newDocs, { ...uploadedDoc, name: finalName }];
       });
 
       setShowAddArtifactDialog(false);
+      
+      loadProjectActivity();
     } catch (error) {
       console.error("Failed to create artifact with file:", error);
       alert(`Failed to create artifact: ${error instanceof Error ? error.message : "Unknown error"}`);
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const filteredActivities = activities.filter((activity) => {
+    const matchesType = activityTypeFilter === 'all' ? true : activity.activityType === activityTypeFilter;
+    const matchesEntity = entityTypeFilter === 'all' ? true : activity.entityType === entityTypeFilter;
+    const matchesSearch = searchQuery ? activity.description.toLowerCase().includes(searchQuery.toLowerCase()) : true;
+    return matchesType && matchesEntity && matchesSearch;
+  });
+
+  const sortedActivities = [...filteredActivities].sort((a, b) => {
+    let aValue, bValue;
+    if (sortColumn === 'createdAt') {
+      aValue = new Date(a.createdAt);
+      bValue = new Date(b.createdAt);
+    } else if (sortColumn === 'user') {
+      aValue = (a.userName || a.userEmail || '').toLowerCase();
+      bValue = (b.userName || b.userEmail || '').toLowerCase();
+    } else if (sortColumn === 'activityType') {
+      aValue = a.activityType || '';
+      bValue = b.activityType || '';
+    } else if (sortColumn === 'entityType') {
+      aValue = a.entityType || '';
+      bValue = b.entityType || '';
+    } else if (sortColumn === 'description') {
+      aValue = a.description || '';
+      bValue = b.description || '';
+    } else {
+      aValue = '';
+      bValue = '';
+    }
+    if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+    if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const handleSort = (column: React.SetStateAction<string>) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
     }
   };
 
@@ -528,7 +623,6 @@ export function ProjectDetailPage() {
             <ActivityIcon className="h-4 w-4 mr-2" />
             Activity
           </TabsTrigger>
-
         </TabsList>
         <TabsContent value="overview" className="py-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -662,22 +756,22 @@ export function ProjectDetailPage() {
           </div>
         </TabsContent>
         <TabsContent value="artifacts">
-            <div className="space-y-4 mt-4">
-                <div className="flex justify-between items-center">
-                <h2 className="text-md font-semibold">All Artifacts</h2>
-                <Button size="sm" onClick={handleAddArtifactClick}>
-                    <Plus className="h-4 w-4 mr-1" />
-                    Add File
-                </Button>
-                </div>
-                <ArtifactsPage
-                artifacts={artifacts}
-                onStatusChange={async (artifactId: string, status: string) => {
-                    await projectService.updateArtifactStatus(artifactId, status);
-                    loadProjectData();
-                }}
-                />
+          <div className="space-y-4 mt-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-md font-semibold">All Artifacts</h2>
+              <Button size="sm" onClick={handleAddArtifactClick}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add File
+              </Button>
             </div>
+            <ArtifactsPage
+              artifacts={artifacts}
+              onStatusChange={async (artifactId: string, status: string) => {
+                await projectService.updateArtifactStatus(artifactId, status);
+                loadProjectData();
+              }}
+            />
+          </div>
         </TabsContent>
         <TabsContent value="documents">
           <div className="space-y-4">
@@ -783,40 +877,165 @@ export function ProjectDetailPage() {
           <ProjectVariablesPanel projectId={project.id} projectService={projectService} />
         </TabsContent>
         <TabsContent value="activity">
-            <div className="space-y-4 mt-4">
-                <div className="flex justify-between items-center">
-                <h2 className="text-md font-semibold">Project Activity</h2>
-                </div>
-                {recentActivity.length > 0 ? (
-                <div className="border rounded-md">
-                    <Table>
-                    <TableHeader>
-                        <TableRow>
-                        <TableHead>Description</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Time</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {recentActivity.map((activity) => (
-                        <TableRow key={activity.id}>
-                            <TableCell className="text-xs">{activity.description}</TableCell>
-                            <TableCell className="text-xs">{new Date(activity.timestamp).toLocaleDateString()}</TableCell>
-                            <TableCell className="text-xs">{new Date(activity.timestamp).toLocaleTimeString()}</TableCell>
-                        </TableRow>
-                        ))}
-                    </TableBody>
-                    </Table>
-                </div>
-                ) : (
-                <div className="text-center p-8 border rounded-md bg-gray-50">
-                    <Activity className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-500 mb-2">No activity recorded for this project yet.</p>
-                    <p className="text-gray-400 text-sm">Activity will be tracked as changes are made to the project.</p>
-                </div>
-                )}
+          <div className="space-y-4 mt-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-md font-semibold">Project Activity</h2>
             </div>
-            </TabsContent>
+            {activityLoading ? (
+              <div className="flex justify-center p-8">
+                <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+              </div>
+            ) : activities.length > 0 ? (
+              <>
+                <div className="flex space-x-4 mb-4">
+                <Select value={activityTypeFilter} onValueChange={setActivityTypeFilter}>
+                    <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Filter by activity type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">All Types</SelectItem>
+                        <SelectItem value="create">Create</SelectItem>
+                        <SelectItem value="update">Update</SelectItem>
+                        <SelectItem value="delete">Delete</SelectItem>
+                        <SelectItem value="review">Review</SelectItem>
+                        <SelectItem value="status_change">Status Change</SelectItem>
+                    </SelectContent>
+                    </Select>
+                    <Select value={entityTypeFilter} onValueChange={setEntityTypeFilter}>
+                        <SelectTrigger className="w-[180px]">
+                            <SelectValue placeholder="Filter by entity type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Entities</SelectItem>
+                            <SelectItem value="project">Project</SelectItem>
+                            <SelectItem value="artifact">Artifact</SelectItem>
+                            <SelectItem value="roadmap">Roadmap</SelectItem>
+                            <SelectItem value="variable">Variable</SelectItem>
+                            <SelectItem value="member">Member</SelectItem>
+                            <SelectItem value="page">Page</SelectItem>
+                            <SelectItem value="artifact_review">Artifact Review</SelectItem>
+                        </SelectContent>
+                        </Select>
+                  <Input
+                    placeholder="Search description"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-[300px]"
+                  />
+                </div>
+
+                <p className="mb-2 text-sm text-gray-500">
+                  Showing {filteredActivities.length} of {activities.length} activities in current page
+                </p>
+
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead onClick={() => handleSort('createdAt')} className="cursor-pointer">
+                          Date {sortColumn === 'createdAt' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                        </TableHead>
+                        <TableHead>Time</TableHead>
+                        <TableHead onClick={() => handleSort('user')} className="cursor-pointer">
+                          User {sortColumn === 'user' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                        </TableHead>
+                        <TableHead onClick={() => handleSort('activityType')} className="cursor-pointer">
+                          Type {sortColumn === 'activityType' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                        </TableHead>
+                        <TableHead onClick={() => handleSort('entityType')} className="cursor-pointer">
+                          Entity {sortColumn === 'entityType' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                        </TableHead>
+                        <TableHead onClick={() => handleSort('description')} className="cursor-pointer">
+                          Description {sortColumn === 'description' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                        </TableHead>
+                        <TableHead>Old Value</TableHead>
+                        <TableHead>New Value</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody className="text-sm">
+                      {sortedActivities.length > 0 ? (
+                        sortedActivities.map((activity) => (
+                          <TableRow key={activity.id}>
+                            <TableCell>{activity.formattedDate}</TableCell>
+                            <TableCell>{activity.formattedTime}</TableCell>
+                            <TableCell>{activity.userName || activity.userEmail}</TableCell>
+                            <TableCell>{activity.activityType}</TableCell>
+                            <TableCell>{activity.entityType}</TableCell>
+                            <TableCell>{activity.description}</TableCell>
+                            <TableCell>
+                              {activity.activityType === 'update' && activity.oldValues && activity.newValues && (
+                                <div>
+                                  {Object.keys(activity.newValues).map((key) => {
+                                    const oldVal = activity.oldValues?.[key];
+                                    const newVal = activity.newValues?.[key];
+                                    if (oldVal !== newVal) {
+                                      return <div key={key}>{key}: {oldVal === null ? 'Not Set' : oldVal}</div>;
+                                    }
+                                    return null;
+                                  })}
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {activity.activityType === 'update' && activity.oldValues && activity.newValues && (
+                                <div>
+                                  {Object.keys(activity.newValues).map((key) => {
+                                    const oldVal = activity.oldValues?.[key];
+                                    const newVal = activity.newValues?.[key];
+                                    if (oldVal !== newVal) {
+                                      return <div key={key}>{key}: {newVal === null ? 'Not Set' : newVal}</div>;
+                                    }
+                                    return null;
+                                  })}
+                                </div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center py-4">
+                            No activities found
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {activityPagination.total > activityPagination.limit && (
+                  <Pagination className="mt-4">
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious 
+                          onClick={handlePrevPage} 
+                          className={activityPagination.offset === 0 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                        />
+                      </PaginationItem>
+                      <PaginationItem className="flex items-center px-4">
+                        <span className="text-sm text-gray-600">
+                          Showing {activityPagination.offset + 1} to {Math.min(activityPagination.offset + activityPagination.limit, activityPagination.total)} of {activityPagination.total}
+                        </span>
+                      </PaginationItem>
+                      <PaginationItem>
+                        <PaginationNext 
+                          onClick={handleNextPage}
+                          className={activityPagination.offset + activityPagination.limit >= activityPagination.total ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                )}
+              </>
+            ) : (
+              <div className="text-center p-8 border rounded-md bg-gray-50">
+                <Activity className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-500 mb-2">No activity recorded for this project yet.</p>
+                <p className="text-gray-400 text-sm">Activity will be tracked as changes are made to the project.</p>
+              </div>
+            )}
+          </div>
+        </TabsContent>
       </Tabs>
     </div>
   );
