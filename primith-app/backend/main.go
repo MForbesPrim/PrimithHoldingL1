@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -30,7 +31,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/rs/cors"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
@@ -153,12 +154,15 @@ type Config struct {
 
 // User represents a user in the system
 type User struct {
-	ID        string `json:"id"`
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
-	Username  string `json:"username"`
-	Password  string `json:"password"`
-	Email     string `json:"email"`
+	ID            string         `json:"id"`
+	FirstName     string         `json:"firstName"`
+	LastName      string         `json:"lastName"`
+	Username      string         `json:"username"`
+	Password      string         `json:"password"`
+	Email         string         `json:"email"`
+	IsActive      bool           `json:"isActive,omitempty"`
+	Organizations []Organization `json:"organizations,omitempty"`
+	Roles         []Role         `json:"roles,omitempty"`
 }
 
 type AdminUser struct {
@@ -755,14 +759,36 @@ func handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID := vars["id"]
 
+	// Validate UUID format
+	if _, err := uuid.Parse(userID); err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Execute the stored procedure
 	_, err := db.Exec(`CALL auth.delete_user($1)`, userID)
 	if err != nil {
-		http.Error(w, "Failed to delete user", http.StatusInternalServerError)
+		pqErr, ok := err.(*pq.Error)
+		if ok {
+			switch pqErr.Message {
+			case "User with ID " + userID + " not found":
+				http.Error(w, "User not found", http.StatusNotFound)
+			case "Cannot delete the last super_admin user":
+				http.Error(w, "Cannot delete the last super admin", http.StatusForbidden)
+			default:
+				http.Error(w, "Failed to delete user: "+err.Error(), http.StatusInternalServerError)
+			}
+		} else {
+			http.Error(w, "Failed to delete user: "+err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(Response{Success: true, Message: "User deleted successfully"})
+	json.NewEncoder(w).Encode(Response{
+		Success: true,
+		Message: "User deleted successfully",
+	})
 }
 
 // Organization Handlers
@@ -1171,35 +1197,144 @@ func handleAdminCheck(w http.ResponseWriter, r *http.Request) {
 // Create new user
 func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	log.Printf("Handling create user request")
+
+	// Log the raw request body
+	bodyBytes, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Failed to read request body: %v", err)
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Raw request body: %s", string(bodyBytes))
+	// Restore the body for decoding
+	r.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	var user User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		log.Printf("Failed to decode request body: %v", err)
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	log.Printf("Decoded user: %+v", user)
+
+	// Basic input validation
+	if user.Email == "" || user.Password == "" || user.FirstName == "" || user.LastName == "" {
+		http.Error(w, "All fields are required", http.StatusBadRequest)
+		return
+	}
+	if len(user.Email) > 255 || len(user.FirstName) > 100 || len(user.LastName) > 100 {
+		http.Error(w, "Input exceeds maximum length", http.StatusBadRequest)
 		return
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
-		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+		log.Printf("Failed to hash password: %v", err)
+		http.Error(w, "Failed to hash password: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Prepare organization and role ID arrays
+	orgIDs := make([]string, 0, len(user.Organizations))
+	for i, org := range user.Organizations {
+		if org.ID != "" && isValidUUID(org.ID) {
+			orgIDs = append(orgIDs, org.ID)
+			log.Printf("Added organization ID: %s", org.ID)
+		} else {
+			log.Printf("Skipping invalid organization at index %d: ID=%s", i, org.ID)
+		}
+	}
+	log.Printf("Final Organization IDs before pq.Array: %v", orgIDs)
+
+	roleIDs := make([]string, 0, len(user.Roles))
+	for i, role := range user.Roles {
+		if role.ID != "" && isValidUUID(role.ID) {
+			roleIDs = append(roleIDs, role.ID)
+			log.Printf("Added role ID: %s, OrganizationID: %v", role.ID, role.OrganizationID)
+			// Fetch organization_id from database if not provided or invalid
+			if role.OrganizationID == nil || (role.OrganizationID != nil && (*role.OrganizationID == "" || !isValidUUID(*role.OrganizationID))) {
+				var orgID string
+				err := db.QueryRow(`
+                    SELECT organization_id
+                    FROM auth.roles
+                    WHERE id = $1
+                `, role.ID).Scan(&orgID)
+				if err != nil {
+					if err == sql.ErrNoRows {
+						log.Printf("Role %s not found in database", role.ID)
+					} else {
+						log.Printf("Error querying organization_id for role %s: %v", role.ID, err)
+					}
+					if len(orgIDs) > 0 {
+						role.OrganizationID = &orgIDs[0]
+						log.Printf("Using fallback orgID %s for role %s due to query error", orgIDs[0], role.ID)
+					} else {
+						log.Printf("No valid organization_id or fallback available for role %s", role.ID)
+						http.Error(w, "No valid organization_id for role "+role.ID, http.StatusBadRequest)
+						return
+					}
+				} else if orgID != "" && isValidUUID(orgID) {
+					role.OrganizationID = &orgID
+					log.Printf("Fetched organization_id %s for role %s from database", orgID, role.ID)
+				} else {
+					log.Printf("Invalid or empty organization_id %s fetched for role %s", orgID, role.ID)
+					if len(orgIDs) > 0 {
+						role.OrganizationID = &orgIDs[0]
+						log.Printf("Using fallback orgID %s for role %s", orgIDs[0], role.ID)
+					} else {
+						log.Printf("No valid organization_id or fallback available for role %s", role.ID)
+						http.Error(w, "No valid organization_id for role "+role.ID, http.StatusBadRequest)
+						return
+					}
+				}
+			} else {
+				log.Printf("Using provided organization_id %s for role %s", *role.OrganizationID, role.ID)
+			}
+			log.Printf("Validated role %s", role.ID)
+		} else {
+			log.Printf("Skipping invalid role at index %d: ID=%s", i, role.ID)
+		}
+	}
+	log.Printf("Final Role IDs before pq.Array: %v", roleIDs)
+
+	orgArray := pq.Array(orgIDs)
+	roleArray := pq.Array(roleIDs)
+	log.Printf("PostgreSQL Organization Array: %v", orgArray)
+	log.Printf("PostgreSQL Role Array: %v", roleArray)
+
+	if len(orgIDs) == 0 && len(roleIDs) > 0 {
+		log.Printf("No organization IDs provided for user with roles")
+		http.Error(w, "Organization ID is required when assigning roles", http.StatusBadRequest)
 		return
 	}
 
 	var userID string
 	err = db.QueryRow(`
-        CALL auth.create_user($1, $2, $3, $4, $5)
-    `, user.Email, string(hashedPassword), user.FirstName, user.LastName, &userID).Scan(&userID)
-
+		SELECT auth.create_user($1, $2, $3, $4, $5, $6)
+	`, user.Email, string(hashedPassword), user.FirstName, user.LastName,
+		pq.Array(orgIDs), pq.Array(roleIDs)).Scan(&userID)
 	if err != nil {
-		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		log.Printf("Failed to create user in DB: %v", err)
+		http.Error(w, "Failed to create user: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	user.ID = userID
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "User created successfully",
 		"user":    user,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+		http.Error(w, "Failed to encode response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+// Helper function remains unchanged
+func isValidUUID(u string) bool {
+	_, err := uuid.Parse(u)
+	return err == nil
 }
 
 // Get single user by ID
