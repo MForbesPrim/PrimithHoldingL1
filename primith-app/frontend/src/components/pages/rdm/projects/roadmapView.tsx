@@ -136,18 +136,34 @@ export function RoadmapView({
     setShowAddModal(true);
   };
 
-  // Prepare for editing with a timeout
   const handleEditClick = (item: RoadmapItem) => {
-    setEditingItem(item)
-    const category = item.category || ""
-    const isExistingCategory = categories.includes(category)
-    setSelectedCategory(isExistingCategory ? category : "")
-    setCustomCategory(isExistingCategory ? "" : category)
-    setIsCustomCategory(!isExistingCategory && !!category)
-    setOpenCategory(false); // Reset category Popover state
-    setOpenParent(false); // Reset parent Popover state
-    setStartDate(item.startDate ? new Date(item.startDate) : undefined)
-    setEndDate(item.endDate ? new Date(item.endDate) : undefined)
+    setEditingItem(item);
+    
+    // First ensure the categories array is properly populated
+    let currentCategories = [...categories];
+    if (item.category && !currentCategories.includes(item.category)) {
+      currentCategories = [...currentCategories, item.category].sort((a, b) => a.localeCompare(b));
+      setCategories(currentCategories);
+    }
+    
+    // Now determine if the category is in the known list or custom
+    const category = item.category || "";
+    const categoryExists = category ? currentCategories.includes(category) : false;
+    
+    // Set the appropriate state values - using empty string instead of undefined
+    setSelectedCategory(categoryExists ? category : "");
+    setCustomCategory(categoryExists ? "" : category);
+    setIsCustomCategory(!categoryExists && category !== "");
+    
+    // Reset dropdown states
+    setOpenCategory(false);
+    setOpenParent(false);
+    
+    // Set date values
+    setStartDate(item.startDate ? new Date(item.startDate) : undefined);
+    setEndDate(item.endDate ? new Date(item.endDate) : undefined);
+    
+    // Set form data
     setFormData({
       title: item.title,
       description: item.description || "",
@@ -155,19 +171,14 @@ export function RoadmapView({
       startDate: item.startDate,
       endDate: item.endDate,
       priority: item.priority,
-      parentId: item.parentId,
+      parentId: item.parentId || undefined,
       category: item.category
-    })
-
-    // Update categories if the item's category is not included
-    if (item.category && !categories.includes(item.category)) {
-      setCategories(prev => [...new Set([...prev, item.category].filter((cat): cat is string => cat !== undefined))].sort((a, b) => a.localeCompare(b)));
-    }
-
-    // Delay opening the edit modal to prevent potential freezing
+    });
+  
+    // Open the modal after a small delay to ensure state is updated
     setTimeout(() => {
       setShowEditModal(true);
-    }, 100); // 100ms delay
+    }, 100);
   };
 
   const handleCustomCategoryChange = (value: string) => {
@@ -190,10 +201,17 @@ export function RoadmapView({
   }
 
   // Handle parent selection from combobox
-  const handleParentSelect = (value: string) => {
-    setFormData({ ...formData, parentId: value === formData.parentId ? undefined : value })
-    setOpenParent(false)
-    if (parentSelectRef.current) parentSelectRef.current.focus()
+// Handle parent selection from combobox
+const handleParentSelect = (value: string) => {
+    // Check if we're deselecting the currently selected parent
+    // Convert to undefined instead of null for TypeScript compatibility
+    const newParentId = value === formData.parentId ? undefined : value;
+    
+    // Update the form data
+    setFormData({ ...formData, parentId: newParentId });
+    setOpenParent(false);
+    
+    if (parentSelectRef.current) parentSelectRef.current.focus();
   }
 
   // Handle date changes
@@ -229,23 +247,33 @@ export function RoadmapView({
   }
 
   // Submit edit
-  const handleEditSubmit = async () => {
+const handleEditSubmit = async () => {
     if (editingItem && editingItem.id) {
-      const finalCategory = customCategory.trim() || selectedCategory
-      if (!formData.title || !finalCategory) {
-        return
-      }
-      setIsSaving(true); // Disable button and show "Saving..."
-      try {
-        await onItemUpdate(editingItem.id, { ...formData, category: finalCategory })
-        setShowEditModal(false)
-      } catch (error) {
-        console.error("Error updating item:", error); // Log errors for debugging
-      } finally {
+        const finalCategory = customCategory.trim() || selectedCategory;
+        if (!formData.title || !finalCategory) {
+        return;
+        }
+        
+        // Create a copy of formData for submitting to the API
+        const submissionData = { ...formData, category: finalCategory };
+        
+        // Convert undefined to null for the API
+        if (submissionData.parentId === undefined) {
+        // @ts-ignore - We're intentionally setting null despite TypeScript's objections
+        submissionData.parentId = null;
+        }
+        
+        setIsSaving(true); // Disable button and show "Saving..."
+        try {
+        await onItemUpdate(editingItem.id, submissionData);
+        setShowEditModal(false);
+        } catch (error) {
+        console.error("Error updating item:", error);
+        } finally {
         setIsSaving(false); // Re-enable button and revert text
-      }
+        }
     }
-  }
+    }
 
   // Handle delete confirmation
   const handleDeleteConfirm = async () => {
@@ -590,9 +618,9 @@ const renderListView = () => {
     <Card key={item.id} className="p-3">
       <div className="flex justify-between">
         <div>
-          <div className="font-medium">{item.title}</div>
+          <div className="font-medium text-sm">{item.title}</div>
           {item.description && (
-            <p className="text-sm text-gray-600 mt-1 line-clamp-2">{item.description}</p>
+            <p className="text-xs text-gray-600 mt-1 line-clamp-2">{item.description}</p>
           )}
           <div className="flex items-center mt-2 space-x-2">
             <span className={`px-2 py-1 rounded-full text-xs ${
@@ -625,12 +653,65 @@ const renderListView = () => {
           )}
         </div>
         <Button 
+            variant="ghost" 
+            size="sm" 
+            className="min-h-8 min-w-8 p-0"
+            onClick={() => handleEditClick(item)}
+            >
+            <Edit className="h-4 w-4" />
+            </Button>
+      </div>
+    </Card>
+  )
+
+  // Modify this function to create smaller timeline cards
+const renderTimelineItemCard = (item: RoadmapItem) => (
+    <Card key={item.id} className="px-4 py-3">
+      <div className="flex justify-between items-start">
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-sm truncate">{item.title}</div>
+          {item.description && (
+            <p className="text-xs text-gray-600 line-clamp-1 my-2">{item.description}</p>
+          )}
+          <div className="flex items-center my-2 flex-wrap gap-1">
+            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+              item.status === 'completed' ? 'bg-green-100 text-green-800' :
+              item.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
+              item.status === 'delayed' ? 'bg-red-100 text-red-800' :
+              'bg-gray-100 text-gray-800'
+            }`}>
+              {capitalizeWords(item.status)}
+            </span>
+            {item.category && (
+              <span className="text-xs bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded-full truncate max-w-[100px]">
+                {item.category}
+              </span>
+            )}
+          </div>
+          {(item.startDate || item.endDate) && (
+            <div className="flex items-center text-xs text-gray-500 mt-2">
+              <CalendarDays className="h-3 w-3 mr-1 flex-shrink-0" />
+              <span className="truncate">
+                {item.startDate && (
+                  <span>{new Date(item.startDate).toLocaleDateString()}</span>
+                )}
+                {item.startDate && item.endDate && (
+                  <span className="mx-1">—</span>
+                )}
+                {item.endDate && (
+                  <span>{new Date(item.endDate).toLocaleDateString()}</span>
+                )}
+              </span>
+            </div>
+          )}
+        </div>
+        <Button 
           variant="ghost" 
           size="sm" 
-          className="h-8 w-8 p-0"
+          className="h-6 w-6 p-0 ml-1 flex-shrink-0"
           onClick={() => handleEditClick(item)}
         >
-          <Edit className="h-4 w-4" />
+          <Edit className="h-3 w-3" />
         </Button>
       </div>
     </Card>
@@ -640,7 +721,7 @@ const renderListView = () => {
   const renderTimelineView = () => {
     const { quarters, year } = groupedByQuarter;
     return (
-      <div className="space-y-6">
+      <div className="space-y-1">
         {safeItems.length > 0 && (
           <div className="flex justify-end mb-2">
             <Button onClick={handleAddClick}>
@@ -655,8 +736,8 @@ const renderListView = () => {
               <div key={quarter} className="mb-6">
                 <h3 className="text-lg font-semibold mb-2">{quarter} {year}</h3>
                 {items.length > 0 ? (
-                  <div className="space-y-2">
-                    {items.map(item => renderItem(item))}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                    {items.map(item => renderTimelineItemCard(item))}
                   </div>
                 ) : (
                   <div className="text-sm text-gray-500 italic p-4 border border-dashed rounded-md text-center">
@@ -688,7 +769,7 @@ const renderListView = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-3">
         {statuses.map(status => (
           <div key={status.key} className="space-y-2">
-            <h3 className="font-medium text-sm uppercase tracking-wider text-gray-500">
+            <h3 className="font-medium text-sm tracking-wider ml-4 text-gray-500">
               {status.label}
               <span className="ml-2 bg-gray-100 text-gray-700 text-xs rounded-full px-2 py-1">
                 {groupedByStatus[status.key]?.length || 0}
@@ -753,7 +834,7 @@ const renderListView = () => {
   }, [safeItems, editingItem]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 mt-4">
       <div className="min-w-[100vh]">
       <Tabs value={view} onValueChange={(v) => setView(v as any)}>
         <TabsList>         
@@ -1005,18 +1086,18 @@ const renderListView = () => {
               </label>
               <Popover open={openParent} onOpenChange={setOpenParent}>
                 <PopoverTrigger asChild>
-                  <Button
+                <Button
                     variant="outline"
                     role="combobox"
                     aria-expanded={openParent}
                     className="w-full justify-between"
                     ref={parentSelectRef}
-                  >
-                    {formData.parentId
-                      ? safeItems.find((item) => item.id === formData.parentId)?.title
-                      : "Select parent..."}
+                    >
+                    {formData.parentId && safeItems.find((item) => item.id === formData.parentId)
+                        ? safeItems.find((item) => item.id === formData.parentId)?.title
+                        : "Select parent..."}
                     <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
-                  </Button>
+                </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-full p-0">
                   <Command>
@@ -1242,18 +1323,18 @@ const renderListView = () => {
               </label>
               <Popover open={openParent} onOpenChange={setOpenParent}>
                 <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={openParent}
-                    className="w-full justify-between"
-                    ref={parentSelectRef}
-                  >
-                    {formData.parentId
-                      ? safeItems.find((item) => item.id === formData.parentId)?.title
-                      : "Select parent..."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
-                  </Button>
+                <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={openParent}
+                className="w-full justify-between"
+                ref={parentSelectRef}
+                >
+                {formData.parentId && safeItems.find((item) => item.id === formData.parentId)
+                    ? safeItems.find((item) => item.id === formData.parentId)?.title
+                    : "Select parent..."}
+                <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
+                </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-full p-0">
                   <Command>

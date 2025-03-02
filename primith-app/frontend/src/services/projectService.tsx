@@ -192,17 +192,26 @@
     }
 
     async updateRoadmapItem(itemId: string, item: Partial<RoadmapItem>): Promise<RoadmapItem> {
+        // Create a new object with null values instead of undefined
+        const data: Record<string, any> = {};
+        
+        // Copy all properties, converting undefined to null
+        Object.entries(item).forEach(([key, value]) => {
+          data[key] = value === undefined ? null : value;
+        });
+        
         const headers = await this.getAuthHeader();
         const response = await fetch(`${this.baseUrl}/roadmap-items/${itemId}`, {
-        method: 'PUT',
-        credentials: 'include',
-        headers,
-        body: JSON.stringify(item)
+          method: 'PUT',
+          credentials: 'include',
+          headers,
+          body: JSON.stringify(data)
         });
+        
         if (!response.ok) throw new Error('Failed to update roadmap item');
         return response.json();
-    }
-
+      }
+      
     // Reviews
     async getArtifactReviews(artifactId: string): Promise<ArtifactReview[]> {
         const headers = await this.getAuthHeader();

@@ -7348,6 +7348,8 @@ func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 	itemId := vars["id"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
+	log.Printf("[DEBUG] Starting update for roadmap item %s", itemId)
+
 	var req struct {
 		Title       *string `json:"title"`
 		Description *string `json:"description"`
@@ -7356,11 +7358,18 @@ func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 		Status      *string `json:"status"`
 		Priority    *int    `json:"priority"`
 		ParentID    *string `json:"parentId"`
-		Category    *string `json:"category"` // Add this field
+		Category    *string `json:"category"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
+	}
+
+	// Log the parentId value
+	if req.ParentID == nil {
+		log.Printf("[DEBUG] Received parentId is nil")
+	} else {
+		log.Printf("[DEBUG] Received parentId: '%s'", *req.ParentID)
 	}
 
 	// First get the project ID to verify permissions
@@ -7440,6 +7449,10 @@ func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Log current database values
+	log.Printf("[DEBUG] Current parentId in DB - Valid: %v, Value: %s",
+		currentParentId.Valid, currentParentId.String)
+
 	// Merge current with updates
 	title := currentTitle
 	if req.Title != nil {
@@ -7464,9 +7477,30 @@ func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 	var parentId *string
 	if currentParentId.Valid {
 		parentId = &currentParentId.String
+		log.Printf("[DEBUG] Using existing parentId: %s", *parentId)
 	}
+
 	if req.ParentID != nil {
 		parentId = req.ParentID
+		log.Printf("[DEBUG] Overriding with request parentId")
+	} else {
+		// This is the important part - if req.ParentID is nil, it means null was sent
+		// and we should explicitly clear the parent ID
+		log.Printf("[DEBUG] Request has null parentId, clearing value")
+		parentId = nil
+	}
+
+	var parentIdUUID *uuid.UUID
+	if parentId != nil && *parentId != "" {
+		parsedUUID, err := uuid.Parse(*parentId)
+		if err != nil {
+			http.Error(w, "Invalid parent ID format", http.StatusBadRequest)
+			return
+		}
+		parentIdUUID = &parsedUUID
+		log.Printf("[DEBUG] Parsed parentIdUUID: %s", parentIdUUID)
+	} else {
+		log.Printf("[DEBUG] parentIdUUID is nil")
 	}
 
 	if startDate == nil && currentStartDate.Valid {
@@ -7494,28 +7528,37 @@ func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call the update stored procedure
+	log.Printf("[DEBUG] Calling procedure with parentIdUUID: %v", parentIdUUID)
 	_, err = db.Exec(`
 	  CALL rdm.update_roadmap_item(
 		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 	  )
 	`,
-		itemUUID,    // Item ID
-		title,       // Title
-		description, // Description
-		startDate,   // Start date
-		endDate,     // End date
-		status,      // Status
-		priority,    // Priority
-		parentId,    // Parent ID
-		category,    // Category
-		userId,      // Updated by
+		itemUUID,     // Item ID
+		title,        // Title
+		description,  // Description
+		startDate,    // Start date
+		endDate,      // End date
+		status,       // Status
+		priority,     // Priority
+		parentIdUUID, // Parent ID
+		category,     // Category
+		userId,       // Updated by
 	)
 
 	if err != nil {
+		log.Printf("[DEBUG] Procedure call failed: %v", err)
 		http.Error(w, "Failed to update roadmap item: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Verify the update
+	var afterParentId sql.NullString
+	db.QueryRow(`SELECT parent_id FROM rdm.project_roadmap_items WHERE id = $1`, itemId).Scan(&afterParentId)
+	log.Printf("[DEBUG] After update, parentId - Valid: %v, Value: %s",
+		afterParentId.Valid, afterParentId.String)
+
+	log.Printf("[DEBUG] Update completed successfully")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"id": itemId})
 }
