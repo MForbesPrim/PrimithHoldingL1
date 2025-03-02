@@ -273,24 +273,62 @@ export function PortalHomePage() {
       </div>
     </nav>
     <div className="flex">
-    <div className="w-60 shrink-0"></div>
-    <main className="container px-4 py-8 max-w-full">
+    <div className="w-52 shrink-0"></div>
+    <main className="container px-4 py-8 max-w-full mr-10">
     <h1 className="text-3xl font-bold mb-4 dark:text-gray-300">
         Hello, {user ? `${user.firstName}` : 'User'}
       </h1>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-4">
       <Card 
-          onClick={handleRdmNavigation} 
-          className="cursor-pointer max-w-sm hover:shadow-lg transition-shadow"
-        >
-          <CardHeader>
-            <CardTitle className="text-lg font-bold">Primith RDM</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Click here to access the Reporting and Document Management system.
-            </p>
-          </CardContent>
-        </Card>
+        onClick={handleRdmNavigation} 
+        className="cursor-pointer max-w-sm hover:shadow-lg transition-shadow"
+      >
+        <CardHeader>
+          <CardTitle className="text-lg font-bold">Primith RDM</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Click here to access the Reporting and Document Management system.
+          </p>
+        </CardContent>
+      </Card>
+      
+      <Card className="max-w-sm opacity-60 cursor-not-allowed">
+        <CardHeader>
+          <CardTitle className="text-lg font-bold">Primith Financing</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Financial solutions and services for business operations and growth.
+          </p>
+          <p className="text-xs text-muted-foreground mt-2 italic">Coming soon</p>
+        </CardContent>
+      </Card>
+      
+      <Card className="max-w-sm opacity-60 cursor-not-allowed">
+        <CardHeader>
+          <CardTitle className="text-lg font-bold">Primith Consulting</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Expert guidance and advisory services for business optimization.
+          </p>
+          <p className="text-xs text-muted-foreground mt-2 italic">Coming soon</p>
+        </CardContent>
+      </Card>
+      
+      <Card className="max-w-sm opacity-60 cursor-not-allowed">
+        <CardHeader>
+          <CardTitle className="text-lg font-bold">Primith Pro</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Professional services and custom solutions tailored to your needs.
+          </p>
+          <p className="text-xs text-muted-foreground mt-2 italic">Coming soon</p>
+        </CardContent>
+      </Card>
+    </div>
     </main>
     </div>
   </div>
