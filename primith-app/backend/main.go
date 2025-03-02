@@ -6927,372 +6927,6 @@ func contains(s []string, str string) bool {
 	return false
 }
 
-func handleGetRoadmapItems(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	projectId := vars["projectId"]
-	claims := r.Context().Value(claimsKey).(*Claims) // Use claimsKey instead of "claims"
-
-	// Verify user is a project member
-	var isMember bool
-	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-        )
-    `, projectId, claims.Username).Scan(&isMember)
-	if err != nil {
-		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
-		return
-	}
-	if !isMember {
-		http.Error(w, "Access denied to project roadmap", http.StatusForbidden)
-		return
-	}
-
-	// Rest of the function remains unchanged
-	rows, err := db.Query(`
-        SELECT id, project_id, title, description, start_date, end_date, status, 
-               priority, parent_id, created_by, updated_by, created_at, updated_at
-        FROM rdm.project_roadmap_items
-        WHERE project_id = $1
-        ORDER BY created_at DESC
-    `, projectId)
-	if err != nil {
-		http.Error(w, "Failed to fetch roadmap items", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	var items []map[string]interface{}
-	for rows.Next() {
-		var id, projectId, createdBy uuid.UUID
-		var title, status string
-		var description sql.NullString
-		var startDate, endDate sql.NullTime
-		var priority int
-		var parentId, updatedBy sql.NullString
-		var createdAt, updatedAt time.Time
-
-		err := rows.Scan(&id, &projectId, &title, &description, &startDate, &endDate, &status,
-			&priority, &parentId, &createdBy, &updatedBy, &createdAt, &updatedAt)
-		if err != nil {
-			continue
-		}
-
-		item := map[string]interface{}{
-			"id":          id.String(),
-			"projectId":   projectId.String(),
-			"title":       title,
-			"description": nullString(description),
-			"startDate":   nullTime(startDate),
-			"endDate":     nullTime(endDate),
-			"status":      status,
-			"priority":    priority,
-			"parentId":    nullString(parentId),
-			"createdBy":   createdBy.String(),
-			"updatedBy":   nullString(updatedBy),
-			"createdAt":   createdAt,
-			"updatedAt":   updatedAt,
-		}
-		items = append(items, item)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(items)
-}
-
-func handleCreateRoadmapItem(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	projectId := vars["projectId"]
-	claims := r.Context().Value(claimsKey).(*Claims)
-
-	// Verify user has permission (member or higher)
-	var isMember bool
-	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-        )
-    `, projectId, claims.Username).Scan(&isMember)
-	if err != nil {
-		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
-		return
-	}
-	if !isMember {
-		http.Error(w, "Access denied to create roadmap items", http.StatusForbidden)
-		return
-	}
-
-	var req struct {
-		Title       string  `json:"title"`
-		Description *string `json:"description"`
-		StartDate   *string `json:"startDate"`
-		EndDate     *string `json:"endDate"`
-		Status      string  `json:"status"`
-		Priority    *int    `json:"priority"`
-		ParentId    *string `json:"parentId"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if req.Title == "" || req.Status == "" {
-		http.Error(w, "Title and status are required", http.StatusBadRequest)
-		return
-	}
-
-	validStatuses := []string{"planned", "in_progress", "completed", "delayed"}
-	if !contains(validStatuses, req.Status) {
-		http.Error(w, "Invalid status", http.StatusBadRequest)
-		return
-	}
-
-	var userId uuid.UUID
-	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
-	if err != nil {
-		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
-		return
-	}
-
-	var startDate *time.Time
-	if req.StartDate != nil {
-		parsed, err := time.Parse("2006-01-02", *req.StartDate)
-		if err != nil {
-			http.Error(w, "Invalid start date format (YYYY-MM-DD)", http.StatusBadRequest)
-			return
-		}
-		startDate = &parsed
-	}
-
-	var endDate *time.Time
-	if req.EndDate != nil {
-		parsed, err := time.Parse("2006-01-02", *req.EndDate)
-		if err != nil {
-			http.Error(w, "Invalid end date format (YYYY-MM-DD)", http.StatusBadRequest)
-			return
-		}
-		endDate = &parsed
-	}
-
-	priority := 0
-	if req.Priority != nil {
-		priority = *req.Priority
-	}
-
-	var itemId uuid.UUID
-	err = db.QueryRow(`
-        INSERT INTO rdm.project_roadmap_items (
-            project_id, title, description, start_date, end_date, status, priority, parent_id, created_by, updated_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
-        RETURNING id
-    `, projectId, req.Title, req.Description, startDate, endDate, req.Status, priority, req.ParentId, userId).Scan(&itemId)
-	if err != nil {
-		http.Error(w, "Failed to create roadmap item", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"id": itemId.String()})
-}
-
-func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	projectId := vars["projectId"]
-	itemId := vars["id"]
-	claims := r.Context().Value(claimsKey).(*Claims)
-
-	// Verify user has permission
-	var isMember bool
-	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-        )
-    `, projectId, claims.Username).Scan(&isMember)
-	if err != nil {
-		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
-		return
-	}
-	if !isMember {
-		http.Error(w, "Access denied to update roadmap items", http.StatusForbidden)
-		return
-	}
-
-	var req struct {
-		Title       *string `json:"title"`
-		Description *string `json:"description"`
-		StartDate   *string `json:"startDate"`
-		EndDate     *string `json:"endDate"`
-		Status      *string `json:"status"`
-		Priority    *int    `json:"priority"`
-		ParentId    *string `json:"parentId"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	var updates []string
-	var args []interface{}
-	argCount := 1
-
-	if req.Title != nil {
-		updates = append(updates, "title = $"+string(rune(argCount)))
-		args = append(args, *req.Title)
-		argCount++
-	}
-	if req.Description != nil {
-		updates = append(updates, "description = $"+string(rune(argCount)))
-		args = append(args, *req.Description)
-		argCount++
-	}
-	if req.StartDate != nil {
-		var startDate *time.Time
-		if *req.StartDate != "" {
-			parsed, err := time.Parse("2006-01-02", *req.StartDate)
-			if err != nil {
-				http.Error(w, "Invalid start date format (YYYY-MM-DD)", http.StatusBadRequest)
-				return
-			}
-			startDate = &parsed
-		}
-		updates = append(updates, "start_date = $"+string(rune(argCount)))
-		args = append(args, startDate)
-		argCount++
-	}
-	if req.EndDate != nil {
-		var endDate *time.Time
-		if *req.EndDate != "" {
-			parsed, err := time.Parse("2006-01-02", *req.EndDate)
-			if err != nil {
-				http.Error(w, "Invalid end date format (YYYY-MM-DD)", http.StatusBadRequest)
-				return
-			}
-			endDate = &parsed
-		}
-		updates = append(updates, "end_date = $"+string(rune(argCount)))
-		args = append(args, endDate)
-		argCount++
-	}
-	if req.Status != nil {
-		validStatuses := []string{"planned", "in_progress", "completed", "delayed"}
-		if !contains(validStatuses, *req.Status) {
-			http.Error(w, "Invalid status", http.StatusBadRequest)
-			return
-		}
-		updates = append(updates, "status = $"+string(rune(argCount)))
-		args = append(args, *req.Status)
-		argCount++
-	}
-	if req.Priority != nil {
-		updates = append(updates, "priority = $"+string(rune(argCount)))
-		args = append(args, *req.Priority)
-		argCount++
-	}
-	if req.ParentId != nil {
-		updates = append(updates, "parent_id = $"+string(rune(argCount)))
-		args = append(args, *req.ParentId)
-		argCount++
-	}
-
-	if len(updates) == 0 {
-		http.Error(w, "No fields to update", http.StatusBadRequest)
-		return
-	}
-
-	var userId uuid.UUID
-	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
-	if err != nil {
-		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
-		return
-	}
-
-	updates = append(updates, "updated_by = $"+string(rune(argCount)))
-	args = append(args, userId)
-	argCount++
-	updates = append(updates, "updated_at = CURRENT_TIMESTAMP")
-	args = append(args, itemId)
-
-	query := "UPDATE rdm.project_roadmap_items SET " + strings.Join(updates, ", ") + " WHERE id = $" + string(rune(argCount))
-	result, err := db.Exec(query, args...)
-	if err != nil {
-		http.Error(w, "Failed to update roadmap item", http.StatusInternalServerError)
-		return
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil || rowsAffected == 0 {
-		http.Error(w, "Roadmap item not found", http.StatusNotFound)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-}
-
-func handleDeleteRoadmapItem(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	projectId := vars["projectId"]
-	itemId := vars["id"]
-	claims := r.Context().Value(claimsKey).(*Claims)
-
-	// Verify user has permission (e.g., owner or admin)
-	var isMember bool
-	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-            AND pm.role IN ('owner', 'admin')
-        )
-    `, projectId, claims.Username).Scan(&isMember)
-	if err != nil {
-		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
-		return
-	}
-	if !isMember {
-		http.Error(w, "Access denied to delete roadmap items", http.StatusForbidden)
-		return
-	}
-
-	result, err := db.Exec("DELETE FROM rdm.project_roadmap_items WHERE id = $1 AND project_id = $2", itemId, projectId)
-	if err != nil {
-		http.Error(w, "Failed to delete roadmap item", http.StatusInternalServerError)
-		return
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil || rowsAffected == 0 {
-		http.Error(w, "Roadmap item not found", http.StatusNotFound)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-}
-
-// Helper functions to handle nullable fields
-func nullString(ns sql.NullString) interface{} {
-	if ns.Valid {
-		return ns.String
-	}
-	return nil
-}
-
-func nullTime(nt sql.NullTime) interface{} {
-	if nt.Valid {
-		return nt.Time.Format("2006-01-02")
-	}
-	return nil
-}
-
 func handleGetProjectActivity(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectId := vars["projectId"]
@@ -7459,6 +7093,553 @@ func handleGetProjectActivity(w http.ResponseWriter, r *http.Request) {
 			"offset": offset,
 		},
 	})
+}
+
+func handleGetRoadmapItems(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user is a project member
+	var isMember bool
+	err := db.QueryRow(`
+	  SELECT EXISTS (
+		SELECT 1 
+		FROM rdm.project_members pm
+		JOIN auth.users u ON pm.user_id = u.id
+		WHERE pm.project_id = $1 AND u.email = $2
+	  )
+	`, projectId, claims.Username).Scan(&isMember)
+	if err != nil {
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
+		http.Error(w, "Access denied to project roadmap", http.StatusForbidden)
+		return
+	}
+
+	rows, err := db.Query(`
+	  SELECT id, project_id, title, description, start_date, end_date, status, 
+			 priority, parent_id, category, created_by, updated_by, created_at, updated_at
+	  FROM rdm.project_roadmap_items
+	  WHERE project_id = $1
+	  ORDER BY created_at DESC
+	`, projectId)
+	if err != nil {
+		http.Error(w, "Failed to fetch roadmap items", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var items []map[string]interface{}
+	for rows.Next() {
+		var id, projectId, createdBy uuid.UUID
+		var title, status string
+		var description, category sql.NullString
+		var startDate, endDate sql.NullTime
+		var priority int
+		var parentId, updatedBy sql.NullString
+		var createdAt, updatedAt time.Time
+
+		err := rows.Scan(&id, &projectId, &title, &description, &startDate, &endDate, &status,
+			&priority, &parentId, &category, &createdBy, &updatedBy, &createdAt, &updatedAt)
+		if err != nil {
+			continue
+		}
+
+		item := map[string]interface{}{
+			"id":          id.String(),
+			"projectId":   projectId.String(),
+			"title":       title,
+			"description": nullString(description),
+			"startDate":   nullTime(startDate),
+			"endDate":     nullTime(endDate),
+			"status":      status,
+			"priority":    priority,
+			"parentId":    nullString(parentId),
+			"category":    nullString(category),
+			"createdBy":   createdBy.String(),
+			"updatedBy":   nullString(updatedBy),
+			"createdAt":   createdAt,
+			"updatedAt":   updatedAt,
+		}
+		items = append(items, item)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
+}
+
+func nullString(ns sql.NullString) interface{} {
+	if ns.Valid {
+		return ns.String
+	}
+	return nil
+}
+
+func nullTime(nt sql.NullTime) interface{} {
+	if nt.Valid {
+		return nt.Time.Format("2006-01-02")
+	}
+	return nil
+}
+
+// In your main.go file
+
+func handleCreateRoadmapItem(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var req struct {
+		ProjectID   string  `json:"projectId"`
+		Title       string  `json:"title"`
+		Description *string `json:"description"`
+		StartDate   *string `json:"startDate"`
+		EndDate     *string `json:"endDate"`
+		Status      string  `json:"status"`
+		Priority    *int    `json:"priority"`
+		ParentID    *string `json:"parentId"`
+		Category    *string `json:"category"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.ProjectID == "" || req.Title == "" || req.Status == "" {
+		http.Error(w, "Project ID, title, and status are required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user has permission (member or higher)
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, req.ProjectID, claims.Username).Scan(&isMember)
+	if err != nil {
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
+		http.Error(w, "Access denied to create roadmap items", http.StatusForbidden)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse dates if provided
+	var startDate, endDate *time.Time
+	if req.StartDate != nil && *req.StartDate != "" {
+		parsedDate, err := time.Parse("2006-01-02", *req.StartDate)
+		if err != nil {
+			http.Error(w, "Invalid start date format. Use YYYY-MM-DD", http.StatusBadRequest)
+			return
+		}
+		startDate = &parsedDate
+	}
+
+	if req.EndDate != nil && *req.EndDate != "" {
+		parsedDate, err := time.Parse("2006-01-02", *req.EndDate)
+		if err != nil {
+			http.Error(w, "Invalid end date format. Use YYYY-MM-DD", http.StatusBadRequest)
+			return
+		}
+		endDate = &parsedDate
+	}
+
+	// Set default priority if not provided
+	priority := 0
+	if req.Priority != nil {
+		priority = *req.Priority
+	}
+
+	// Begin transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Insert roadmap item
+	var roadmapItemId string
+	err = db.QueryRow(`
+    INSERT INTO rdm.project_roadmap_items (
+        project_id, 
+        title, 
+        description, 
+        start_date, 
+        end_date, 
+        status, 
+        priority, 
+        parent_id,
+        category,
+        created_by, 
+        updated_by
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+    RETURNING id
+`, req.ProjectID, req.Title, req.Description, startDate, endDate, req.Status, priority, req.ParentID, req.Category, userId).Scan(&roadmapItemId)
+
+	if err != nil {
+		http.Error(w, "Failed to create roadmap item: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Log activity
+	_, err = tx.Exec(`
+        INSERT INTO rdm.project_activity (
+            project_id,
+            user_id,
+            activity_type,
+            entity_type,
+            entity_id,
+            description,
+            new_values
+        ) VALUES ($1, $2, 'create', 'roadmap', $3, $4, $5)
+    `, req.ProjectID, userId, roadmapItemId,
+		"Created roadmap item: "+req.Title,
+		fmt.Sprintf(`{"title":"%s","status":"%s"}`, req.Title, req.Status))
+
+	if err != nil {
+		http.Error(w, "Failed to log activity", http.StatusInternalServerError)
+		return
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":          roadmapItemId,
+		"projectId":   req.ProjectID,
+		"title":       req.Title,
+		"description": req.Description,
+		"startDate":   req.StartDate,
+		"endDate":     req.EndDate,
+		"status":      req.Status,
+		"priority":    priority,
+		"parentId":    req.ParentID,
+		"createdBy":   userId,
+		"updatedBy":   userId,
+		"createdAt":   time.Now(),
+		"updatedAt":   time.Now(),
+	})
+}
+
+func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	itemId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var req struct {
+		Title       *string `json:"title"`
+		Description *string `json:"description"`
+		StartDate   *string `json:"startDate"`
+		EndDate     *string `json:"endDate"`
+		Status      *string `json:"status"`
+		Priority    *int    `json:"priority"`
+		ParentID    *string `json:"parentId"`
+		Category    *string `json:"category"` // Add this field
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// First get the project ID to verify permissions
+	var projectId string
+	err := db.QueryRow("SELECT project_id FROM rdm.project_roadmap_items WHERE id = $1", itemId).Scan(&projectId)
+	if err != nil {
+		http.Error(w, "Roadmap item not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify user has permission
+	var isMember bool
+	err = db.QueryRow(`
+	  SELECT EXISTS (
+		SELECT 1 
+		FROM rdm.project_members pm
+		JOIN auth.users u ON pm.user_id = u.id
+		WHERE pm.project_id = $1 AND u.email = $2
+	  )
+	`, projectId, claims.Username).Scan(&isMember)
+	if err != nil {
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
+		http.Error(w, "Access denied to update roadmap items", http.StatusForbidden)
+		return
+	}
+
+	var userId uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Process date fields if provided
+	var startDate, endDate *time.Time
+	if req.StartDate != nil {
+		if *req.StartDate != "" {
+			parsed, err := time.Parse("2006-01-02", *req.StartDate)
+			if err != nil {
+				http.Error(w, "Invalid start date format (YYYY-MM-DD)", http.StatusBadRequest)
+				return
+			}
+			startDate = &parsed
+		}
+	}
+
+	if req.EndDate != nil {
+		if *req.EndDate != "" {
+			parsed, err := time.Parse("2006-01-02", *req.EndDate)
+			if err != nil {
+				http.Error(w, "Invalid end date format (YYYY-MM-DD)", http.StatusBadRequest)
+				return
+			}
+			endDate = &parsed
+		}
+	}
+
+	// Get current values to merge with updates
+	var currentTitle, currentStatus string
+	var currentDescription, currentCategory sql.NullString
+	var currentStartDate, currentEndDate sql.NullTime
+	var currentPriority int
+	var currentParentId sql.NullString
+
+	err = db.QueryRow(`
+	  SELECT title, description, start_date, end_date, status, priority, parent_id, category
+	  FROM rdm.project_roadmap_items
+	  WHERE id = $1
+	`, itemId).Scan(&currentTitle, &currentDescription, &currentStartDate, &currentEndDate,
+		&currentStatus, &currentPriority, &currentParentId, &currentCategory)
+
+	if err != nil {
+		http.Error(w, "Failed to get current values", http.StatusInternalServerError)
+		return
+	}
+
+	// Merge current with updates
+	title := currentTitle
+	if req.Title != nil {
+		title = *req.Title
+	}
+
+	description := currentDescription.String
+	if req.Description != nil {
+		description = *req.Description
+	}
+
+	status := currentStatus
+	if req.Status != nil {
+		status = *req.Status
+	}
+
+	priority := currentPriority
+	if req.Priority != nil {
+		priority = *req.Priority
+	}
+
+	var parentId *string
+	if currentParentId.Valid {
+		parentId = &currentParentId.String
+	}
+	if req.ParentID != nil {
+		parentId = req.ParentID
+	}
+
+	if startDate == nil && currentStartDate.Valid {
+		startDate = &currentStartDate.Time
+	}
+
+	if endDate == nil && currentEndDate.Valid {
+		endDate = &currentEndDate.Time
+	}
+
+	// Handle category updates
+	var category *string
+	if currentCategory.Valid {
+		category = &currentCategory.String
+	}
+	if req.Category != nil {
+		category = req.Category
+	}
+
+	// Convert item ID to UUID
+	itemUUID, err := uuid.Parse(itemId)
+	if err != nil {
+		http.Error(w, "Invalid item ID", http.StatusBadRequest)
+		return
+	}
+
+	// Call the update stored procedure
+	_, err = db.Exec(`
+	  CALL rdm.update_roadmap_item(
+		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+	  )
+	`,
+		itemUUID,    // Item ID
+		title,       // Title
+		description, // Description
+		startDate,   // Start date
+		endDate,     // End date
+		status,      // Status
+		priority,    // Priority
+		parentId,    // Parent ID
+		category,    // Category
+		userId,      // Updated by
+	)
+
+	if err != nil {
+		http.Error(w, "Failed to update roadmap item: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"id": itemId})
+}
+
+func handleDeleteRoadmapItem(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	itemId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// First get the project ID to verify permissions
+	var projectId string
+	err := db.QueryRow("SELECT project_id FROM rdm.project_roadmap_items WHERE id = $1", itemId).Scan(&projectId)
+	if err != nil {
+		http.Error(w, "Roadmap item not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify user has permission (e.g., owner or admin)
+	var isAdmin bool
+	err = db.QueryRow(`
+	  SELECT EXISTS (
+		SELECT 1 
+		FROM rdm.project_members pm
+		JOIN auth.users u ON pm.user_id = u.id
+		WHERE pm.project_id = $1 AND u.email = $2
+		AND pm.role IN ('owner', 'admin')
+	  )
+	`, projectId, claims.Username).Scan(&isAdmin)
+	if err != nil {
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+	if !isAdmin {
+		http.Error(w, "Access denied to delete roadmap items", http.StatusForbidden)
+		return
+	}
+
+	var userId uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Convert item ID to UUID
+	itemUUID, err := uuid.Parse(itemId)
+	if err != nil {
+		http.Error(w, "Invalid item ID", http.StatusBadRequest)
+		return
+	}
+
+	// Execute the delete stored procedure
+	_, err = db.Exec(`CALL rdm.delete_roadmap_item($1, $2)`, itemUUID, userId)
+	if err != nil {
+		http.Error(w, "Failed to delete roadmap item: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// Handler to get categories for a project
+func handleGetCategories(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	log.Printf("[handleGetCategories] Fetching categories for projectId: %s", projectId)
+
+	// Verify user has access to the project
+	claims := r.Context().Value(claimsKey).(*Claims)
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+	if err != nil {
+		log.Printf("[handleGetCategories] Error verifying membership: %v", err)
+		http.Error(w, "Failed to verify membership", http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
+		log.Printf("[handleGetCategories] Access denied for user %s to project %s", claims.Username, projectId)
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	log.Printf("[handleGetCategories] User %s authorized for project %s", claims.Username, projectId)
+
+	// Fetch categories from the database, including those with NULL project_id
+	rows, err := db.Query(`
+        SELECT category_name 
+        FROM rdm.project_categories 
+        WHERE project_id = $1 OR project_id IS NULL
+    `, projectId)
+	if err != nil {
+		log.Printf("[handleGetCategories] Database query error: %v", err)
+		http.Error(w, "Failed to fetch categories", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var categories []string
+	for rows.Next() {
+		var category string
+		if err := rows.Scan(&category); err != nil {
+			log.Printf("[handleGetCategories] Error scanning category: %v", err)
+			http.Error(w, "Error scanning category", http.StatusInternalServerError)
+			return
+		}
+		categories = append(categories, category)
+		log.Printf("[handleGetCategories] Found category: %s", category)
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("[handleGetCategories] Error reading categories: %v", err)
+		http.Error(w, "Error reading categories", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[handleGetCategories] Returning %d categories: %v", len(categories), categories)
+
+	json.NewEncoder(w).Encode(categories)
 }
 
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
@@ -7673,6 +7854,11 @@ func main() {
 	r.HandleFunc("/projects/{projectId}/roadmap/{id}", authMiddleware(handleUpdateRoadmapItem)).Methods("PUT")
 	r.HandleFunc("/projects/{projectId}/roadmap/{id}", authMiddleware(handleDeleteRoadmapItem)).Methods("DELETE")
 	r.HandleFunc("/projects/{projectId}/activity", authMiddleware(handleGetProjectActivity)).Methods("GET")
+	r.HandleFunc("/projects/{projectId}/roadmap", authMiddleware(handleGetRoadmapItems)).Methods("GET")
+	r.HandleFunc("/roadmap-items", authMiddleware(handleCreateRoadmapItem)).Methods("POST")
+	r.HandleFunc("/roadmap-items/{id}", authMiddleware(handleUpdateRoadmapItem)).Methods("PUT")
+	r.HandleFunc("/roadmap-items/{id}", authMiddleware(handleDeleteRoadmapItem)).Methods("DELETE")
+	r.HandleFunc("/projects/{projectId}/categories", authMiddleware(handleGetCategories)).Methods("GET")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

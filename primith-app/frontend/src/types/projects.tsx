@@ -50,6 +50,7 @@ export interface Project {
     status: 'planned' | 'in_progress' | 'completed' | 'delayed';
     priority: number;
     parentId?: string;
+    category?: string; 
     createdBy: string;
     updatedBy?: string;
     createdAt: string;

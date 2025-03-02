@@ -67,7 +67,10 @@ import {
   PaginationPrevious 
 } from "@/components/ui/pagination";
 
+import { useToast } from '@/hooks/use-toast';
+
 export function ProjectDetailPage() {
+  const { toast } = useToast();    
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [artifacts, setArtifacts] = useState<ProjectArtifact[]>([]);
@@ -861,18 +864,63 @@ export function ProjectDetailPage() {
           </div>
         </TabsContent>
         <TabsContent value="roadmap">
-          <RoadmapView
-            items={roadmapItems}
-            onItemCreate={async (item: Partial<RoadmapItem>) => {
-              await projectService.createRoadmapItem(item);
-              loadProjectData();
-            }}
-            onItemUpdate={async (itemId: string, item: Partial<RoadmapItem>) => {
-              await projectService.updateRoadmapItem(itemId, item);
-              loadProjectData();
-            }}
-          />
-        </TabsContent>
+            <RoadmapView
+                items={roadmapItems}
+                onItemCreate={async (item: Partial<RoadmapItem>) => {
+                try {
+                    const roadmapItemToCreate = { ...item, projectId: project.id };
+                    await projectService.createRoadmapItem(roadmapItemToCreate);
+                    await loadProjectData();
+                    toast({
+                    title: "Success",
+                    description: "Roadmap item created successfully",
+                    });
+                } catch (error) {
+                    console.error("Failed to create roadmap item:", error);
+                    toast({
+                    title: "Error",
+                    description: "Failed to create roadmap item",
+                    variant: "destructive",
+                    });
+                }
+                }}
+                onItemUpdate={async (itemId: string, item: Partial<RoadmapItem>) => {
+                try {
+                    await projectService.updateRoadmapItem(itemId, item);
+                    await loadProjectData();
+                    toast({
+                    title: "Success",
+                    description: "Roadmap item updated successfully",
+                    });
+                } catch (error) {
+                    console.error("Failed to update roadmap item:", error);
+                    toast({
+                    title: "Error",
+                    description: "Failed to update roadmap item",
+                    variant: "destructive",
+                    });
+                }
+                }}
+                onItemDelete={async (itemId: string) => {
+                try {
+                    await projectService.deleteRoadmapItem(itemId);
+                    await loadProjectData();
+                    toast({
+                    title: "Success",
+                    description: "Roadmap item deleted successfully",
+                    });
+                } catch (error) {
+                    console.error("Failed to delete roadmap item:", error);
+                    toast({
+                    title: "Error",
+                    description: "Failed to delete roadmap item",
+                    variant: "destructive",
+                    });
+                }
+                }}
+                projectId={project.id} // Add this line to pass the dynamic projectId
+            />
+            </TabsContent>
         <TabsContent value="variables">
           <ProjectVariablesPanel projectId={project.id} projectService={projectService} />
         </TabsContent>

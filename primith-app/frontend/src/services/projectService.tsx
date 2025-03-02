@@ -331,4 +331,33 @@
           throw error;
         }
       }
+
+      async deleteRoadmapItem(itemId: string): Promise<void> {
+        const headers = await this.getAuthHeader();
+        const response = await fetch(`${this.baseUrl}/roadmap-items/${itemId}`, {
+          method: 'DELETE',
+          credentials: 'include',
+          headers
+        });
+        if (!response.ok) throw new Error('Failed to delete roadmap item');
+      }
+
+      async getCategories(projectId: string): Promise<string[]> {
+        const headers = await this.getAuthHeader();
+        try {
+            const response = await fetch(`${this.baseUrl}/projects/${projectId}/categories`, {
+                credentials: 'include',
+                headers
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}, message: ${response.statusText}`);
+            }
+            const data = await response.json();
+            console.log("Raw categories data:", data); // Debug log
+            return Array.isArray(data) ? data : [];
+        } catch (error) {
+            console.error("Error fetching categories:", error);
+            return [];
+        }
+    }
     }
