@@ -1,5 +1,5 @@
     import AuthService from '@/services/auth'
-    import { Project, ProjectArtifact, ProjectVariable, RoadmapItem, ArtifactReview, ProjectMember, ProjectActivity} from '@/types/projects'
+    import { Project, ProjectArtifact, ProjectVariable, RoadmapItem, ArtifactReview, ProjectMember, ProjectActivity, ProjectTask} from '@/types/projects'
 
     export class ProjectService {
     private baseUrl = import.meta.env.VITE_API_URL;
@@ -211,7 +211,7 @@
         if (!response.ok) throw new Error('Failed to update roadmap item');
         return response.json();
       }
-      
+
     // Reviews
     async getArtifactReviews(artifactId: string): Promise<ArtifactReview[]> {
         const headers = await this.getAuthHeader();
@@ -369,4 +369,72 @@
             return [];
         }
     }
+
+// Add to src/services/projectService.ts
+async getProjectTasks(projectId: string, filters?: { 
+    status?: string, 
+    assignedTo?: string, 
+    parentId?: string 
+  }): Promise<ProjectTask[]> {
+    const headers = await this.getAuthHeader();
+    
+    let url = `${this.baseUrl}/projects/${projectId}/tasks`;
+    
+    // Add query parameters for filters
+    if (filters) {
+      const params = new URLSearchParams();
+      if (filters.status) params.append('status', filters.status);
+      if (filters.assignedTo) params.append('assignedTo', filters.assignedTo);
+      if (filters.parentId) params.append('parentId', filters.parentId);
+      
+      const queryString = params.toString();
+      if (queryString) url += `?${queryString}`;
+    }
+    
+    const response = await fetch(url, {
+      credentials: 'include',
+      headers
+    });
+    
+    if (!response.ok) throw new Error('Failed to fetch tasks');
+    return response.json();
+  }
+  
+  async createTask(projectId: string, task: Partial<ProjectTask>): Promise<ProjectTask> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/tasks`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify(task)
+    });
+    
+    if (!response.ok) throw new Error('Failed to create task');
+    return response.json();
+  }
+  
+  async updateTask(taskId: string, task: Partial<ProjectTask>): Promise<{ id: string }> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/tasks/${taskId}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify(task)
+    });
+    
+    if (!response.ok) throw new Error('Failed to update task');
+    return response.json();
+  }
+  
+  async deleteTask(taskId: string): Promise<{ success: boolean }> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/tasks/${taskId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+      headers
+    });
+    
+    if (!response.ok) throw new Error('Failed to delete task');
+    return response.json();
+  }
     }

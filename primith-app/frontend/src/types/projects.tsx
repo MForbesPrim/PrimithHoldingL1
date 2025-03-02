@@ -129,3 +129,23 @@ export interface ProjectMember {
     limit: number;
   }
   
+  export interface ProjectTask {
+    id: string;
+    projectId: string;
+    name: string;
+    description?: string;
+    status: 'todo' | 'in_progress' | 'in_review' | 'approved' | 'done' | 'blocked';
+    priority: 'low' | 'medium' | 'high' | 'urgent';
+    assignedTo?: string;
+    assigneeName?: string;
+    dueDate?: string;
+    estimatedHours?: number;
+    actualHours?: number;
+    tags?: string[];
+    parentId?: string;
+    createdBy: string;
+    updatedBy?: string;
+    createdAt: string;
+    updatedAt: string;
+    children?: ProjectTask[];
+  }

@@ -7685,6 +7685,659 @@ func handleGetCategories(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(categories)
 }
 
+// Add these handlers to your main.go file
+
+func handleGetProjectTasks(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user is a project member
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil || !isMember {
+		http.Error(w, "Access denied to project tasks", http.StatusForbidden)
+		return
+	}
+
+	// Get query parameters for filtering
+	status := r.URL.Query().Get("status")
+	assignedTo := r.URL.Query().Get("assignedTo")
+	parentId := r.URL.Query().Get("parentId")
+
+	// Build dynamic query with filters
+	query := `
+        SELECT t.id, t.project_id, t.name, t.description, t.status, t.priority,
+               t.assigned_to, CONCAT(u.first_name, ' ', u.last_name) as assignee_name,
+               t.due_date, t.estimated_hours, t.actual_hours, t.tags,
+               t.parent_id, t.created_by, t.updated_by, t.created_at, t.updated_at
+        FROM rdm.project_tasks t
+        LEFT JOIN auth.users u ON t.assigned_to = u.id
+        WHERE t.project_id = $1
+    `
+
+	args := []interface{}{projectId}
+	paramCount := 1
+
+	if status != "" {
+		paramCount++
+		query += fmt.Sprintf(" AND t.status = $%d", paramCount)
+		args = append(args, status)
+	}
+
+	if assignedTo != "" {
+		paramCount++
+		query += fmt.Sprintf(" AND t.assigned_to = $%d", paramCount)
+		args = append(args, assignedTo)
+	}
+
+	// Handle parent ID filter (null for top-level tasks)
+	if parentId == "null" {
+		query += " AND t.parent_id IS NULL"
+	} else if parentId != "" {
+		paramCount++
+		query += fmt.Sprintf(" AND t.parent_id = $%d", paramCount)
+		args = append(args, parentId)
+	}
+
+	query += " ORDER BY t.due_date ASC NULLS LAST, t.priority DESC, t.created_at DESC"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		http.Error(w, "Failed to fetch tasks", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var tasks []map[string]interface{}
+	for rows.Next() {
+		var id, projectId, createdBy string
+		var assignedTo, assigneeName, updatedBy, parentId sql.NullString
+		var name, status, priority string
+		var description sql.NullString
+		var dueDate sql.NullTime
+		var estimatedHours, actualHours sql.NullFloat64
+		var tags pq.StringArray
+		var createdAt, updatedAt time.Time
+
+		err := rows.Scan(
+			&id, &projectId, &name, &description, &status, &priority,
+			&assignedTo, &assigneeName, &dueDate, &estimatedHours, &actualHours, &tags,
+			&parentId, &createdBy, &updatedBy, &createdAt, &updatedAt,
+		)
+
+		if err != nil {
+			continue
+		}
+
+		task := map[string]interface{}{
+			"id":             id,
+			"projectId":      projectId,
+			"name":           name,
+			"description":    nullStringValue(description),
+			"status":         status,
+			"priority":       priority,
+			"assignedTo":     nullStringValue(assignedTo),
+			"assigneeName":   nullStringValue(assigneeName),
+			"dueDate":        nullTimeValue(dueDate),
+			"estimatedHours": nullFloat64Value(estimatedHours),
+			"actualHours":    nullFloat64Value(actualHours),
+			"tags":           tags,
+			"parentId":       nullStringValue(parentId),
+			"createdBy":      createdBy,
+			"updatedBy":      nullStringValue(updatedBy),
+			"createdAt":      createdAt,
+			"updatedAt":      updatedAt,
+		}
+
+		tasks = append(tasks, task)
+	}
+
+	// Get children for each task to build a tree structure
+	if parentId == "" {
+		tasks = buildTaskHierarchy(tasks)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tasks)
+}
+
+func buildTaskHierarchy(tasks []map[string]interface{}) []map[string]interface{} {
+	// Create a map for quick lookup of tasks by ID
+	taskMap := make(map[string]map[string]interface{})
+	for _, task := range tasks {
+		taskMap[task["id"].(string)] = task
+		task["children"] = []interface{}{}
+	}
+
+	// Build the hierarchy
+	var rootTasks []map[string]interface{}
+	for _, task := range tasks {
+		parentId, hasParent := task["parentId"].(string)
+		if hasParent && parentId != "" {
+			// Add to parent's children
+			if parent, exists := taskMap[parentId]; exists {
+				children := parent["children"].([]interface{})
+				parent["children"] = append(children, task)
+			}
+		} else {
+			// This is a root task
+			rootTasks = append(rootTasks, task)
+		}
+	}
+
+	return rootTasks
+}
+
+func handleCreateTask(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has permission to create tasks
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil || !isMember {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Name           string   `json:"name"`
+		Description    *string  `json:"description"`
+		Status         string   `json:"status"`
+		Priority       string   `json:"priority"`
+		AssignedTo     *string  `json:"assignedTo"`
+		DueDate        *string  `json:"dueDate"`
+		EstimatedHours *float64 `json:"estimatedHours"`
+		ActualHours    *float64 `json:"actualHours"`
+		Tags           []string `json:"tags"`
+		ParentId       *string  `json:"parentId"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.Name == "" {
+		http.Error(w, "Task name is required", http.StatusBadRequest)
+		return
+	}
+
+	// Set default values if not provided
+	if req.Status == "" {
+		req.Status = "todo"
+	}
+	if req.Priority == "" {
+		req.Priority = "medium"
+	}
+
+	// Get user ID
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse due date if provided
+	var dueDateParam *time.Time
+	if req.DueDate != nil && *req.DueDate != "" {
+		parsedDate, err := time.Parse("2006-01-02", *req.DueDate)
+		if err != nil {
+			http.Error(w, "Invalid due date format. Use YYYY-MM-DD", http.StatusBadRequest)
+			return
+		}
+		dueDateParam = &parsedDate
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Create task
+	var taskId string
+	err = tx.QueryRow(`
+        INSERT INTO rdm.project_tasks (
+            project_id, name, description, status, priority,
+            assigned_to, due_date, estimated_hours, actual_hours,
+            tags, parent_id, created_by, updated_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+        RETURNING id
+    `, projectId, req.Name, req.Description, req.Status, req.Priority,
+		req.AssignedTo, dueDateParam, req.EstimatedHours, req.ActualHours,
+		pq.Array(req.Tags), req.ParentId, userId).Scan(&taskId)
+
+	if err != nil {
+		http.Error(w, "Failed to create task: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Log activity
+	_, err = tx.Exec(`
+        INSERT INTO rdm.project_activity (
+            project_id, user_id, activity_type, entity_type, entity_id,
+            description, new_values
+        ) VALUES ($1, $2, 'create', 'task', $3, $4, $5)
+    `, projectId, userId, taskId,
+		"Created task: "+req.Name,
+		fmt.Sprintf(`{"name":"%s","status":"%s"}`, req.Name, req.Status))
+
+	if err != nil {
+		http.Error(w, "Failed to log activity: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get the created task with full details - using individual variables first
+	var id, projectIdResult, name, status, priority string
+	var description, assigneeName sql.NullString
+	var assignedTo, parentId sql.NullString
+	var dueDateResult sql.NullTime
+	var estimatedHours, actualHours sql.NullFloat64
+	var tags pq.StringArray
+	var createdBy, updatedBy string
+	var createdAt, updatedAt time.Time
+
+	err = db.QueryRow(`
+        SELECT t.id, t.project_id, t.name, t.description, t.status, t.priority,
+               t.assigned_to, CONCAT(u.first_name, ' ', u.last_name) as assignee_name,
+               t.due_date, t.estimated_hours, t.actual_hours, t.tags,
+               t.parent_id, t.created_by, t.updated_by, t.created_at, t.updated_at
+        FROM rdm.project_tasks t
+        LEFT JOIN auth.users u ON t.assigned_to = u.id
+        WHERE t.id = $1
+    `, taskId).Scan(
+		&id, &projectIdResult, &name, &description, &status, &priority,
+		&assignedTo, &assigneeName, &dueDateResult, &estimatedHours, &actualHours,
+		&tags, &parentId, &createdBy, &updatedBy, &createdAt, &updatedAt,
+	)
+
+	if err != nil {
+		// Return just the ID if we can't fetch the full task
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"id": taskId})
+		return
+	}
+
+	// Now build the task map
+	task := map[string]interface{}{
+		"id":             id,
+		"projectId":      projectIdResult,
+		"name":           name,
+		"description":    nullStringValue(description),
+		"status":         status,
+		"priority":       priority,
+		"assignedTo":     nullStringValue(assignedTo),
+		"assigneeName":   nullStringValue(assigneeName),
+		"dueDate":        nullTimeValue(dueDateResult),
+		"estimatedHours": nullFloat64Value(estimatedHours),
+		"actualHours":    nullFloat64Value(actualHours),
+		"tags":           tags,
+		"parentId":       nullStringValue(parentId),
+		"createdBy":      createdBy,
+		"updatedBy":      updatedBy,
+		"createdAt":      createdAt,
+		"updatedAt":      updatedAt,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(task)
+}
+
+func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	taskId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// First get the project ID to verify permissions
+	var projectId string
+	err := db.QueryRow("SELECT project_id FROM rdm.project_tasks WHERE id = $1", taskId).Scan(&projectId)
+	if err != nil {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify user has permission
+	var isMember bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil || !isMember {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Name           *string   `json:"name"`
+		Description    *string   `json:"description"`
+		Status         *string   `json:"status"`
+		Priority       *string   `json:"priority"`
+		AssignedTo     *string   `json:"assignedTo"`
+		DueDate        *string   `json:"dueDate"`
+		EstimatedHours *float64  `json:"estimatedHours"`
+		ActualHours    *float64  `json:"actualHours"`
+		Tags           *[]string `json:"tags"`
+		ParentId       *string   `json:"parentId"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Get current values for activity logging
+	var currentValues map[string]interface{}
+	err = db.QueryRow(`
+        SELECT row_to_json(t) FROM (
+            SELECT name, description, status, priority, assigned_to,
+                   due_date, estimated_hours, actual_hours, tags, parent_id
+            FROM rdm.project_tasks
+            WHERE id = $1
+        ) t
+    `, taskId).Scan(&currentValues)
+
+	if err != nil {
+		http.Error(w, "Failed to get current task values", http.StatusInternalServerError)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse due date if provided
+	var dueDate *time.Time
+	if req.DueDate != nil {
+		if *req.DueDate != "" {
+			parsedDate, err := time.Parse("2006-01-02", *req.DueDate)
+			if err != nil {
+				http.Error(w, "Invalid due date format. Use YYYY-MM-DD", http.StatusBadRequest)
+				return
+			}
+			dueDate = &parsedDate
+		}
+	}
+
+	// Build dynamic update query
+	updates := []string{"updated_by = $1", "updated_at = CURRENT_TIMESTAMP"}
+	args := []interface{}{userId}
+	paramCount := 1
+
+	if req.Name != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("name = $%d", paramCount))
+		args = append(args, *req.Name)
+	}
+
+	if req.Description != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("description = $%d", paramCount))
+		args = append(args, *req.Description)
+	}
+
+	if req.Status != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("status = $%d", paramCount))
+		args = append(args, *req.Status)
+	}
+
+	if req.Priority != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("priority = $%d", paramCount))
+		args = append(args, *req.Priority)
+	}
+
+	if req.AssignedTo != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("assigned_to = $%d", paramCount))
+		args = append(args, *req.AssignedTo)
+	}
+
+	if req.DueDate != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("due_date = $%d", paramCount))
+		args = append(args, dueDate)
+	}
+
+	if req.EstimatedHours != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("estimated_hours = $%d", paramCount))
+		args = append(args, *req.EstimatedHours)
+	}
+
+	if req.ActualHours != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("actual_hours = $%d", paramCount))
+		args = append(args, *req.ActualHours)
+	}
+
+	if req.Tags != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("tags = $%d", paramCount))
+		args = append(args, pq.Array(*req.Tags))
+	}
+
+	if req.ParentId != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("parent_id = $%d", paramCount))
+		args = append(args, *req.ParentId)
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Execute update
+	paramCount++
+	query := fmt.Sprintf("UPDATE rdm.project_tasks SET %s WHERE id = $%d",
+		strings.Join(updates, ", "), paramCount)
+	args = append(args, taskId)
+
+	_, err = tx.Exec(query, args...)
+	if err != nil {
+		http.Error(w, "Failed to update task", http.StatusInternalServerError)
+		return
+	}
+
+	// Log activity
+	_, err = tx.Exec(`
+        INSERT INTO rdm.project_activity (
+            project_id, user_id, activity_type, entity_type, entity_id,
+            description, old_values, new_values
+        ) VALUES ($1, $2, 'update', 'task', $3, $4, $5, $6)
+    `, projectId, userId, taskId,
+		"Updated task details",
+		currentValues,
+		req) // New values from the request
+
+	if err != nil {
+		http.Error(w, "Failed to log activity", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"id": taskId})
+}
+
+func handleDeleteTask(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	taskId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// First get the project ID to verify permissions
+	var projectId string
+	var taskName string
+	err := db.QueryRow("SELECT project_id, name FROM rdm.project_tasks WHERE id = $1", taskId).Scan(&projectId, &taskName)
+	if err != nil {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify user has permission (owner or admin)
+	var isAdmin bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+            AND pm.role IN ('owner', 'admin')
+        )
+    `, projectId, claims.Username).Scan(&isAdmin)
+
+	if err != nil || !isAdmin {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Check if task has children
+	var hasChildren bool
+	err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM rdm.project_tasks WHERE parent_id = $1)", taskId).Scan(&hasChildren)
+	if err != nil {
+		http.Error(w, "Failed to check for subtasks", http.StatusInternalServerError)
+		return
+	}
+
+	if hasChildren {
+		http.Error(w, "Cannot delete task with subtasks. Remove subtasks first.", http.StatusBadRequest)
+		return
+	}
+
+	// Save current task data for activity log
+	var taskData map[string]interface{}
+	err = tx.QueryRow(`
+		SELECT row_to_json(t) FROM (
+			SELECT * FROM rdm.project_tasks WHERE id = $1
+		) t
+	`, taskId).Scan(&taskData)
+
+	// Add error handling here
+	if err != nil {
+		log.Printf("Failed to fetch task data for logging: %v", err)
+		// Depending on your error handling strategy, you might want to:
+		// 1. Continue anyway (just log the error)
+		// 2. Return an error response
+		http.Error(w, "Failed to fetch task data", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete the task
+	_, err = tx.Exec("DELETE FROM rdm.project_tasks WHERE id = $1", taskId)
+	if err != nil {
+		http.Error(w, "Failed to delete task", http.StatusInternalServerError)
+		return
+	}
+
+	// Log activity
+	_, err = tx.Exec(`
+        INSERT INTO rdm.project_activity (
+            project_id, user_id, activity_type, entity_type, entity_id,
+            description, old_values
+        ) VALUES ($1, $2, 'delete', 'task', $3, $4, $5)
+    `, projectId, userId, taskId,
+		"Deleted task: "+taskName,
+		taskData)
+
+	if err != nil {
+		http.Error(w, "Failed to log activity", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// Helper function to convert sql.NullString to a value that works with JSON
+func nullStringValue(ns sql.NullString) interface{} {
+	if ns.Valid {
+		return ns.String
+	}
+	return nil
+}
+
+// Helper function to convert sql.NullFloat64 to a value that works with JSON
+func nullFloat64Value(nf sql.NullFloat64) interface{} {
+	if nf.Valid {
+		return nf.Float64
+	}
+	return nil
+}
+
+// Helper function to convert sql.NullTime to a value that works with JSON
+func nullTimeValue(nt sql.NullTime) interface{} {
+	if nt.Valid {
+		return nt.Time.Format("2006-01-02")
+	}
+	return nil
+}
+
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -7902,6 +8555,10 @@ func main() {
 	r.HandleFunc("/roadmap-items/{id}", authMiddleware(handleUpdateRoadmapItem)).Methods("PUT")
 	r.HandleFunc("/roadmap-items/{id}", authMiddleware(handleDeleteRoadmapItem)).Methods("DELETE")
 	r.HandleFunc("/projects/{projectId}/categories", authMiddleware(handleGetCategories)).Methods("GET")
+	r.HandleFunc("/projects/{projectId}/tasks", authMiddleware(handleGetProjectTasks)).Methods("GET")
+	r.HandleFunc("/projects/{projectId}/tasks", authMiddleware(handleCreateTask)).Methods("POST")
+	r.HandleFunc("/tasks/{id}", authMiddleware(handleUpdateTask)).Methods("PUT")
+	r.HandleFunc("/tasks/{id}", authMiddleware(handleDeleteTask)).Methods("DELETE")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

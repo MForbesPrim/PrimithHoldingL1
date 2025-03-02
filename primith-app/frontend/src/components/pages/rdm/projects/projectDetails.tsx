@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { RoadmapView } from "@/components/pages/rdm/projects/roadmapView";
 import { ArtifactsPage } from "@/components/pages/rdm/projects/artifactsTable";
+import { TasksView } from "@/components/pages/rdm/projects/projectTasksView";
 import { ProjectVariablesPanel } from "@/components/pages/rdm/projects/projectVariables";
 import { EditProjectDialog } from "@/components/pages/rdm/projects/editProjectDialog";
 import {
@@ -921,6 +922,9 @@ export function ProjectDetailPage() {
                 projectId={project.id} // Add this line to pass the dynamic projectId
             />
             </TabsContent>
+        <TabsContent value="tasks">
+        <TasksView projectId={project.id} projectService={projectService} />
+        </TabsContent>
         <TabsContent value="variables">
           <ProjectVariablesPanel projectId={project.id} projectService={projectService} />
         </TabsContent>
