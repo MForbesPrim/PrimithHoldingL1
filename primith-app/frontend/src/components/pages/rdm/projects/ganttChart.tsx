@@ -414,7 +414,7 @@ const GanttChart: React.FC<GanttChartProps> = ({ items, onItemClick }) => {
         >
             {/* Main container - will use a single div with border and rounded corners */}
             <div 
-              className="border-r rounded-xl overflow-hidden" 
+              className="border-r rounded-l-xl overflow-hidden" 
               style={{ 
                 width: `${effectiveWidth}px`, 
                 position: 'relative',
