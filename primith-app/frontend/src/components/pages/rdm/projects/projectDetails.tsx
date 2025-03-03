@@ -410,17 +410,80 @@ export function ProjectDetailPage() {
 
   if (loading) {
     return (
-      <div className="container h-full overflow-y-auto p-4">
-        <div className="flex items-center space-x-2 mb-6">
-          <Button variant="ghost" size="sm" onClick={handleBackClick}>
-            <ChevronLeft className="h-4 w-4 mr-1" />
-            Back to Projects
-          </Button>
+      <div className="h-full overflow-y-auto pt-4 pl-4 pr-6">
+        <div className="mb-4">
+          <div className="flex justify-between items-center mb-4">
+            <div className="w-32 h-9 bg-gray-200 rounded animate-pulse" />
+            <div className="flex space-x-2">
+              <div className="w-20 h-9 bg-gray-200 rounded animate-pulse" />
+              <div className="w-24 h-9 bg-gray-200 rounded animate-pulse" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <div className="h-8 w-1/3 bg-gray-200 rounded animate-pulse" />
+            <div className="h-4 w-2/3 bg-gray-200 rounded animate-pulse" />
+          </div>
         </div>
-        <div className="animate-pulse">
-          <div className="h-8 w-1/3 bg-gray-200 rounded mb-4"></div>
-          <div className="h-4 w-2/3 bg-gray-200 rounded mb-8"></div>
-          <div className="h-48 bg-gray-200 rounded mb-4"></div>
+
+        <div className="flex space-x-2 mb-6">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+            <div key={i} className="w-24 h-10 bg-gray-200 rounded animate-pulse" />
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="p-4 border rounded-lg">
+              <div className="flex items-center space-x-2">
+                <div className="w-5 h-5 bg-gray-200 rounded animate-pulse" />
+                <div className="space-y-2">
+                  <div className="w-20 h-4 bg-gray-200 rounded animate-pulse" />
+                  <div className="w-16 h-3 bg-gray-200 rounded animate-pulse" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="border rounded-lg p-4">
+            <div className="flex justify-between items-center mb-4">
+              <div className="w-32 h-5 bg-gray-200 rounded animate-pulse" />
+              <div className="w-24 h-9 bg-gray-200 rounded animate-pulse" />
+            </div>
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="p-3 border rounded-md">
+                  <div className="flex justify-between items-center">
+                    <div className="space-y-2">
+                      <div className="w-40 h-4 bg-gray-200 rounded animate-pulse" />
+                      <div className="w-24 h-3 bg-gray-200 rounded animate-pulse" />
+                    </div>
+                    <div className="w-4 h-4 bg-gray-200 rounded animate-pulse" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="border rounded-lg p-4">
+            <div className="mb-4">
+              <div className="w-32 h-5 bg-gray-200 rounded animate-pulse" />
+            </div>
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="p-3 border rounded-md">
+                  <div className="flex justify-between items-center">
+                    <div className="space-y-2">
+                      <div className="w-48 h-4 bg-gray-200 rounded animate-pulse" />
+                      <div className="w-32 h-3 bg-gray-200 rounded animate-pulse" />
+                    </div>
+                    <div className="w-4 h-4 bg-gray-200 rounded animate-pulse" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -447,7 +510,7 @@ export function ProjectDetailPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-4">
+    <div className="h-full overflow-y-auto pt-4 pl-4 pr-6">
       <EditProjectDialog
         open={editingProject}
         onClose={() => setEditingProject(false)}
@@ -628,7 +691,7 @@ export function ProjectDetailPage() {
             Activity
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="overview" className="py-4">
+        <TabsContent value="overview" className="pt-2">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <Card>
               <CardContent className="p-4">
@@ -919,7 +982,7 @@ export function ProjectDetailPage() {
                     });
                 }
                 }}
-                projectId={project.id} // Add this line to pass the dynamic projectId
+                projectId={project.id}
             />
             </TabsContent>
         <TabsContent value="tasks">

@@ -273,7 +273,7 @@ export function PortalHomePage() {
       </div>
     </nav>
     <div className="flex">
-    <div className="w-52 shrink-0"></div>
+    <div className="w-24 shrink-0"></div>
     <main className="container px-4 py-8 max-w-full mr-10">
     <h1 className="text-3xl font-bold mb-4 dark:text-gray-300">
         Hello, {user ? `${user.firstName}` : 'User'}

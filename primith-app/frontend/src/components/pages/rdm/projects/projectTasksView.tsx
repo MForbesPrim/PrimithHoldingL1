@@ -34,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Calendar } from "@/components/ui/calendar"
+import { Calendar } from "@/components/ui/calendar";
 import { Badge } from "@/components/ui/badge";
 import {
   Plus,
@@ -49,7 +49,17 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format } from "date-fns"; // You'll need date-fns for formatting
+import { format, parse } from "date-fns";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface TasksViewProps {
   projectId: string;
@@ -68,39 +78,40 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("");
   const [projectMembers, setProjectMembers] = useState<{ id: string; userName: string }[]>([]);
-  
+  const [isSaving, setIsSaving] = useState(false);
+  const [isEditSaving, setIsEditSaving] = useState(false);
   const [newTask, setNewTask] = useState<Partial<ProjectTask>>({
     name: "",
     description: "",
-    status: "todo" as const,
-    priority: "medium" as const,
-    dueDate: new Date().toISOString(),
+    status: "todo",
+    priority: "medium",
+    dueDate: undefined,
     assignedTo: undefined,
     tags: [],
-    parentId: undefined
+    parentId: undefined,
   });
+  const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
 
   useEffect(() => {
     loadTasks();
     loadProjectMembers();
   }, [projectId, statusFilter, assigneeFilter]);
 
-// src/components/pages/rdm/projects/tasksView.tsx (continued)
-
-const loadTasks = async () => {
+  const loadTasks = async () => {
     setLoading(true);
     setError(null);
     try {
       const filters: { status?: string; assignedTo?: string } = {};
       if (statusFilter) filters.status = statusFilter;
       if (assigneeFilter) filters.assignedTo = assigneeFilter;
-      
+
       const tasksData = await projectService.getProjectTasks(projectId, filters);
-      setTasks(tasksData || []);  // Ensure tasksData is always an array
+      console.log("Tasks data received from server:", tasksData); // Log server response
+      setTasks(tasksData || []);
     } catch (err) {
       setError("Failed to load tasks");
       console.error("Error loading tasks:", err);
-      setTasks([]);  // Set to empty array on error
+      setTasks([]);
     } finally {
       setLoading(false);
     }
@@ -109,16 +120,37 @@ const loadTasks = async () => {
   const loadProjectMembers = async () => {
     try {
       const members = await projectService.getProjectMembers(projectId);
-      setProjectMembers(members.map(m => ({ id: m.userId, userName: m.userName })));
+      setProjectMembers(members.map((m) => ({ id: m.userId, userName: m.userName })));
     } catch (err) {
       console.error("Error loading project members:", err);
     }
   };
 
+  const formatDueDate = (dateString: string): string => {
+    const [year, month, day] = dateString.split("-").map(Number);
+    const date = new Date(year, month - 1, day); // Month is 0-based
+    return date.toLocaleDateString();
+  };
+
+  const formatDateForServer = (date: string | undefined): string | undefined => {
+    if (!date) return undefined;
+    const [year, month, day] = date.split("-").map(Number);
+    const dateObj = new Date(year, month - 1, day);
+    return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, "0")}-${String(dateObj.getDate()).padStart(2, "0")}`;
+  };
+
   const handleAddTask = async () => {
+    setIsSaving(true);
     try {
-      const createdTask = await projectService.createTask(projectId, newTask);
-      setTasks(prev => [createdTask, ...prev]);
+      const taskToCreate = {
+        ...newTask,
+        status: newTask.status || "todo",
+        priority: newTask.priority || "medium",
+        dueDate: formatDateForServer(newTask.dueDate),
+      };
+
+      await projectService.createTask(projectId, taskToCreate);
+      await loadTasks();
       setShowAddDialog(false);
       setNewTask({
         name: "",
@@ -128,85 +160,77 @@ const loadTasks = async () => {
         dueDate: undefined,
         assignedTo: undefined,
         tags: [],
-        parentId: undefined
+        parentId: undefined,
       });
-      toast({
-        title: "Success",
-        description: "Task created successfully",
-      });
+      toast({ title: "Success", description: "Task created successfully" });
     } catch (err) {
       console.error("Error creating task:", err);
-      toast({
-        title: "Error",
-        description: "Failed to create task",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to create task", variant: "destructive" });
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleEditTask = async () => {
     if (!currentTask) return;
-    
+
+    setIsEditSaving(true);
     try {
-      await projectService.updateTask(currentTask.id, currentTask);
-      setTasks(prev => prev.map(task => 
-        task.id === currentTask.id ? { ...task, ...currentTask } : task
-      ));
+      const taskToUpdate = {
+        ...currentTask,
+        dueDate: formatDateForServer(currentTask.dueDate),
+      };
+      console.log("Sending task to server:", taskToUpdate); // Debug log before API call
+      const response = await projectService.updateTask(currentTask.id, taskToUpdate);
+      console.log("Server response after update:", response); // Debug log after API call
+      setTasks((prev) =>
+        prev.map((task) =>
+          task.id === currentTask.id ? { ...task, ...taskToUpdate } : task
+        )
+      );
       setShowEditDialog(false);
-      toast({
-        title: "Success",
-        description: "Task updated successfully",
-      });
+      toast({ title: "Success", description: "Task updated successfully" });
     } catch (err) {
       console.error("Error updating task:", err);
-      toast({
-        title: "Error",
-        description: "Failed to update task",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to update task", variant: "destructive" });
+    } finally {
+      setIsEditSaving(false);
     }
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    if (!confirm("Are you sure you want to delete this task?")) return;
-    
     try {
       await projectService.deleteTask(taskId);
-      setTasks(prev => prev.filter(task => task.id !== taskId));
-      toast({
-        title: "Success",
-        description: "Task deleted successfully",
-      });
+      setTasks((prev) => prev.filter((task) => task.id !== taskId));
+      toast({ title: "Success", description: "Task deleted successfully" });
     } catch (err) {
       console.error("Error deleting task:", err);
-      toast({
-        title: "Error",
-        description: "Failed to delete task",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to delete task", variant: "destructive" });
+    } finally {
+      setDeleteTaskId(null);
     }
   };
 
   const toggleTaskExpand = (taskId: string) => {
-    setExpandedTasks(prev => ({
+    setExpandedTasks((prev) => ({
       ...prev,
-      [taskId]: !prev[taskId]
+      [taskId]: !prev[taskId],
     }));
   };
 
   const statusColors: Record<string, string> = {
-    todo: "bg-gray-100 text-gray-800",
-    in_progress: "bg-blue-100 text-blue-800",
-    in_review: "bg-yellow-100 text-yellow-800",
-    done: "bg-green-100 text-green-800",
-    blocked: "bg-red-100 text-red-800"
+    todo: "bg-gray-100 text-gray-800 hover:bg-gray-600 hover:text-white transition-colors",
+    in_progress: "bg-blue-100 text-blue-800 hover:bg-blue-600 hover:text-white transition-colors",
+    in_review: "bg-yellow-100 text-yellow-800 hover:bg-yellow-600 hover:text-white transition-colors",
+    done: "bg-green-100 text-green-800 hover:bg-green-600 hover:text-white transition-colors",
+    blocked: "bg-red-100 text-red-800 hover:bg-red-600 hover:text-white transition-colors",
   };
 
   const priorityColors: Record<string, string> = {
-    low: "bg-gray-100 text-gray-800",
-    medium: "bg-blue-100 text-blue-800",
-    high: "bg-orange-100 text-orange-800",
-    urgent: "bg-red-100 text-red-800"
+    low: "bg-gray-100 text-gray-800 hover:bg-gray-600 hover:text-white transition-colors",
+    medium: "bg-blue-100 text-blue-800 hover:bg-blue-600 hover:text-white transition-colors",
+    high: "bg-orange-100 text-orange-800 hover:bg-orange-600 hover:text-white transition-colors",
+    urgent: "bg-red-100 text-red-800 hover:bg-red-600 hover:text-white transition-colors",
   };
 
   return (
@@ -218,15 +242,27 @@ const loadTasks = async () => {
               <SelectValue placeholder="Filter by status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="todo" className="hover:bg-gray-100">To Do</SelectItem>
-              <SelectItem value="in_progress" className="hover:bg-gray-100">In Progress</SelectItem>
-              <SelectItem value="in_review" className="hover:bg-gray-100">In Review</SelectItem>
-              <SelectItem value="approved" className="hover:bg-gray-100">Approved</SelectItem>
-              <SelectItem value="done" className="hover:bg-gray-100">Done</SelectItem>
-              <SelectItem value="blocked" className="hover:bg-gray-100">Blocked</SelectItem>
+              <SelectItem value="todo" className="hover:bg-gray-100">
+                To Do
+              </SelectItem>
+              <SelectItem value="in_progress" className="hover:bg-gray-100">
+                In Progress
+              </SelectItem>
+              <SelectItem value="in_review" className="hover:bg-gray-100">
+                In Review
+              </SelectItem>
+              <SelectItem value="approved" className="hover:bg-gray-100">
+                Approved
+              </SelectItem>
+              <SelectItem value="done" className="hover:bg-gray-100">
+                Done
+              </SelectItem>
+              <SelectItem value="blocked" className="hover:bg-gray-100">
+                Blocked
+              </SelectItem>
             </SelectContent>
           </Select>
-          
+
           <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Filter by assignee" />
@@ -234,7 +270,7 @@ const loadTasks = async () => {
             <SelectContent>
               <SelectItem value="none">All Assignees</SelectItem>
               <SelectItem value="unassigned">Unassigned</SelectItem>
-              {projectMembers.map(member => (
+              {projectMembers.map((member) => (
                 <SelectItem key={member.id} value={member.id}>
                   {member.userName}
                 </SelectItem>
@@ -242,7 +278,7 @@ const loadTasks = async () => {
             </SelectContent>
           </Select>
         </div>
-        
+
         <Button onClick={() => setShowAddDialog(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Add Task
@@ -251,23 +287,23 @@ const loadTasks = async () => {
 
       {loading ? (
         <div className="flex justify-center p-8">
-            <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+          <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
         </div>
-        ) : error ? (
+      ) : error ? (
         <div className="text-center p-4 text-red-500">
-            <AlertTriangle className="mx-auto h-8 w-8 mb-2" />
-            <p>{error}</p>
+          <AlertTriangle className="mx-auto h-8 w-8 mb-2" />
+          <p>{error}</p>
         </div>
-        ) : !tasks || tasks.length === 0 ? (  // Add check for tasks being null or undefined
+      ) : !tasks || tasks.length === 0 ? (
         <div className="text-center p-8 border border-dashed rounded-md">
-            <CheckSquare className="h-6 w-6 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-500 mb-2 text-sm">No tasks found for this project.</p>
-            <Button variant="outline" onClick={() => setShowAddDialog(true)}>
+          <CheckSquare className="h-6 w-6 text-gray-400 mx-auto mb-4" />
+          <p className="text-gray-500 mb-2 text-sm">No tasks found for this project.</p>
+          <Button variant="outline" onClick={() => setShowAddDialog(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Create Your First Task
-            </Button>
+          </Button>
         </div>
-        ) : (
+      ) : (
         <Card>
           <CardHeader>
             <CardTitle>Tasks</CardTitle>
@@ -286,14 +322,14 @@ const loadTasks = async () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tasks.map(task => (
+                {tasks.map((task) => (
                   <React.Fragment key={task.id}>
                     <TableRow>
                       <TableCell>
                         {task.children && task.children.length > 0 ? (
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => toggleTaskExpand(task.id)}
                           >
                             {expandedTasks[task.id] ? (
@@ -317,13 +353,24 @@ const loadTasks = async () => {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge className={statusColors[task.status] || "bg-gray-100"}>
-                          {task.status.replace("_", " ")}
+                        <Badge
+                          className={
+                            statusColors[task.status || "todo"] || "bg-gray-100"
+                          }
+                        >
+                          {(task.status || "todo")
+                            .replace("_", " ")
+                            .replace(/^\w/, (c) => c.toUpperCase())}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge className={priorityColors[task.priority] || "bg-gray-100"}>
-                          {task.priority}
+                        <Badge
+                          className={
+                            priorityColors[task.priority] || "bg-gray-100"
+                          }
+                        >
+                          {task.priority.charAt(0).toUpperCase() +
+                            task.priority.slice(1)}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -335,7 +382,7 @@ const loadTasks = async () => {
                         {task.dueDate ? (
                           <div className="flex items-center">
                             <LucideCalendar className="h-4 w-4 mr-1 text-gray-500" />
-                            <span>{new Date(task.dueDate).toLocaleDateString()}</span>
+                            <span>{formatDueDate(task.dueDate)}</span>
                           </div>
                         ) : (
                           <span className="text-gray-400">No due date</span>
@@ -356,7 +403,7 @@ const loadTasks = async () => {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDeleteTask(task.id)}
+                            onClick={() => setDeleteTaskId(task.id)}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -365,7 +412,7 @@ const loadTasks = async () => {
                     </TableRow>
                     {expandedTasks[task.id] && task.children && (
                       <>
-                        {task.children.map(childTask => (
+                        {task.children.map((childTask) => (
                           <TableRow key={childTask.id} className="bg-gray-50">
                             <TableCell></TableCell>
                             <TableCell>
@@ -379,13 +426,26 @@ const loadTasks = async () => {
                               </div>
                             </TableCell>
                             <TableCell>
-                              <Badge className={statusColors[childTask.status] || "bg-gray-100"}>
-                                {childTask.status.replace("_", " ")}
+                              <Badge
+                                className={
+                                  statusColors[childTask.status || "todo"] ||
+                                  "bg-gray-100"
+                                }
+                              >
+                                {(childTask.status || "todo")
+                                  .replace("_", " ")
+                                  .replace(/^\w/, (c) => c.toUpperCase())}
                               </Badge>
                             </TableCell>
                             <TableCell>
-                              <Badge className={priorityColors[childTask.priority] || "bg-gray-100"}>
-                                {childTask.priority}
+                              <Badge
+                                className={
+                                  priorityColors[childTask.priority] ||
+                                  "bg-gray-100"
+                                }
+                              >
+                                {childTask.priority.charAt(0).toUpperCase() +
+                                  childTask.priority.slice(1)}
                               </Badge>
                             </TableCell>
                             <TableCell>
@@ -397,7 +457,7 @@ const loadTasks = async () => {
                               {childTask.dueDate ? (
                                 <div className="flex items-center">
                                   <LucideCalendar className="h-4 w-4 mr-1 text-gray-500" />
-                                  <span>{new Date(childTask.dueDate).toLocaleDateString()}</span>
+                                  <span>{formatDueDate(childTask.dueDate)}</span>
                                 </div>
                               ) : (
                                 <span className="text-gray-400">No due date</span>
@@ -418,7 +478,7 @@ const loadTasks = async () => {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => handleDeleteTask(childTask.id)}
+                                  onClick={() => setDeleteTaskId(childTask.id)}
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
@@ -469,41 +529,61 @@ const loadTasks = async () => {
               <div>
                 <Label htmlFor="task-status">Status</Label>
                 <Select
-                value={newTask.status || "todo"}
-                onValueChange={(value: "todo" | "in_progress" | "in_review" | "done" | "blocked") => 
+                  value={newTask.status || "todo"}
+                  onValueChange={(value: "todo" | "in_progress" | "in_review" | "done" | "blocked") =>
                     setNewTask({ ...newTask, status: value })
-                }
+                  }
                 >
                   <SelectTrigger id="status">
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="todo" className="hover:bg-gray-100">To Do</SelectItem>
-                    <SelectItem value="in_progress" className="hover:bg-gray-100">In Progress</SelectItem>
-                    <SelectItem value="in_review" className="hover:bg-gray-100">In Review</SelectItem>
-                    <SelectItem value="approved" className="hover:bg-gray-100">Approved</SelectItem>
-                    <SelectItem value="done" className="hover:bg-gray-100">Done</SelectItem>
-                    <SelectItem value="blocked" className="hover:bg-gray-100">Blocked</SelectItem>
-                </SelectContent>
+                  <SelectContent>
+                    <SelectItem value="todo" className="hover:bg-gray-100">
+                      To Do
+                    </SelectItem>
+                    <SelectItem value="in_progress" className="hover:bg-gray-100">
+                      In Progress
+                    </SelectItem>
+                    <SelectItem value="in_review" className="hover:bg-gray-100">
+                      In Review
+                    </SelectItem>
+                    <SelectItem value="approved" className="hover:bg-gray-100">
+                      Approved
+                    </SelectItem>
+                    <SelectItem value="done" className="hover:bg-gray-100">
+                      Done
+                    </SelectItem>
+                    <SelectItem value="blocked" className="hover:bg-gray-100">
+                      Blocked
+                    </SelectItem>
+                  </SelectContent>
                 </Select>
               </div>
               <div>
                 <Label htmlFor="task-priority">Priority</Label>
                 <Select
-                value={newTask.priority || "medium"}
-                onValueChange={(value: "low" | "medium" | "high" | "urgent") => 
+                  value={newTask.priority || "medium"}
+                  onValueChange={(value: "low" | "medium" | "high" | "urgent") =>
                     setNewTask({ ...newTask, priority: value })
-                }
+                  }
                 >
-                <SelectTrigger id="task-priority">
+                  <SelectTrigger id="task-priority">
                     <SelectValue placeholder="Select priority" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="low" className="hover:bg-gray-100">Low</SelectItem>
-                    <SelectItem value="medium" className="hover:bg-gray-100">Medium</SelectItem>
-                    <SelectItem value="high" className="hover:bg-gray-100">High</SelectItem>
-                    <SelectItem value="urgent" className="hover:bg-gray-100">Urgent</SelectItem>
-                </SelectContent>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low" className="hover:bg-gray-100">
+                      Low
+                    </SelectItem>
+                    <SelectItem value="medium" className="hover:bg-gray-100">
+                      Medium
+                    </SelectItem>
+                    <SelectItem value="high" className="hover:bg-gray-100">
+                      High
+                    </SelectItem>
+                    <SelectItem value="urgent" className="hover:bg-gray-100">
+                      Urgent
+                    </SelectItem>
+                  </SelectContent>
                 </Select>
               </div>
             </div>
@@ -511,14 +591,17 @@ const loadTasks = async () => {
               <div>
                 <Label htmlFor="task-assignee">Assignee</Label>
                 <Select
-                  value={newTask.assignedTo}
-                  onValueChange={(value) => setNewTask({ ...newTask, assignedTo: value })}
+                  value={newTask.assignedTo || ""}
+                  onValueChange={(value) =>
+                    setNewTask({ ...newTask, assignedTo: value || undefined })
+                  }
                 >
                   <SelectTrigger id="task-assignee">
                     <SelectValue placeholder="Select assignee" />
                   </SelectTrigger>
                   <SelectContent>
-                    {projectMembers.map(member => (
+                    <SelectItem value="">Unassigned</SelectItem>
+                    {projectMembers.map((member) => (
                       <SelectItem key={member.id} value={member.id}>
                         {member.userName}
                       </SelectItem>
@@ -529,35 +612,65 @@ const loadTasks = async () => {
               <div>
                 <Label htmlFor="task-duedate">Due Date</Label>
                 <Popover>
-                    <PopoverTrigger asChild>
+                  <PopoverTrigger asChild>
                     <Button
-                        variant="outline"
-                        className="w-full justify-start text-left font-normal"
+                      variant="outline"
+                      className="w-full justify-start text-left font-normal"
                     >
-                        {newTask.dueDate ? (
-                        format(new Date(newTask.dueDate), "PPP")
-                        ) : (
+                      {newTask.dueDate ? (
+                        format(parse(newTask.dueDate, "yyyy-MM-dd", new Date()), "PPP")
+                      ) : (
                         <span className="text-muted-foreground">Select a date</span>
-                        )}
+                      )}
                     </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-2" side="top" align="center">
                     <Calendar
-                        mode="single"
-                        selected={newTask.dueDate ? new Date(newTask.dueDate) : undefined}
-                        onSelect={(date) => setNewTask({ ...newTask, dueDate: date?.toISOString() })}
-                        initialFocus
-                        defaultMonth={new Date()} // Opens to the current month
-                        />
-                    </PopoverContent>
+                      mode="single"
+                      selected={
+                        newTask.dueDate
+                          ? parse(newTask.dueDate, "yyyy-MM-dd", new Date())
+                          : undefined
+                      }
+                      onSelect={(date) => {
+                        if (date) {
+                          const year = date.getFullYear();
+                          const month = String(date.getMonth() + 1).padStart(2, "0");
+                          const day = String(date.getDate()).padStart(2, "0");
+                          const dateString = `${year}-${month}-${day}`;
+                          setNewTask({ ...newTask, dueDate: dateString });
+                        } else {
+                          setNewTask({ ...newTask, dueDate: undefined });
+                        }
+                      }}
+                      initialFocus
+                      defaultMonth={
+                        newTask.dueDate
+                          ? parse(newTask.dueDate, "yyyy-MM-dd", new Date())
+                          : new Date()
+                      }
+                    />
+                    <div className="flex justify-end mt-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setNewTask({ ...newTask, dueDate: undefined })}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  </PopoverContent>
                 </Popover>
-                </div>
+              </div>
             </div>
             <div>
               <Label htmlFor="task-parent">Parent Task (Optional)</Label>
               <Select
-                value={newTask.parentId}
-                onValueChange={(value) => setNewTask({ ...newTask, parentId: value })}
+                value={newTask.parentId || ""}
+                onValueChange={(value) =>
+                  setNewTask({ ...newTask, parentId: value || undefined })
+                }
               >
                 <SelectTrigger id="task-parent">
                   <SelectValue placeholder="Select parent task" />
@@ -565,8 +678,8 @@ const loadTasks = async () => {
                 <SelectContent>
                   <SelectItem value="none">No Parent (Top Level)</SelectItem>
                   {tasks
-                    .filter(t => !t.parentId) // Only top-level tasks can be parents
-                    .map(task => (
+                    .filter((t) => !t.parentId)
+                    .map((task) => (
                       <SelectItem key={task.id} value={task.id}>
                         {task.name}
                       </SelectItem>
@@ -576,11 +689,25 @@ const loadTasks = async () => {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddDialog(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setShowAddDialog(false)}
+              disabled={isSaving}
+            >
               Cancel
             </Button>
-            <Button onClick={handleAddTask} disabled={!newTask.name || newTask.name.trim() === ""}>
-            Create Task
+            <Button
+              onClick={handleAddTask}
+              disabled={!newTask.name || newTask.name.trim() === "" || isSaving}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Create Task"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -599,7 +726,9 @@ const loadTasks = async () => {
                 <Input
                   id="edit-task-name"
                   value={currentTask.name}
-                  onChange={(e) => setCurrentTask({ ...currentTask, name: e.target.value })}
+                  onChange={(e) =>
+                    setCurrentTask({ ...currentTask, name: e.target.value })
+                  }
                 />
               </div>
               <div>
@@ -607,7 +736,9 @@ const loadTasks = async () => {
                 <Textarea
                   id="edit-task-description"
                   value={currentTask.description || ""}
-                  onChange={(e) => setCurrentTask({ ...currentTask, description: e.target.value })}
+                  onChange={(e) =>
+                    setCurrentTask({ ...currentTask, description: e.target.value })
+                  }
                   rows={3}
                 />
               </div>
@@ -615,57 +746,82 @@ const loadTasks = async () => {
                 <div>
                   <Label htmlFor="edit-task-status">Status</Label>
                   <Select
-                    value={newTask.status || "todo"}
-                    onValueChange={(value: "todo" | "in_progress" | "in_review" | "approved" | "done" | "blocked") => 
-                        setNewTask({ ...newTask, status: value })
-                    }
-                    >
+                    value={currentTask.status || "todo"}
+                    onValueChange={(
+                      value: "todo" | "in_progress" | "in_review" | "approved" | "done" | "blocked"
+                    ) => setCurrentTask({ ...currentTask, status: value })}
+                  >
                     <SelectTrigger id="task-status">
-                        <SelectValue placeholder="Select status" />
+                      <SelectValue placeholder="Select status" />
                     </SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="todo" className="hover:bg-gray-100">To Do</SelectItem>
-                        <SelectItem value="in_progress" className="hover:bg-gray-100">In Progress</SelectItem>
-                        <SelectItem value="in_review" className="hover:bg-gray-100">In Review</SelectItem>
-                        <SelectItem value="approved" className="hover:bg-gray-100">Approved</SelectItem>
-                        <SelectItem value="done" className="hover:bg-gray-100">Done</SelectItem>
-                        <SelectItem value="blocked" className="hover:bg-gray-100">Blocked</SelectItem>
+                      <SelectItem value="todo" className="hover:bg-gray-100">
+                        To Do
+                      </SelectItem>
+                      <SelectItem value="in_progress" className="hover:bg-gray-100">
+                        In Progress
+                      </SelectItem>
+                      <SelectItem value="in_review" className="hover:bg-gray-100">
+                        In Review
+                      </SelectItem>
+                      <SelectItem value="approved" className="hover:bg-gray-100">
+                        Approved
+                      </SelectItem>
+                      <SelectItem value="done" className="hover:bg-gray-100">
+                        Done
+                      </SelectItem>
+                      <SelectItem value="blocked" className="hover:bg-gray-100">
+                        Blocked
+                      </SelectItem>
                     </SelectContent>
-                    </Select>
+                  </Select>
                 </div>
                 <div>
                   <Label htmlFor="edit-task-priority">Priority</Label>
                   <Select
-                    value={newTask.priority || "medium"}
-                    onValueChange={(value: "low" | "medium" | "high" | "urgent") => 
-                        setNewTask({ ...newTask, priority: value })
-                    }
-                    >
+                    value={currentTask.priority || "medium"}
+                    onValueChange={(
+                      value: "low" | "medium" | "high" | "urgent"
+                    ) => setCurrentTask({ ...currentTask, priority: value })}
+                  >
                     <SelectTrigger id="task-priority">
-                        <SelectValue placeholder="Select priority" />
+                      <SelectValue placeholder="Select priority" />
                     </SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="low" className="hover:bg-gray-100">Low</SelectItem>
-                        <SelectItem value="medium" className="hover:bg-gray-100">Medium</SelectItem>
-                        <SelectItem value="high" className="hover:bg-gray-100">High</SelectItem>
-                        <SelectItem value="urgent" className="hover:bg-gray-100">Urgent</SelectItem>
+                      <SelectItem value="low" className="hover:bg-gray-100">
+                        Low
+                      </SelectItem>
+                      <SelectItem value="medium" className="hover:bg-gray-100">
+                        Medium
+                      </SelectItem>
+                      <SelectItem value="high" className="hover:bg-gray-100">
+                        High
+                      </SelectItem>
+                      <SelectItem value="urgent" className="hover:bg-gray-100">
+                        Urgent
+                      </SelectItem>
                     </SelectContent>
-                    </Select>
+                  </Select>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="edit-task-assignee">Assignee</Label>
+                  <Label htmlFor="task-assignee">Assignee</Label>
                   <Select
-                    value={currentTask.assignedTo || ""}
-                    onValueChange={(value) => setCurrentTask({ ...currentTask, assignedTo: value || undefined })}
+                    value={currentTask.assignedTo || "unassigned"}
+                    onValueChange={(value) =>
+                      setCurrentTask({
+                        ...currentTask,
+                        assignedTo: value === "unassigned" ? undefined : value,
+                      })
+                    }
                   >
-                    <SelectTrigger id="edit-task-assignee">
+                    <SelectTrigger id="task-assignee">
                       <SelectValue placeholder="Select assignee" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Unassigned</SelectItem>
-                      {projectMembers.map(member => (
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                      {projectMembers.map((member) => (
                         <SelectItem key={member.id} value={member.id}>
                           {member.userName}
                         </SelectItem>
@@ -674,39 +830,123 @@ const loadTasks = async () => {
                   </Select>
                 </div>
                 <div>
-                <Label htmlFor="edit-task-duedate">Due Date</Label>
-                <Popover>
-                <PopoverTrigger asChild>
-                <Button
-                    variant="outline"
-                    className="w-full justify-start text-left font-normal"
-                >
-                    {newTask.dueDate ? format(new Date(newTask.dueDate), "PPP") : <span className="text-muted-foreground">Select a date</span>}
-                </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0 max-w-[300px] z-50" style={{ position: 'absolute' }}>
-                <Calendar
-                    mode="single"
-                    selected={newTask.dueDate ? new Date(newTask.dueDate) : undefined}
-                    onSelect={(date) => setNewTask({ ...newTask, dueDate: date?.toISOString() })}
-                    initialFocus
-                />
-                </PopoverContent>
-            </Popover>
+                  <Label htmlFor="task-duedate">Due Date</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="w-full justify-start text-left font-normal"
+                      >
+                        {currentTask.dueDate ? (
+                          format(
+                            parse(currentTask.dueDate, "yyyy-MM-dd", new Date()),
+                            "PPP"
+                          )
+                        ) : (
+                          <span className="text-muted-foreground">
+                            Select a date
+                          </span>
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-2" side="top" align="center">
+                      <Calendar
+                        mode="single"
+                        selected={
+                          currentTask.dueDate
+                            ? parse(currentTask.dueDate, "yyyy-MM-dd", new Date())
+                            : undefined
+                        }
+                        onSelect={(date) => {
+                          console.log("Selected date:", date); // Debug log
+                          if (date) {
+                            const year = date.getFullYear();
+                            const month = String(date.getMonth() + 1).padStart(
+                              2,
+                              "0"
+                            );
+                            const day = String(date.getDate()).padStart(2, "0");
+                            const dateString = `${year}-${month}-${day}`;
+                            console.log("Formatted dateString:", dateString); // Debug log
+                            setCurrentTask({ ...currentTask, dueDate: dateString });
+                          } else {
+                            setCurrentTask({ ...currentTask, dueDate: undefined });
+                          }
+                        }}
+                        initialFocus
+                        defaultMonth={
+                          currentTask.dueDate
+                            ? parse(currentTask.dueDate, "yyyy-MM-dd", new Date())
+                            : new Date()
+                        }
+                      />
+                      <div className="flex justify-end mt-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setCurrentTask({ ...currentTask, dueDate: undefined })
+                          }
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          Clear
+                        </Button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditDialog(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setShowEditDialog(false)}
+              disabled={isEditSaving}
+            >
               Cancel
             </Button>
-            <Button onClick={handleEditTask}>
-              Save Changes
+            <Button
+              onClick={handleEditTask}
+              disabled={!currentTask?.name || currentTask.name.trim() === "" || isEditSaving}
+            >
+              {isEditSaving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Save Changes"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Task Alert Dialog */}
+      <AlertDialog
+        open={!!deleteTaskId}
+        onOpenChange={(open) => !open && setDeleteTaskId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the task
+              and remove it from the project.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteTaskId && handleDeleteTask(deleteTaskId)}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

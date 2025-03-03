@@ -4,7 +4,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewProps } from '@tiptap/r
 import { format } from 'date-fns'
 import React from 'react'
 import { Calendar as CalendarIcon } from 'lucide-react'
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover-datenode"
 import { Calendar } from "@/components/ui/calendar"
 
 export interface DateNodeOptions {
@@ -34,7 +34,7 @@ const DateNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => {
               {format(date, 'MMM dd, yyyy')}
             </button>
           </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
+          <PopoverContent className="w-auto p-0">
             <Calendar
               mode="single"
               selected={date}

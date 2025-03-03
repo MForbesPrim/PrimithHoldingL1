@@ -7842,52 +7842,60 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	projectId := vars["projectId"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
-	// Verify user has permission to create tasks
-	var isMember bool
-	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-        )
-    `, projectId, claims.Username).Scan(&isMember)
+	// Log incoming request details
+	log.Printf("Creating task for project ID: %s by user: %s", projectId, claims.Username)
 
-	if err != nil || !isMember {
-		http.Error(w, "Access denied", http.StatusForbidden)
+	if projectId == "" {
+		log.Printf("Error: Missing project ID in request")
+		http.Error(w, "Project ID is required", http.StatusBadRequest)
 		return
 	}
 
-	var req struct {
-		Name           string   `json:"name"`
-		Description    *string  `json:"description"`
-		Status         string   `json:"status"`
-		Priority       string   `json:"priority"`
-		AssignedTo     *string  `json:"assignedTo"`
-		DueDate        *string  `json:"dueDate"`
-		EstimatedHours *float64 `json:"estimatedHours"`
-		ActualHours    *float64 `json:"actualHours"`
-		Tags           []string `json:"tags"`
-		ParentId       *string  `json:"parentId"`
+	// Parse and validate request body
+	var taskData struct {
+		Name        string     `json:"name"`
+		Description string     `json:"description"`
+		Status      string     `json:"status"`
+		Priority    string     `json:"priority"`
+		ParentID    *string    `json:"parentId"`
+		DueDate     *time.Time `json:"dueDate"`
+		AssignedTo  *string    `json:"assignedTo"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&taskData); err != nil {
+		log.Printf("Error decoding request body: %v", err)
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Validate required fields
-	if req.Name == "" {
+	if taskData.Name == "" {
+		log.Printf("Error: Task name is required")
 		http.Error(w, "Task name is required", http.StatusBadRequest)
 		return
 	}
 
-	// Set default values if not provided
-	if req.Status == "" {
-		req.Status = "todo"
+	// Verify user has permission to create tasks
+	var isMember bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 
+			FROM rdm.project_members pm
+			JOIN auth.users u ON pm.user_id = u.id
+			WHERE pm.project_id = $1 AND u.email = $2
+		)
+	`, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil {
+		log.Printf("Error checking project membership: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
-	if req.Priority == "" {
-		req.Priority = "medium"
+
+	if !isMember {
+		log.Printf("Access denied: User %s is not a member of project %s", claims.Username, projectId)
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
 	}
 
 	// Get user ID
@@ -7898,21 +7906,11 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse due date if provided
-	var dueDateParam *time.Time
-	if req.DueDate != nil && *req.DueDate != "" {
-		parsedDate, err := time.Parse("2006-01-02", *req.DueDate)
-		if err != nil {
-			http.Error(w, "Invalid due date format. Use YYYY-MM-DD", http.StatusBadRequest)
-			return
-		}
-		dueDateParam = &parsedDate
-	}
-
 	// Start transaction
 	tx, err := db.Begin()
 	if err != nil {
-		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		log.Printf("Error starting transaction: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	defer tx.Rollback()
@@ -7920,112 +7918,96 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// Create task
 	var taskId string
 	err = tx.QueryRow(`
-        INSERT INTO rdm.project_tasks (
-            project_id, name, description, status, priority,
-            assigned_to, due_date, estimated_hours, actual_hours,
-            tags, parent_id, created_by, updated_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
-        RETURNING id
-    `, projectId, req.Name, req.Description, req.Status, req.Priority,
-		req.AssignedTo, dueDateParam, req.EstimatedHours, req.ActualHours,
-		pq.Array(req.Tags), req.ParentId, userId).Scan(&taskId)
+		INSERT INTO rdm.project_tasks (
+			project_id, name, description, status, priority,
+			assigned_to, due_date, estimated_hours, actual_hours,
+			tags, parent_id, created_by, updated_by
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+		RETURNING id
+	`, projectId, taskData.Name, taskData.Description, taskData.Status, taskData.Priority,
+		taskData.AssignedTo, taskData.DueDate, nil, nil,
+		pq.Array([]string{}), taskData.ParentID, userId).Scan(&taskId)
 
 	if err != nil {
-		http.Error(w, "Failed to create task: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("Error creating task: %v", err)
+		if pqErr, ok := err.(*pq.Error); ok {
+			// Log specific PostgreSQL error details
+			log.Printf("PostgreSQL Error Details - Code: %s, Message: %s, Detail: %s",
+				pqErr.Code, pqErr.Message, pqErr.Detail)
+
+			switch pqErr.Code {
+			case "23503": // foreign key violation
+				http.Error(w, "Invalid reference: The parent task or assignee may not exist", http.StatusBadRequest)
+			case "23505": // unique violation
+				http.Error(w, "Task with this name already exists", http.StatusBadRequest)
+			default:
+				http.Error(w, "Error creating task", http.StatusInternalServerError)
+			}
+		} else {
+			http.Error(w, "Error creating task", http.StatusInternalServerError)
+		}
 		return
 	}
 
-	// Log activity
+	// Create activity log
 	_, err = tx.Exec(`
-        INSERT INTO rdm.project_activity (
-            project_id, user_id, activity_type, entity_type, entity_id,
-            description, new_values
-        ) VALUES ($1, $2, 'create', 'task', $3, $4, $5)
-    `, projectId, userId, taskId,
-		"Created task: "+req.Name,
-		fmt.Sprintf(`{"name":"%s","status":"%s"}`, req.Name, req.Status))
+		INSERT INTO rdm.project_activity (
+			project_id, user_id, activity_type, entity_type, entity_id, description, metadata
+		) VALUES ($1, $2, 'create', 'task', $3, $4, $5)
+	`, projectId, userId, taskId,
+		"Created task: "+taskData.Name,
+		fmt.Sprintf(`{"name":"%s","status":"%s"}`, taskData.Name, taskData.Status))
 
 	if err != nil {
-		http.Error(w, "Failed to log activity: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("Error creating activity log: %v", err)
+		http.Error(w, "Error creating activity log", http.StatusInternalServerError)
 		return
 	}
 
 	if err = tx.Commit(); err != nil {
-		http.Error(w, "Failed to commit transaction: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("Error committing transaction: %v", err)
+		http.Error(w, "Error committing transaction", http.StatusInternalServerError)
 		return
 	}
 
-	// Get the created task with full details - using individual variables first
-	var id, projectIdResult, name, status, priority string
-	var description, assigneeName sql.NullString
-	var assignedTo, parentId sql.NullString
-	var dueDateResult sql.NullTime
-	var estimatedHours, actualHours sql.NullFloat64
-	var tags pq.StringArray
-	var createdBy, updatedBy string
-	var createdAt, updatedAt time.Time
-
-	err = db.QueryRow(`
-        SELECT t.id, t.project_id, t.name, t.description, t.status, t.priority,
-               t.assigned_to, CONCAT(u.first_name, ' ', u.last_name) as assignee_name,
-               t.due_date, t.estimated_hours, t.actual_hours, t.tags,
-               t.parent_id, t.created_by, t.updated_by, t.created_at, t.updated_at
-        FROM rdm.project_tasks t
-        LEFT JOIN auth.users u ON t.assigned_to = u.id
-        WHERE t.id = $1
-    `, taskId).Scan(
-		&id, &projectIdResult, &name, &description, &status, &priority,
-		&assignedTo, &assigneeName, &dueDateResult, &estimatedHours, &actualHours,
-		&tags, &parentId, &createdBy, &updatedBy, &createdAt, &updatedAt,
-	)
-
-	if err != nil {
-		// Return just the ID if we can't fetch the full task
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"id": taskId})
-		return
-	}
-
-	// Now build the task map
-	task := map[string]interface{}{
-		"id":             id,
-		"projectId":      projectIdResult,
-		"name":           name,
-		"description":    nullStringValue(description),
-		"status":         status,
-		"priority":       priority,
-		"assignedTo":     nullStringValue(assignedTo),
-		"assigneeName":   nullStringValue(assigneeName),
-		"dueDate":        nullTimeValue(dueDateResult),
-		"estimatedHours": nullFloat64Value(estimatedHours),
-		"actualHours":    nullFloat64Value(actualHours),
-		"tags":           tags,
-		"parentId":       nullStringValue(parentId),
-		"createdBy":      createdBy,
-		"updatedBy":      updatedBy,
-		"createdAt":      createdAt,
-		"updatedAt":      updatedAt,
+	// Return success response with the created task ID
+	response := struct {
+		Success bool   `json:"success"`
+		TaskID  string `json:"taskId"`
+	}{
+		Success: true,
+		TaskID:  taskId,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(task)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding response: %v", err)
+		http.Error(w, "Error encoding response", http.StatusInternalServerError)
+		return
+	}
 }
 
 func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	log.Printf("handleUpdateTask: Starting task update for taskId: %s", mux.Vars(r)["id"])
 	vars := mux.Vars(r)
 	taskId := vars["id"]
 	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("handleUpdateTask: User claims: %+v", claims)
 
 	// First get the project ID to verify permissions
 	var projectId string
+	log.Printf("handleUpdateTask: Querying project ID for taskId: %s", taskId)
 	err := db.QueryRow("SELECT project_id FROM rdm.project_tasks WHERE id = $1", taskId).Scan(&projectId)
 	if err != nil {
+		log.Printf("handleUpdateTask: Error querying project ID: %v", err)
 		http.Error(w, "Task not found", http.StatusNotFound)
 		return
 	}
+	log.Printf("handleUpdateTask: Successfully retrieved projectId: %s", projectId)
 
 	// Verify user has permission
 	var isMember bool
+	log.Printf("handleUpdateTask: Verifying permission for projectId: %s, user: %s", projectId, claims.Username)
 	err = db.QueryRow(`
         SELECT EXISTS (
             SELECT 1 
@@ -8034,11 +8016,17 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
             WHERE pm.project_id = $1 AND u.email = $2
         )
     `, projectId, claims.Username).Scan(&isMember)
-
-	if err != nil || !isMember {
+	if err != nil {
+		log.Printf("handleUpdateTask: Error checking membership: %v", err)
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
+	if !isMember {
+		log.Printf("handleUpdateTask: Permission denied for user: %s", claims.Username)
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	log.Printf("handleUpdateTask: User has permission to update task")
 
 	var req struct {
 		Name           *string   `json:"name"`
@@ -8053,13 +8041,17 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		ParentId       *string   `json:"parentId"`
 	}
 
+	log.Printf("handleUpdateTask: Decoding request body")
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("handleUpdateTask: Error decoding request body: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+	log.Printf("handleUpdateTask: Decoded request: %+v", req)
 
 	// Get current values for activity logging
-	var currentValues map[string]interface{}
+	var currentValuesBytes []byte
+	log.Printf("handleUpdateTask: Fetching current task values for taskId: %s", taskId)
 	err = db.QueryRow(`
         SELECT row_to_json(t) FROM (
             SELECT name, description, status, priority, assigned_to,
@@ -8067,31 +8059,38 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
             FROM rdm.project_tasks
             WHERE id = $1
         ) t
-    `, taskId).Scan(&currentValues)
-
+    `, taskId).Scan(&currentValuesBytes)
 	if err != nil {
+		log.Printf("handleUpdateTask: Error fetching current values: %v", err)
 		http.Error(w, "Failed to get current task values", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("handleUpdateTask: Successfully fetched currentValuesBytes: %s", string(currentValuesBytes))
 
 	// Get user ID
 	var userId string
+	log.Printf("handleUpdateTask: Fetching user ID for email: %s", claims.Username)
 	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
 	if err != nil {
+		log.Printf("handleUpdateTask: Error fetching user ID: %v", err)
 		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("handleUpdateTask: Retrieved userId: %s", userId)
 
 	// Parse due date if provided
 	var dueDate *time.Time
+	log.Printf("handleUpdateTask: Parsing dueDate: %v", req.DueDate)
 	if req.DueDate != nil {
 		if *req.DueDate != "" {
 			parsedDate, err := time.Parse("2006-01-02", *req.DueDate)
 			if err != nil {
+				log.Printf("handleUpdateTask: Invalid due date format error: %v", err)
 				http.Error(w, "Invalid due date format. Use YYYY-MM-DD", http.StatusBadRequest)
 				return
 			}
 			dueDate = &parsedDate
+			log.Printf("handleUpdateTask: Parsed dueDate: %v", dueDate)
 		}
 	}
 
@@ -8099,88 +8098,114 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	updates := []string{"updated_by = $1", "updated_at = CURRENT_TIMESTAMP"}
 	args := []interface{}{userId}
 	paramCount := 1
+	log.Printf("handleUpdateTask: Building update query with initial args: %v", args)
 
 	if req.Name != nil {
 		paramCount++
 		updates = append(updates, fmt.Sprintf("name = $%d", paramCount))
 		args = append(args, *req.Name)
+		log.Printf("handleUpdateTask: Added name update, paramCount: %d, args: %v", paramCount, args)
 	}
 
 	if req.Description != nil {
 		paramCount++
 		updates = append(updates, fmt.Sprintf("description = $%d", paramCount))
 		args = append(args, *req.Description)
+		log.Printf("handleUpdateTask: Added description update, paramCount: %d, args: %v", paramCount, args)
 	}
 
 	if req.Status != nil {
 		paramCount++
 		updates = append(updates, fmt.Sprintf("status = $%d", paramCount))
 		args = append(args, *req.Status)
+		log.Printf("handleUpdateTask: Added status update, paramCount: %d, args: %v", paramCount, args)
 	}
 
 	if req.Priority != nil {
 		paramCount++
 		updates = append(updates, fmt.Sprintf("priority = $%d", paramCount))
 		args = append(args, *req.Priority)
+		log.Printf("handleUpdateTask: Added priority update, paramCount: %d, args: %v", paramCount, args)
 	}
 
 	if req.AssignedTo != nil {
 		paramCount++
 		updates = append(updates, fmt.Sprintf("assigned_to = $%d", paramCount))
 		args = append(args, *req.AssignedTo)
+		log.Printf("handleUpdateTask: Added assignedTo update, paramCount: %d, args: %v", paramCount, args)
 	}
 
 	if req.DueDate != nil {
 		paramCount++
 		updates = append(updates, fmt.Sprintf("due_date = $%d", paramCount))
 		args = append(args, dueDate)
+		log.Printf("handleUpdateTask: Added dueDate update, paramCount: %d, args: %v", paramCount, args)
 	}
 
 	if req.EstimatedHours != nil {
 		paramCount++
 		updates = append(updates, fmt.Sprintf("estimated_hours = $%d", paramCount))
 		args = append(args, *req.EstimatedHours)
+		log.Printf("handleUpdateTask: Added estimatedHours update, paramCount: %d, args: %v", paramCount, args)
 	}
 
 	if req.ActualHours != nil {
 		paramCount++
 		updates = append(updates, fmt.Sprintf("actual_hours = $%d", paramCount))
 		args = append(args, *req.ActualHours)
+		log.Printf("handleUpdateTask: Added actualHours update, paramCount: %d, args: %v", paramCount, args)
 	}
 
 	if req.Tags != nil {
 		paramCount++
 		updates = append(updates, fmt.Sprintf("tags = $%d", paramCount))
 		args = append(args, pq.Array(*req.Tags))
+		log.Printf("handleUpdateTask: Added tags update, paramCount: %d, args: %v", paramCount, args)
 	}
 
 	if req.ParentId != nil {
 		paramCount++
 		updates = append(updates, fmt.Sprintf("parent_id = $%d", paramCount))
 		args = append(args, *req.ParentId)
+		log.Printf("handleUpdateTask: Added parentId update, paramCount: %d, args: %v", paramCount, args)
 	}
 
 	// Start transaction
+	log.Printf("handleUpdateTask: Starting transaction")
 	tx, err := db.Begin()
 	if err != nil {
+		log.Printf("handleUpdateTask: Error starting transaction: %v", err)
 		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback()
+	log.Printf("handleUpdateTask: Transaction started successfully")
 
 	// Execute update
 	paramCount++
 	query := fmt.Sprintf("UPDATE rdm.project_tasks SET %s WHERE id = $%d",
 		strings.Join(updates, ", "), paramCount)
 	args = append(args, taskId)
-
+	log.Printf("handleUpdateTask: Executing query: %s with args: %v", query, args)
 	_, err = tx.Exec(query, args...)
 	if err != nil {
+		log.Printf("handleUpdateTask: Error executing update: %v", err)
 		http.Error(w, "Failed to update task", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("handleUpdateTask: Update executed successfully")
+
+	// Marshal req into JSON for new_values
+	log.Printf("handleUpdateTask: Marshaling req into JSON for new_values")
+	newValuesBytes, err := json.Marshal(req)
+	if err != nil {
+		log.Printf("handleUpdateTask: Error marshaling new_values: %v", err)
+		http.Error(w, "Failed to process new task values", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("handleUpdateTask: Successfully marshaled newValuesBytes: %s", string(newValuesBytes))
 
 	// Log activity
+	log.Printf("handleUpdateTask: Logging activity for taskId: %s", taskId)
 	_, err = tx.Exec(`
         INSERT INTO rdm.project_activity (
             project_id, user_id, activity_type, entity_type, entity_id,
@@ -8188,20 +8213,26 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
         ) VALUES ($1, $2, 'update', 'task', $3, $4, $5, $6)
     `, projectId, userId, taskId,
 		"Updated task details",
-		currentValues,
-		req) // New values from the request
-
+		currentValuesBytes,
+		newValuesBytes) // Use marshaled byte slice
 	if err != nil {
+		log.Printf("handleUpdateTask: Error logging activity: %v", err)
 		http.Error(w, "Failed to log activity", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("handleUpdateTask: Activity logged successfully")
 
+	// Commit transaction
+	log.Printf("handleUpdateTask: Committing transaction")
 	if err = tx.Commit(); err != nil {
+		log.Printf("handleUpdateTask: Error committing transaction: %v", err)
 		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("handleUpdateTask: Transaction committed successfully")
 
 	w.WriteHeader(http.StatusOK)
+	log.Printf("handleUpdateTask: Sending success response for taskId: %s", taskId)
 	json.NewEncoder(w).Encode(map[string]string{"id": taskId})
 }
 
@@ -8266,19 +8297,18 @@ func handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save current task data for activity log
-	var taskData map[string]interface{}
+	var taskDataBytes []byte
 	err = tx.QueryRow(`
 		SELECT row_to_json(t) FROM (
 			SELECT * FROM rdm.project_tasks WHERE id = $1
 		) t
-	`, taskId).Scan(&taskData)
-
-	// Add error handling here
+	`, taskId).Scan(&taskDataBytes)
 	if err != nil {
-		log.Printf("Failed to fetch task data for logging: %v", err)
-		// Depending on your error handling strategy, you might want to:
-		// 1. Continue anyway (just log the error)
-		// 2. Return an error response
+		if err == sql.ErrNoRows {
+			http.Error(w, "Task not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Failed to fetch task data: %v", err)
 		http.Error(w, "Failed to fetch task data", http.StatusInternalServerError)
 		return
 	}
@@ -8290,16 +8320,15 @@ func handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log activity
+	// Log activity using taskDataBytes directly
 	_, err = tx.Exec(`
-        INSERT INTO rdm.project_activity (
-            project_id, user_id, activity_type, entity_type, entity_id,
-            description, old_values
-        ) VALUES ($1, $2, 'delete', 'task', $3, $4, $5)
-    `, projectId, userId, taskId,
+		INSERT INTO rdm.project_activity (
+			project_id, user_id, activity_type, entity_type, entity_id,
+			description, old_values
+		) VALUES ($1, $2, 'delete', 'task', $3, $4, $5)
+	`, projectId, userId, taskId,
 		"Deleted task: "+taskName,
-		taskData)
-
+		taskDataBytes)
 	if err != nil {
 		http.Error(w, "Failed to log activity", http.StatusInternalServerError)
 		return

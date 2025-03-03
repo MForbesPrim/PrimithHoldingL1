@@ -733,7 +733,7 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
         {safeItems.length > 0 ? (
           <div>
             {Object.entries(quarters).map(([quarter, items]) => (
-              <div key={quarter} className="mb-6">
+              <div key={quarter} className="mb-5">
                 <h3 className="text-lg font-semibold mb-2">{quarter} {year}</h3>
                 {items.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
