@@ -46,6 +46,7 @@ import {
   ChevronRight,
   Loader2,
   Calendar as LucideCalendar,
+  Filter,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -68,7 +69,8 @@ interface TasksViewProps {
 
 export function TasksView({ projectId, projectService }: TasksViewProps) {
   const { toast } = useToast();
-  const [tasks, setTasks] = useState<ProjectTask[]>([]);
+  const [allTasks, setAllTasks] = useState<ProjectTask[]>([]);
+  const [filteredTasks, setFilteredTasks] = useState<ProjectTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -76,7 +78,9 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
   const [currentTask, setCurrentTask] = useState<ProjectTask | null>(null);
   const [expandedTasks, setExpandedTasks] = useState<Record<string, boolean>>({});
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [priorityFilter, setPriorityFilter] = useState<string>("");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const [projectMembers, setProjectMembers] = useState<{ id: string; userName: string }[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isEditSaving, setIsEditSaving] = useState(false);
@@ -91,27 +95,30 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
     parentId: undefined,
   });
   const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
+  const [dueDateFilter, setDueDateFilter] = useState<string>("");
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>();
 
   useEffect(() => {
     loadTasks();
     loadProjectMembers();
-  }, [projectId, statusFilter, assigneeFilter]);
+  }, [projectId]);
+
+  useEffect(() => {
+    filterTasks();
+  }, [allTasks, statusFilter, assigneeFilter, priorityFilter, dueDateFilter, selectedDate, searchQuery]);
 
   const loadTasks = async () => {
     setLoading(true);
     setError(null);
     try {
-      const filters: { status?: string; assignedTo?: string } = {};
-      if (statusFilter) filters.status = statusFilter;
-      if (assigneeFilter) filters.assignedTo = assigneeFilter;
-
-      const tasksData = await projectService.getProjectTasks(projectId, filters);
-      console.log("Tasks data received from server:", tasksData); // Log server response
-      setTasks(tasksData || []);
+      const tasksData = await projectService.getProjectTasks(projectId);
+      setAllTasks(tasksData || []);
+      setFilteredTasks(tasksData || []);
     } catch (err) {
       setError("Failed to load tasks");
       console.error("Error loading tasks:", err);
-      setTasks([]);
+      setAllTasks([]);
+      setFilteredTasks([]);
     } finally {
       setLoading(false);
     }
@@ -183,7 +190,7 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
       console.log("Sending task to server:", taskToUpdate); // Debug log before API call
       const response = await projectService.updateTask(currentTask.id, taskToUpdate);
       console.log("Server response after update:", response); // Debug log after API call
-      setTasks((prev) =>
+      setFilteredTasks((prev) =>
         prev.map((task) =>
           task.id === currentTask.id ? { ...task, ...taskToUpdate } : task
         )
@@ -201,7 +208,7 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
   const handleDeleteTask = async (taskId: string) => {
     try {
       await projectService.deleteTask(taskId);
-      setTasks((prev) => prev.filter((task) => task.id !== taskId));
+      setFilteredTasks((prev) => prev.filter((task) => task.id !== taskId));
       toast({ title: "Success", description: "Task deleted successfully" });
     } catch (err) {
       console.error("Error deleting task:", err);
@@ -216,6 +223,15 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
       ...prev,
       [taskId]: !prev[taskId],
     }));
+  };
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setStatusFilter("none");
+    setAssigneeFilter("none");
+    setPriorityFilter("none");
+    setDueDateFilter("none");
+    setSelectedDate(undefined);
   };
 
   const statusColors: Record<string, string> = {
@@ -233,50 +249,258 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
     urgent: "bg-red-100 text-red-800 hover:bg-red-600 hover:text-white transition-colors",
   };
 
+  const filterTasks = () => {
+    let filtered = [...allTasks];
+    console.log("Starting filtering with", filtered.length, "tasks");
+
+    // Search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(task => 
+        task.name.toLowerCase().includes(query) || 
+        task.description?.toLowerCase().includes(query)
+      );
+      console.log("After search filter:", filtered.length, "tasks remain");
+    }
+
+    // Status filter
+    if (statusFilter && statusFilter !== "none") {
+      filtered = filtered.filter(task => task.status === statusFilter);
+      console.log("After status filter:", filtered.length, "tasks remain");
+    }
+
+    // Priority filter
+    if (priorityFilter && priorityFilter !== "none") {
+      filtered = filtered.filter(task => task.priority === priorityFilter);
+      console.log("After priority filter:", filtered.length, "tasks remain");
+    }
+
+    // Assignee filter
+    if (assigneeFilter && assigneeFilter !== "none") {
+      filtered = filtered.filter(task => task.assignedTo === assigneeFilter);
+      console.log("After assignee filter:", filtered.length, "tasks remain");
+    }
+
+    // Due date range filter
+    if (dueDateFilter && dueDateFilter !== "none") {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      filtered = filtered.filter(task => {
+        if (!task.dueDate) return dueDateFilter === "no_date";
+        
+        // Parse the YYYY-MM-DD format directly
+        const [year, month, day] = task.dueDate.split('-').map(Number);
+        const dueDate = new Date(year, month - 1, day);
+        dueDate.setHours(0, 0, 0, 0);
+
+        switch (dueDateFilter) {
+          case "overdue":
+            return dueDate < today;
+          case "today":
+            return dueDate.getTime() === today.getTime();
+          case "this_week": {
+            const endOfWeek = new Date(today);
+            endOfWeek.setDate(today.getDate() + (6 - today.getDay()));
+            return dueDate <= endOfWeek && dueDate >= today;
+          }
+          case "next_week": {
+            const startOfNextWeek = new Date(today);
+            startOfNextWeek.setDate(today.getDate() + (7 - today.getDay()));
+            const endOfNextWeek = new Date(startOfNextWeek);
+            endOfNextWeek.setDate(startOfNextWeek.getDate() + 6);
+            return dueDate >= startOfNextWeek && dueDate <= endOfNextWeek;
+          }
+          case "this_month": {
+            const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+            return dueDate <= endOfMonth && dueDate >= today;
+          }
+          case "no_date":
+            return !task.dueDate;
+          default:
+            return true;
+        }
+      });
+      console.log("After due date range filter:", filtered.length, "tasks remain");
+    }
+
+    // Specific date filter
+    if (selectedDate) {
+      console.log("Filtering for specific date:", selectedDate);
+      filtered = filtered.filter(task => {
+        if (!task.dueDate) {
+          console.log("Task has no due date:", task.name);
+          return false;
+        }
+        
+        // Parse the YYYY-MM-DD format directly
+        const [year, month, day] = task.dueDate.split('-').map(Number);
+        const taskDate = new Date(year, month - 1, day);
+        
+        // Get the selected date components
+        const selectedYear = selectedDate.getFullYear();
+        const selectedMonth = selectedDate.getMonth();
+        const selectedDay = selectedDate.getDate();
+        
+        // Compare date components directly
+        const isMatch = 
+          taskDate.getFullYear() === selectedYear &&
+          taskDate.getMonth() === selectedMonth &&
+          taskDate.getDate() === selectedDay;
+        
+        console.log(
+          "Task:", task.name,
+          "Due date:", task.dueDate,
+          "Task date components:", year, month, day,
+          "Selected date components:", selectedYear, selectedMonth + 1, selectedDay,
+          "Match?:", isMatch
+        );
+        
+        return isMatch;
+      });
+      console.log("After specific date filter:", filtered.length, "tasks remain");
+    }
+
+    setFilteredTasks(filtered);
+  };
+
+  const handleDateSelect = (date: Date | undefined) => {
+    if (date) {
+      console.log("Selected date from calendar:", date);
+      // Store the date components directly
+      const selectedYear = date.getFullYear();
+      const selectedMonth = date.getMonth();
+      const selectedDay = date.getDate();
+      const normalizedDate = new Date(selectedYear, selectedMonth, selectedDay);
+      console.log("Setting selected date components:", selectedYear, selectedMonth + 1, selectedDay);
+      setSelectedDate(normalizedDate);
+      setDueDateFilter("none"); // Clear the due date range when specific date is selected
+    } else {
+      setSelectedDate(undefined);
+    }
+  };
+
   return (
     <div className="space-y-4 mt-4">
-      <div className="flex justify-between items-center">
-        <div className="flex space-x-2">
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter by status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todo" className="hover:bg-gray-100">
-                To Do
-              </SelectItem>
-              <SelectItem value="in_progress" className="hover:bg-gray-100">
-                In Progress
-              </SelectItem>
-              <SelectItem value="in_review" className="hover:bg-gray-100">
-                In Review
-              </SelectItem>
-              <SelectItem value="approved" className="hover:bg-gray-100">
-                Approved
-              </SelectItem>
-              <SelectItem value="done" className="hover:bg-gray-100">
-                Done
-              </SelectItem>
-              <SelectItem value="blocked" className="hover:bg-gray-100">
-                Blocked
-              </SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter by assignee" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">All Assignees</SelectItem>
-              <SelectItem value="unassigned">Unassigned</SelectItem>
-              {projectMembers.map((member) => (
-                <SelectItem key={member.id} value={member.id}>
-                  {member.userName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <div className="flex justify-between items-center gap-4">
+        <div className="flex items-center gap-2">
+          <div className="w-[300px]">
+            <Input
+              placeholder="Search tasks..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="icon">
+                <Filter className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80">
+              <div className="grid gap-4">
+                <div>
+                  <Label htmlFor="status">Status</Label>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger id="status">
+                      <SelectValue placeholder="Filter by status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">All Statuses</SelectItem>
+                      <SelectItem value="todo">To Do</SelectItem>
+                      <SelectItem value="in_progress">In Progress</SelectItem>
+                      <SelectItem value="in_review">In Review</SelectItem>
+                      <SelectItem value="approved">Approved</SelectItem>
+                      <SelectItem value="done">Done</SelectItem>
+                      <SelectItem value="blocked">Blocked</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="priority">Priority</Label>
+                  <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                    <SelectTrigger id="priority">
+                      <SelectValue placeholder="Filter by priority" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">All Priorities</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="urgent">Urgent</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="assignee">Assignee</Label>
+                  <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
+                    <SelectTrigger id="assignee">
+                      <SelectValue placeholder="Filter by assignee" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">All Assignees</SelectItem>
+                      {projectMembers.map((member) => (
+                        <SelectItem key={member.id} value={member.id}>
+                          {member.userName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="dueDate">Due Date Range</Label>
+                  <Select value={dueDateFilter} onValueChange={setDueDateFilter}>
+                    <SelectTrigger id="dueDate">
+                      <SelectValue placeholder="Filter by due date" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">All Dates</SelectItem>
+                      <SelectItem value="overdue">Overdue</SelectItem>
+                      <SelectItem value="today">Due Today</SelectItem>
+                      <SelectItem value="this_week">Due This Week</SelectItem>
+                      <SelectItem value="next_week">Due Next Week</SelectItem>
+                      <SelectItem value="this_month">Due This Month</SelectItem>
+                      <SelectItem value="no_date">No Due Date</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Specific Date</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="w-full justify-start text-left font-normal"
+                      >
+                        {selectedDate ? (
+                          format(selectedDate, "PPP")
+                        ) : (
+                          <span className="text-muted-foreground">Pick a date</span>
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={selectedDate}
+                        onSelect={handleDateSelect}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    clearFilters();
+                    setSelectedDate(undefined);
+                  }}
+                >
+                  Clear Filters
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
 
         <Button onClick={() => setShowAddDialog(true)}>
@@ -294,13 +518,15 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
           <AlertTriangle className="mx-auto h-8 w-8 mb-2" />
           <p>{error}</p>
         </div>
-      ) : !tasks || tasks.length === 0 ? (
+      ) : !filteredTasks || filteredTasks.length === 0 ? (
         <div className="text-center p-8 border border-dashed rounded-md">
           <CheckSquare className="h-6 w-6 text-gray-400 mx-auto mb-4" />
-          <p className="text-gray-500 mb-2 text-sm">No tasks found for this project.</p>
+          <p className="text-gray-500 mb-2 text-sm">
+            {allTasks.length === 0 ? "No tasks found for this project." : "No tasks match the current filters."}
+          </p>
           <Button variant="outline" onClick={() => setShowAddDialog(true)}>
             <Plus className="mr-2 h-4 w-4" />
-            Create Your First Task
+            {allTasks.length === 0 ? "Create Your First Task" : "Add New Task"}
           </Button>
         </div>
       ) : (
@@ -322,7 +548,7 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tasks.map((task) => (
+                {filteredTasks.map((task) => (
                   <React.Fragment key={task.id}>
                     <TableRow>
                       <TableCell>
@@ -354,9 +580,9 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                       </TableCell>
                       <TableCell>
                         <Badge
-                          className={
-                            statusColors[task.status || "todo"] || "bg-gray-100"
-                          }
+                          className={`font-normal ${
+                            statusColors[task.status || "todo"] || "bg-gray-100 text-sm"
+                          }`}
                         >
                           {(task.status || "todo")
                             .replace("_", " ")
@@ -365,9 +591,9 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                       </TableCell>
                       <TableCell>
                         <Badge
-                          className={
-                            priorityColors[task.priority] || "bg-gray-100"
-                          }
+                          className={`font-normal ${
+                            priorityColors[task.priority] || "bg-gray-100 text-sm"
+                          }`}
                         >
                           {task.priority.charAt(0).toUpperCase() +
                             task.priority.slice(1)}
@@ -427,10 +653,10 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                             </TableCell>
                             <TableCell>
                               <Badge
-                                className={
+                                className={`font-normal ${
                                   statusColors[childTask.status || "todo"] ||
-                                  "bg-gray-100"
-                                }
+                                  "bg-gray-100 text-sm"
+                                }`}
                               >
                                 {(childTask.status || "todo")
                                   .replace("_", " ")
@@ -439,10 +665,10 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                             </TableCell>
                             <TableCell>
                               <Badge
-                                className={
+                                className={`font-normal ${
                                   priorityColors[childTask.priority] ||
                                   "bg-gray-100"
-                                }
+                                }`}
                               >
                                 {childTask.priority.charAt(0).toUpperCase() +
                                   childTask.priority.slice(1)}
@@ -600,7 +826,6 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                     <SelectValue placeholder="Select assignee" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Unassigned</SelectItem>
                     {projectMembers.map((member) => (
                       <SelectItem key={member.id} value={member.id}>
                         {member.userName}
@@ -677,7 +902,7 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No Parent (Top Level)</SelectItem>
-                  {tasks
+                  {allTasks
                     .filter((t) => !t.parentId)
                     .map((task) => (
                       <SelectItem key={task.id} value={task.id}>
@@ -820,7 +1045,6 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                       <SelectValue placeholder="Select assignee" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
                       {projectMembers.map((member) => (
                         <SelectItem key={member.id} value={member.id}>
                           {member.userName}

@@ -78,7 +78,7 @@ export function DocumentsOverview({
                 onClick={() => onFolderClick(folder.id)}
               >
                 <div className="flex items-center gap-2">
-                  <Folder className="h-4 w-4" />
+                  <Folder className="h-4 w-4 fill-blue-500 stroke-blue-500 stroke-[1.5]" />
                   <span className="text-sm">{folder.name}</span>
                 </div>
                 <span className="text-sm text-muted-foreground">

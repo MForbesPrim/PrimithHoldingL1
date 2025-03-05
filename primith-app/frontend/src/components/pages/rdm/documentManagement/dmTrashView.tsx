@@ -132,7 +132,7 @@ export function TrashView({
                 <TableCell>
                   <div className="flex items-center gap-2">
                     {item.type === 'folder' ? (
-                      <Folder className="h-4 w-4 text-muted-foreground" />
+                      <Folder className="h-4 w-4 text-muted-foreground fill-blue-500 stroke-blue-500 stroke-[1.5]" />
                     ) : (
                       <File className="h-4 w-4 text-muted-foreground" />
                     )}

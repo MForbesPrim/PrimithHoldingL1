@@ -493,7 +493,7 @@ const renderListView = () => {
                         <Edit className="h-4 w-4" />
                       </Button>
                       {onItemDelete && (
-                        <Button variant="ghost" size="sm" className="text-red-600" onClick={(e) => {
+                        <Button variant="ghost" size="sm" onClick={(e) => {
                           e.stopPropagation();
                           handleDeleteClick(item);
                         }}>

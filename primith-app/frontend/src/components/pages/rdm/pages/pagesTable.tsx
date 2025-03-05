@@ -364,7 +364,7 @@ export function PagesTable({
                           <div className="w-6" /> // Consistent spacing for items without children
                         )}
                         {node.type === 'folder' ? (
-                          <Folder className="h-4 w-4 mr-2" />
+                          <Folder className="h-4 w-4 mr-2 fill-blue-500 stroke-blue-500 stroke-[1.5]" />
                         ) : (
                           <FileText className="h-4 w-4 mr-2" />
                         )}
@@ -549,7 +549,7 @@ export function PagesTable({
                         e.stopPropagation();
                       }}
                     >
-                      <Folder className="h-4 w-4 mr-2" /> 
+                      <Folder className="h-4 w-4 mr-2 fill-blue-500 stroke-blue-500 stroke-[1.5]" /> 
                       New Subfolder
                     </DropdownMenuItem>
                     <DropdownMenuItem 

@@ -306,12 +306,12 @@ export const DashboardTable = memo(function DashboardTable({
                         }}
                     >
                         {isFolder ? (
-                            <Folder className="text-muted-foreground" size={16} />
+                            <Folder className="fill-blue-500 stroke-blue-500 stroke-[1.5]" size={16} />
                         ) : (
                             <File className="text-muted-foreground" size={16} />
                         )}
                         {row.getValue("name")}
-                    </div>
+                    </div>  
                 )
             },
             enableSorting: true,

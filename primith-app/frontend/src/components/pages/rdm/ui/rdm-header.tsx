@@ -106,7 +106,7 @@ function OrgCombobox({
                    onOrgChange(org.id)
                    setOpen(false)
                  }}
-                 className="text-sm"
+                 className="text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
                >
                  {org.name}
                  <Check
@@ -168,7 +168,7 @@ function ProjectCombobox({
                    onProjectChange(null)
                    setOpen(false)
                  }}
-                 className="text-sm text-muted-foreground"
+                 className="text-sm text-muted-foreground hover:bg-gray-100 dark:hover:bg-gray-800"
                >
                  <X className="w-4 h-4 mr-2" />
                  Clear selection
@@ -182,7 +182,7 @@ function ProjectCombobox({
                    onProjectChange(project.id)
                    setOpen(false)
                  }}
-                 className="text-sm"
+                 className="text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
                >
                  <Box className="w-4 h-4 mr-2" />
                  {project.name}

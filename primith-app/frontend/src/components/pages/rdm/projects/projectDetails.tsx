@@ -69,6 +69,7 @@ import {
 } from "@/components/ui/pagination";
 
 import { useToast } from '@/hooks/use-toast';
+import { MilestonesView } from "@/components/pages/rdm/projects/milestonesView";
 
 export function ProjectDetailPage() {
   const { toast } = useToast();    
@@ -653,7 +654,6 @@ export function ProjectDetailPage() {
         </div>
         <div>
           <h1 className="text-2xl font-bold mb-1">{project.name}</h1>
-          <p className="text-gray-600">{project.description}</p>
         </div>
       </div>
       <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
@@ -987,6 +987,9 @@ export function ProjectDetailPage() {
             </TabsContent>
         <TabsContent value="tasks">
         <TasksView projectId={project.id} projectService={projectService} />
+        </TabsContent>
+        <TabsContent value="milestones">
+          <MilestonesView projectId={project.id} projectService={projectService} />
         </TabsContent>
         <TabsContent value="variables">
           <ProjectVariablesPanel projectId={project.id} projectService={projectService} />
