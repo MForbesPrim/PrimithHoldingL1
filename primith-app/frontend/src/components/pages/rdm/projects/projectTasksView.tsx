@@ -47,6 +47,8 @@ import {
   Loader2,
   Calendar as LucideCalendar,
   Filter,
+  ChevronsUpDown,
+  ChevronUp,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -97,6 +99,8 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
   const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
   const [dueDateFilter, setDueDateFilter] = useState<string>("");
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(null);
 
   useEffect(() => {
     loadTasks();
@@ -105,7 +109,7 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
 
   useEffect(() => {
     filterTasks();
-  }, [allTasks, statusFilter, assigneeFilter, priorityFilter, dueDateFilter, selectedDate, searchQuery]);
+  }, [allTasks, statusFilter, assigneeFilter, priorityFilter, dueDateFilter, selectedDate, searchQuery, sortColumn, sortDirection]);
 
   const loadTasks = async () => {
     setLoading(true);
@@ -253,6 +257,27 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
     let filtered = [...allTasks];
     console.log("Starting filtering with", filtered.length, "tasks");
 
+    // Apply sorting
+    if (sortColumn && sortDirection) {
+      filtered.sort((a, b) => {
+        let aValue = a[sortColumn as keyof ProjectTask];
+        let bValue = b[sortColumn as keyof ProjectTask];
+        
+        // Handle special cases for sorting
+        if (sortColumn === 'dueDate') {
+          aValue = a.dueDate ? new Date(a.dueDate).getTime() : 0;
+          bValue = b.dueDate ? new Date(b.dueDate).getTime() : 0;
+        }
+        
+        if (aValue === bValue) return 0;
+        if (aValue === null || aValue === undefined) return 1;
+        if (bValue === null || bValue === undefined) return -1;
+        
+        const result = aValue < bValue ? -1 : 1;
+        return sortDirection === 'asc' ? result : -result;
+      });
+    }
+
     // Search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
@@ -377,6 +402,21 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
       setDueDateFilter("none"); // Clear the due date range when specific date is selected
     } else {
       setSelectedDate(undefined);
+    }
+  };
+
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      // Cycle through: asc -> desc -> null (unsorted)
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortDirection(null);
+        setSortColumn(null);
+      }
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
     }
   };
 
@@ -539,12 +579,77 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
               <TableHeader>
                 <TableRow>
                   <TableHead></TableHead>
-                  <TableHead>Task</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Priority</TableHead>
-                  <TableHead>Assignee</TableHead>
-                  <TableHead>Due Date</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead className="cursor-pointer" onClick={() => handleSort('name')}>
+                    <div className="flex items-center">
+                      Task
+                      {sortColumn === 'name' ? (
+                        sortDirection === 'asc' ? (
+                          <ChevronUp className="ml-2 h-4 w-4" />
+                        ) : sortDirection === 'desc' ? (
+                          <ChevronDown className="ml-2 h-4 w-4" />
+                        ) : null
+                      ) : (
+                        <ChevronsUpDown className="ml-2 h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                  </TableHead>
+                  <TableHead className="cursor-pointer" onClick={() => handleSort('status')}>
+                    <div className="flex items-center">
+                      Status
+                      {sortColumn === 'status' ? (
+                        sortDirection === 'asc' ? (
+                          <ChevronUp className="ml-2 h-4 w-4" />
+                        ) : sortDirection === 'desc' ? (
+                          <ChevronDown className="ml-2 h-4 w-4" />
+                        ) : null
+                      ) : (
+                        <ChevronsUpDown className="ml-2 h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                  </TableHead>
+                  <TableHead className="cursor-pointer" onClick={() => handleSort('priority')}>
+                    <div className="flex items-center">
+                      Priority
+                      {sortColumn === 'priority' ? (
+                        sortDirection === 'asc' ? (
+                          <ChevronUp className="ml-2 h-4 w-4" />
+                        ) : sortDirection === 'desc' ? (
+                          <ChevronDown className="ml-2 h-4 w-4" />
+                        ) : null
+                      ) : (
+                        <ChevronsUpDown className="ml-2 h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                  </TableHead>
+                  <TableHead className="cursor-pointer" onClick={() => handleSort('assigneeName')}>
+                    <div className="flex items-center">
+                      Assignee
+                      {sortColumn === 'assigneeName' ? (
+                        sortDirection === 'asc' ? (
+                          <ChevronUp className="ml-2 h-4 w-4" />
+                        ) : sortDirection === 'desc' ? (
+                          <ChevronDown className="ml-2 h-4 w-4" />
+                        ) : null
+                      ) : (
+                        <ChevronsUpDown className="ml-2 h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                  </TableHead>
+                  <TableHead className="cursor-pointer" onClick={() => handleSort('dueDate')}>
+                    <div className="flex items-center">
+                      Due Date
+                      {sortColumn === 'dueDate' ? (
+                        sortDirection === 'asc' ? (
+                          <ChevronUp className="ml-2 h-4 w-4" />
+                        ) : sortDirection === 'desc' ? (
+                          <ChevronDown className="ml-2 h-4 w-4" />
+                        ) : null
+                      ) : (
+                        <ChevronsUpDown className="ml-2 h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                  </TableHead>
+                  <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

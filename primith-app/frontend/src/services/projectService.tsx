@@ -1,5 +1,5 @@
     import AuthService from '@/services/auth'
-    import { Project, ProjectArtifact, ProjectVariable, RoadmapItem, ArtifactReview, ProjectMember, ProjectActivity, ProjectTask} from '@/types/projects'
+    import { Project, ProjectArtifact, ProjectVariable, RoadmapItem, ArtifactReview, ProjectMember, ProjectActivity, ProjectTask, ProjectMilestone, MilestoneStatus} from '@/types/projects'
 
     export class ProjectService {
     private baseUrl = import.meta.env.VITE_API_URL;
@@ -179,16 +179,16 @@
         return response.json();
     }
 
-    async createRoadmapItem(item: Partial<RoadmapItem>): Promise<RoadmapItem> {
-        const headers = await this.getAuthHeader();
-        const response = await fetch(`${this.baseUrl}/roadmap-items`, {
-        method: 'POST',
-        credentials: 'include',
-        headers,
-        body: JSON.stringify(item)
-        });
-        if (!response.ok) throw new Error('Failed to create roadmap item');
-        return response.json();
+    async createRoadmapItem(item: Partial<RoadmapItem> & { asMilestone?: boolean }): Promise<RoadmapItem> {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/roadmap-items`, {
+          method: 'POST',
+          credentials: 'include',
+          headers,
+          body: JSON.stringify(item)
+      });
+      if (!response.ok) throw new Error('Failed to create roadmap item');
+      return response.json();
     }
 
     async updateRoadmapItem(itemId: string, item: Partial<RoadmapItem>): Promise<RoadmapItem> {
@@ -437,4 +437,92 @@ async getProjectTasks(projectId: string, filters?: {
     if (!response.ok) throw new Error('Failed to delete task');
     return response.json();
   }
+
+  async getProjectMilestones(projectId: string): Promise<ProjectMilestone[]> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/milestones`, {
+        credentials: 'include',
+        headers
+    });
+    if (!response.ok) throw new Error('Failed to fetch milestones');
+    return response.json();
     }
+
+    async createMilestoneStatus(projectId: string, status: Partial<MilestoneStatus>): Promise<MilestoneStatus> {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/projects/${projectId}/milestone-statuses`, {
+          method: 'POST',
+          credentials: 'include',
+          headers,
+          body: JSON.stringify(status)
+      });
+      if (!response.ok) throw new Error('Failed to create milestone status');
+      return response.json();
+  }
+
+  async updateMilestoneStatus(projectId: string, statusId: string, status: Partial<MilestoneStatus>): Promise<MilestoneStatus> {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/projects/${projectId}/milestone-statuses/${statusId}`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers,
+          body: JSON.stringify(status)
+      });
+      if (!response.ok) throw new Error('Failed to update milestone status');
+      return response.json();
+  }
+
+  async deleteMilestoneStatus(projectId: string, statusId: string): Promise<void> {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/projects/${projectId}/milestone-statuses/${statusId}`, {
+          method: 'DELETE',
+          credentials: 'include',
+          headers
+      });
+      if (!response.ok) throw new Error('Failed to delete milestone status');
+  }
+
+    async createMilestone(milestone: Partial<ProjectMilestone>): Promise<ProjectMilestone> {
+        const headers = await this.getAuthHeader();
+        const response = await fetch(`${this.baseUrl}/milestones`, {
+            method: 'POST',
+            credentials: 'include',
+            headers,
+            body: JSON.stringify(milestone)
+        });
+        if (!response.ok) throw new Error('Failed to create milestone');
+        return response.json();
+    }
+
+    async updateMilestone(milestoneId: string, milestone: Partial<ProjectMilestone>): Promise<ProjectMilestone> {
+        const headers = await this.getAuthHeader();
+        const response = await fetch(`${this.baseUrl}/milestones/${milestoneId}`, {
+            method: 'PUT',
+            credentials: 'include',
+            headers,
+            body: JSON.stringify(milestone)
+        });
+        if (!response.ok) throw new Error('Failed to update milestone');
+        return response.json();
+    }
+
+    async deleteMilestone(milestoneId: string): Promise<void> {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/milestones/${milestoneId}`, {
+          method: 'DELETE',
+          credentials: 'include',
+          headers
+      });
+      if (!response.ok) throw new Error('Failed to delete milestone');
+    }
+
+    async getMilestoneStatuses(projectId: string): Promise<MilestoneStatus[]> {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/projects/${projectId}/milestone-statuses`, {
+          credentials: 'include',
+          headers
+      });
+      if (!response.ok) throw new Error('Failed to fetch milestone statuses');
+      return response.json();
+  }
+  }

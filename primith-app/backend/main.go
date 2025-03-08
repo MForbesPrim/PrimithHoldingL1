@@ -370,20 +370,20 @@ func sendEmail(request ContactRequest) error {
 	to := mail.NewEmail("Michael Forbes", "michael.forbes@primith.com")
 	subject := "New Contact Form Submission"
 	plainTextContent := fmt.Sprintf(`
-Name: %s %s
-Email: %s
-Phone: %s
-Company: %s
+	Name: %s %s
+	Email: %s
+	Phone: %s
+	Company: %s
 
-Message:
-%s`, request.FirstName, request.LastName, request.Email, request.Phone, request.Company, request.Message)
+	Message:
+	%s`, request.FirstName, request.LastName, request.Email, request.Phone, request.Company, request.Message)
 
 	htmlContent := fmt.Sprintf(`
-<p><strong>Name:</strong> %s %s</p>
-<p><strong>Email:</strong> %s</p>
-<p><strong>Phone:</strong> %s</p>
-<p><strong>Company:</strong> %s</p>
-<p><strong>Message:</strong><br>%s</p>`,
+	<p><strong>Name:</strong> %s %s</p>
+	<p><strong>Email:</strong> %s</p>
+	<p><strong>Phone:</strong> %s</p>
+	<p><strong>Company:</strong> %s</p>
+	<p><strong>Message:</strong><br>%s</p>`,
 		request.FirstName, request.LastName, request.Email, request.Phone, request.Company, request.Message)
 
 	message := mail.NewSingleEmail(from, subject, to, plainTextContent, htmlContent)
@@ -470,8 +470,8 @@ func login(w http.ResponseWriter, r *http.Request) {
 	var userData UserData
 	var userID string
 	err := db.QueryRow(`
-		SELECT id, password_hash, first_name, last_name, email 
-		FROM auth.users WHERE email = $1`,
+			SELECT id, password_hash, first_name, last_name, email 
+			FROM auth.users WHERE email = $1`,
 		user.Username).Scan(&userID, &storedHash, &userData.FirstName, &userData.LastName, &userData.Email)
 
 	if err == sql.ErrNoRows {
@@ -589,13 +589,13 @@ func protected(w http.ResponseWriter, r *http.Request) {
 func isSuperAdmin(email string) (bool, error) {
 	var isSuperAdmin bool
 	err := db.QueryRow(`
-        SELECT EXISTS(
-            SELECT 1 FROM auth.user_roles ur
-            JOIN auth.roles r ON ur.role_id = r.id
-            JOIN auth.users u ON ur.user_id = u.id
-            WHERE u.email = $1 
-            AND r.name = 'super_admin'
-        )`, email).Scan(&isSuperAdmin)
+			SELECT EXISTS(
+				SELECT 1 FROM auth.user_roles ur
+				JOIN auth.roles r ON ur.role_id = r.id
+				JOIN auth.users u ON ur.user_id = u.id
+				WHERE u.email = $1 
+				AND r.name = 'super_admin'
+			)`, email).Scan(&isSuperAdmin)
 	return isSuperAdmin, err
 }
 
@@ -631,31 +631,31 @@ func handleListUsers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	rows, err := db.Query(`
-		SELECT 
-			u.id, 
-			u.email, 
-			u.first_name, 
-			u.last_name, 
-			u.is_active, 
-			u.created_at, 
-			u.updated_at,
-			COALESCE((SELECT json_agg(row_to_json(o))
-					FROM (
-						SELECT o.id, o.name, o.description
-						FROM auth.organizations o
-						INNER JOIN auth.organization_members om ON o.id = om.organization_id
-						WHERE om.user_id = u.id
-					) o), '[]') AS organizations,
-			COALESCE((SELECT json_agg(row_to_json(r))
-					FROM (
-						SELECT r.id, r.name, r.description, r.organization_id
-						FROM auth.roles r
-						INNER JOIN auth.user_roles ur ON r.id = ur.role_id
-						WHERE ur.user_id = u.id
-					) r), '[]') AS roles
-		FROM auth.users u
-		ORDER BY u.created_at DESC
-    `)
+			SELECT 
+				u.id, 
+				u.email, 
+				u.first_name, 
+				u.last_name, 
+				u.is_active, 
+				u.created_at, 
+				u.updated_at,
+				COALESCE((SELECT json_agg(row_to_json(o))
+						FROM (
+							SELECT o.id, o.name, o.description
+							FROM auth.organizations o
+							INNER JOIN auth.organization_members om ON o.id = om.organization_id
+							WHERE om.user_id = u.id
+						) o), '[]') AS organizations,
+				COALESCE((SELECT json_agg(row_to_json(r))
+						FROM (
+							SELECT r.id, r.name, r.description, r.organization_id
+							FROM auth.roles r
+							INNER JOIN auth.user_roles ur ON r.id = ur.role_id
+							WHERE ur.user_id = u.id
+						) r), '[]') AS roles
+			FROM auth.users u
+			ORDER BY u.created_at DESC
+		`)
 	if err != nil {
 		log.Printf("Error querying users: %v", err)
 		http.Error(w, "Failed to fetch users", http.StatusInternalServerError)
@@ -743,8 +743,8 @@ func handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := db.Exec(`
-        CALL auth.update_user($1, $2, $3, $4, $5)
-    `, userID, updateData.Email, updateData.FirstName, updateData.LastName, updateData.IsActive)
+			CALL auth.update_user($1, $2, $3, $4, $5)
+		`, userID, updateData.Email, updateData.FirstName, updateData.LastName, updateData.IsActive)
 
 	if err != nil {
 		http.Error(w, "Failed to update user", http.StatusInternalServerError)
@@ -795,9 +795,9 @@ func handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 func handleListOrganizations(w http.ResponseWriter, r *http.Request) {
 	var orgs []Organization
 	rows, err := db.Query(`
-        SELECT id, name, description, created_at, updated_at 
-        FROM auth.organizations ORDER BY created_at DESC
-    `)
+			SELECT id, name, description, created_at, updated_at 
+			FROM auth.organizations ORDER BY created_at DESC
+		`)
 	if err != nil {
 		http.Error(w, "Failed to fetch organizations", http.StatusInternalServerError)
 		return
@@ -828,8 +828,8 @@ func handleCreateOrganization(w http.ResponseWriter, r *http.Request) {
 
 	var orgID string
 	err := db.QueryRow(`
-        CALL auth.create_organization($1, $2, $3)
-    `, org.Name, org.Description, &orgID).Scan(&orgID)
+			CALL auth.create_organization($1, $2, $3)
+		`, org.Name, org.Description, &orgID).Scan(&orgID)
 
 	if err != nil {
 		http.Error(w, "Failed to create organization", http.StatusInternalServerError)
@@ -856,8 +856,8 @@ func handleUpdateOrganization(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := db.Exec(`
-        CALL auth.update_organization($1, $2, $3)
-    `, orgID, updateData.Name, updateData.Description)
+			CALL auth.update_organization($1, $2, $3)
+		`, orgID, updateData.Name, updateData.Description)
 
 	if err != nil {
 		http.Error(w, "Failed to update organization", http.StatusInternalServerError)
@@ -886,9 +886,9 @@ func handleDeleteOrganization(w http.ResponseWriter, r *http.Request) {
 func handleListRoles(w http.ResponseWriter, r *http.Request) {
 	var roles []Role
 	rows, err := db.Query(`
-        SELECT id, organization_id, name, description, created_at 
-        FROM auth.roles ORDER BY created_at DESC
-    `)
+			SELECT id, organization_id, name, description, created_at 
+			FROM auth.roles ORDER BY created_at DESC
+		`)
 	if err != nil {
 		http.Error(w, "Failed to fetch roles", http.StatusInternalServerError)
 		return
@@ -919,8 +919,8 @@ func handleCreateRole(w http.ResponseWriter, r *http.Request) {
 
 	var roleID string
 	err := db.QueryRow(`
-        CALL auth.create_role($1, $2, $3, $4)
-    `, role.OrganizationID, role.Name, role.Description, &roleID).Scan(&roleID)
+			CALL auth.create_role($1, $2, $3, $4)
+		`, role.OrganizationID, role.Name, role.Description, &roleID).Scan(&roleID)
 
 	if err != nil {
 		http.Error(w, "Failed to create role", http.StatusInternalServerError)
@@ -952,8 +952,8 @@ func handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 
 	// Update the role
 	result, err := db.Exec(`
-        CALL auth.update_role($1, $2, $3, $4)
-    `, roleID, updateData.Name, updateData.Description, updateData.OrganizationID)
+			CALL auth.update_role($1, $2, $3, $4)
+		`, roleID, updateData.Name, updateData.Description, updateData.OrganizationID)
 
 	if err != nil {
 		log.Printf("Error updating role in database: %v\n", err)
@@ -972,10 +972,10 @@ func handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 	// Fetch the updated role from the database
 	var updatedRole Role
 	err = db.QueryRow(`
-        SELECT id, organization_id, name, description, created_at
-        FROM auth.roles
-        WHERE id = $1
-    `, roleID).Scan(&updatedRole.ID, &updatedRole.OrganizationID, &updatedRole.Name, &updatedRole.Description, &updatedRole.CreatedAt)
+			SELECT id, organization_id, name, description, created_at
+			FROM auth.roles
+			WHERE id = $1
+		`, roleID).Scan(&updatedRole.ID, &updatedRole.OrganizationID, &updatedRole.Name, &updatedRole.Description, &updatedRole.CreatedAt)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -1016,17 +1016,17 @@ func handleListServices(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	rows, err := db.Query(`
-        SELECT s.id, s.name, s.description, s.status, s.created_at, s.updated_at,
-               array_agg(json_build_object(
-                   'id', o.id,
-                   'name', o.name,
-                   'description', o.description
-               )) as organizations
-        FROM services.services s
-        LEFT JOIN services.organization_services os ON s.id = os.service_id
-        LEFT JOIN auth.organizations o ON os.organization_id = o.id
-        GROUP BY s.id, s.name, s.description, s.status, s.created_at, s.updated_at
-    `)
+			SELECT s.id, s.name, s.description, s.status, s.created_at, s.updated_at,
+				array_agg(json_build_object(
+					'id', o.id,
+					'name', o.name,
+					'description', o.description
+				)) as organizations
+			FROM services.services s
+			LEFT JOIN services.organization_services os ON s.id = os.service_id
+			LEFT JOIN auth.organizations o ON os.organization_id = o.id
+			GROUP BY s.id, s.name, s.description, s.status, s.created_at, s.updated_at
+		`)
 
 	if err != nil {
 		http.Error(w, "Failed to fetch services", http.StatusInternalServerError)
@@ -1094,8 +1094,8 @@ func handleCreateService(w http.ResponseWriter, r *http.Request) {
 
 	var serviceID string
 	err := db.QueryRow(`
-        CALL services.create_service($1, $2, $3)
-    `, service.Name, service.Description, &serviceID).Scan(&serviceID)
+			CALL services.create_service($1, $2, $3)
+		`, service.Name, service.Description, &serviceID).Scan(&serviceID)
 
 	if err != nil {
 		http.Error(w, "Failed to create service", http.StatusInternalServerError)
@@ -1122,8 +1122,8 @@ func handleUpdateService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := db.Exec(`
-        CALL services.update_service($1, $2, $3)
-    `, serviceID, updateData.Name, updateData.Description)
+			CALL services.update_service($1, $2, $3)
+		`, serviceID, updateData.Name, updateData.Description)
 
 	if err != nil {
 		http.Error(w, "Failed to update service", http.StatusInternalServerError)
@@ -1155,9 +1155,9 @@ func handleGetCurrentUser(w http.ResponseWriter, r *http.Request) {
 
 	var user AdminUser
 	err := db.QueryRow(`
-        SELECT id, email, first_name, last_name, is_active, created_at, updated_at 
-        FROM auth.users WHERE email = $1
-    `, claims.Username).Scan(
+			SELECT id, email, first_name, last_name, is_active, created_at, updated_at 
+			FROM auth.users WHERE email = $1
+		`, claims.Username).Scan(
 		&user.ID, &user.Email, &user.FirstName, &user.LastName,
 		&user.IsActive, &user.CreatedAt, &user.UpdatedAt,
 	)
@@ -1177,14 +1177,14 @@ func handleAdminCheck(w http.ResponseWriter, r *http.Request) {
 
 	var isSuperAdmin bool
 	err := db.QueryRow(`
-        SELECT EXISTS(
-            SELECT 1 FROM auth.user_roles ur
-            JOIN auth.roles r ON ur.role_id = r.id
-            JOIN auth.users u ON ur.user_id = u.id
-            WHERE u.email = $1 
-            AND r.name = 'super_admin'
-        )
-    `, claims.Username).Scan(&isSuperAdmin)
+			SELECT EXISTS(
+				SELECT 1 FROM auth.user_roles ur
+				JOIN auth.roles r ON ur.role_id = r.id
+				JOIN auth.users u ON ur.user_id = u.id
+				WHERE u.email = $1 
+				AND r.name = 'super_admin'
+			)
+		`, claims.Username).Scan(&isSuperAdmin)
 
 	if err != nil {
 		http.Error(w, "Error checking admin status", http.StatusInternalServerError)
@@ -1256,10 +1256,10 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 			if role.OrganizationID == nil || (role.OrganizationID != nil && (*role.OrganizationID == "" || !isValidUUID(*role.OrganizationID))) {
 				var orgID string
 				err := db.QueryRow(`
-                    SELECT organization_id
-                    FROM auth.roles
-                    WHERE id = $1
-                `, role.ID).Scan(&orgID)
+						SELECT organization_id
+						FROM auth.roles
+						WHERE id = $1
+					`, role.ID).Scan(&orgID)
 				if err != nil {
 					if err == sql.ErrNoRows {
 						log.Printf("Role %s not found in database", role.ID)
@@ -1311,8 +1311,8 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	var userID string
 	err = db.QueryRow(`
-		SELECT auth.create_user($1, $2, $3, $4, $5, $6)
-	`, user.Email, string(hashedPassword), user.FirstName, user.LastName,
+			SELECT auth.create_user($1, $2, $3, $4, $5, $6)
+		`, user.Email, string(hashedPassword), user.FirstName, user.LastName,
 		pq.Array(orgIDs), pq.Array(roleIDs)).Scan(&userID)
 	if err != nil {
 		log.Printf("Failed to create user in DB: %v", err)
@@ -1345,9 +1345,9 @@ func handleGetUser(w http.ResponseWriter, r *http.Request) {
 
 	var user AdminUser
 	err := db.QueryRow(`
-        SELECT id, email, first_name, last_name, is_active, created_at, updated_at 
-        FROM auth.users WHERE id = $1
-    `, userID).Scan(
+			SELECT id, email, first_name, last_name, is_active, created_at, updated_at 
+			FROM auth.users WHERE id = $1
+		`, userID).Scan(
 		&user.ID, &user.Email, &user.FirstName, &user.LastName,
 		&user.IsActive, &user.CreatedAt, &user.UpdatedAt,
 	)
@@ -1371,9 +1371,9 @@ func handleGetOrganization(w http.ResponseWriter, r *http.Request) {
 
 	var org Organization
 	err := db.QueryRow(`
-        SELECT id, name, description, created_at, updated_at 
-        FROM auth.organizations WHERE id = $1
-    `, orgID).Scan(
+			SELECT id, name, description, created_at, updated_at 
+			FROM auth.organizations WHERE id = $1
+		`, orgID).Scan(
 		&org.ID, &org.Name, &org.Description, &org.CreatedAt, &org.UpdatedAt,
 	)
 
@@ -1396,9 +1396,9 @@ func handleGetRole(w http.ResponseWriter, r *http.Request) {
 
 	var role Role
 	err := db.QueryRow(`
-        SELECT id, organization_id, name, description, created_at
-        FROM auth.roles WHERE id = $1
-    `, roleID).Scan(
+			SELECT id, organization_id, name, description, created_at
+			FROM auth.roles WHERE id = $1
+		`, roleID).Scan(
 		&role.ID, &role.OrganizationID, &role.Name, &role.Description, &role.CreatedAt,
 	)
 
@@ -1421,9 +1421,9 @@ func handleGetService(w http.ResponseWriter, r *http.Request) {
 
 	var service Service
 	err := db.QueryRow(`
-        SELECT id, name, description, status, created_at, updated_at 
-        FROM services.services WHERE id = $1
-    `, serviceID).Scan(
+			SELECT id, name, description, status, created_at, updated_at 
+			FROM services.services WHERE id = $1
+		`, serviceID).Scan(
 		&service.ID, &service.Name, &service.Description, &service.Status,
 		&service.CreatedAt, &service.UpdatedAt,
 	)
@@ -1455,8 +1455,8 @@ func handleAssignOrganizationToService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := db.Exec(`
-        CALL services.assign_organization_service($1, $2, $3)
-    `, request.OrganizationID, serviceId, request.Status)
+			CALL services.assign_organization_service($1, $2, $3)
+		`, request.OrganizationID, serviceId, request.Status)
 
 	if err != nil {
 		log.Printf("Failed to assign organization to service: %v", err)
@@ -1477,8 +1477,8 @@ func handleRemoveOrganizationFromService(w http.ResponseWriter, r *http.Request)
 	orgId := vars["orgId"]
 
 	_, err := db.Exec(`
-        CALL services.remove_organization_service($1, $2)
-    `, orgId, serviceId)
+			CALL services.remove_organization_service($1, $2)
+		`, orgId, serviceId)
 
 	if err != nil {
 		log.Printf("Failed to remove organization from service: %v", err)
@@ -1842,15 +1842,15 @@ func handleCheckRdmAccess(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
 
 	query := `
-        SELECT EXISTS(
-            SELECT 1 
-            FROM services.organization_services os
-            JOIN auth.organizations o ON os.organization_id = o.id
-            JOIN auth.organization_members om ON o.id = om.organization_id
-            JOIN auth.users u ON om.user_id = u.id
-            WHERE u.email = $1 
-            AND os.service_id = (SELECT id FROM services.services WHERE name = 'rdm')
-    `
+			SELECT EXISTS(
+				SELECT 1 
+				FROM services.organization_services os
+				JOIN auth.organizations o ON os.organization_id = o.id
+				JOIN auth.organization_members om ON o.id = om.organization_id
+				JOIN auth.users u ON om.user_id = u.id
+				WHERE u.email = $1 
+				AND os.service_id = (SELECT id FROM services.services WHERE name = 'rdm')
+		`
 	args := []interface{}{claims.Username}
 
 	if organizationId != "" {
@@ -1892,13 +1892,13 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, req.OrganizationID).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, req.OrganizationID).Scan(&authorized)
 
 	if err != nil || !authorized {
 		http.Error(w, "Unauthorized access to organization", http.StatusForbidden)
@@ -1917,10 +1917,10 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	if req.ParentID != nil {
 		var parentOrgID string
 		err := tx.QueryRow(`
-            SELECT organization_id 
-            FROM rdm.folders 
-            WHERE id = $1
-        `, req.ParentID).Scan(&parentOrgID)
+				SELECT organization_id 
+				FROM rdm.folders 
+				WHERE id = $1
+			`, req.ParentID).Scan(&parentOrgID)
 
 		if err != nil {
 			http.Error(w, "Parent folder not found", http.StatusNotFound)
@@ -1943,15 +1943,15 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	// Check for duplicate names at the same level
 	var duplicateExists bool
 	err = tx.QueryRow(`
-		SELECT EXISTS (
-			SELECT 1 
-			FROM rdm.folders 
-			WHERE parent_id IS NOT DISTINCT FROM $1
-			AND organization_id = $2
-			AND name ILIKE $3
-			AND deleted_at IS NULL  -- Only check against non-deleted folders
-		)
-	`, req.ParentID, req.OrganizationID, name).Scan(&duplicateExists)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.folders 
+				WHERE parent_id IS NOT DISTINCT FROM $1
+				AND organization_id = $2
+				AND name ILIKE $3
+				AND deleted_at IS NULL  -- Only check against non-deleted folders
+			)
+		`, req.ParentID, req.OrganizationID, name).Scan(&duplicateExists)
 
 	if err != nil {
 		http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
@@ -1965,15 +1965,15 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		for duplicateExists {
 			name = fmt.Sprintf("%s (%d)", baseName, counter)
 			err = tx.QueryRow(`
-				SELECT EXISTS (
-					SELECT 1 
-					FROM rdm.folders 
-					WHERE parent_id IS NOT DISTINCT FROM $1
-					AND organization_id = $2
-					AND LOWER(name) = LOWER($3)
-					AND deleted_at IS NULL  -- Only check against non-deleted folders
-				)
-			`, req.ParentID, req.OrganizationID, name).Scan(&duplicateExists)
+					SELECT EXISTS (
+						SELECT 1 
+						FROM rdm.folders 
+						WHERE parent_id IS NOT DISTINCT FROM $1
+						AND organization_id = $2
+						AND LOWER(name) = LOWER($3)
+						AND deleted_at IS NULL  -- Only check against non-deleted folders
+					)
+				`, req.ParentID, req.OrganizationID, name).Scan(&duplicateExists)
 
 			if err != nil {
 				http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
@@ -1986,10 +1986,10 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	// Create the folder
 	var folderID string
 	err = tx.QueryRow(`
-        INSERT INTO rdm.folders (name, parent_id, organization_id)
-        VALUES ($1, $2, $3)
-        RETURNING id
-    `, name, req.ParentID, req.OrganizationID).Scan(&folderID)
+			INSERT INTO rdm.folders (name, parent_id, organization_id)
+			VALUES ($1, $2, $3)
+			RETURNING id
+		`, name, req.ParentID, req.OrganizationID).Scan(&folderID)
 
 	if err != nil {
 		log.Printf("Error creating folder: %v", err)
@@ -2015,17 +2015,17 @@ func handleGetUserRdmOrganizations(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
 
 	rows, err := db.Query(`
-        SELECT DISTINCT o.id, o.name, o.description, o.created_at, o.updated_at
-        FROM auth.organizations o
-        JOIN auth.organization_members om ON o.id = om.organization_id
-        JOIN auth.users u ON om.user_id = u.id
-        JOIN services.organization_services os ON o.id = os.organization_id
-        JOIN services.services s ON os.service_id = s.id
-        WHERE u.email = $1 
-        AND s.name = 'rdm'
-        AND os.status = 'active'
-        ORDER BY o.name
-    `, claims.Username)
+			SELECT DISTINCT o.id, o.name, o.description, o.created_at, o.updated_at
+			FROM auth.organizations o
+			JOIN auth.organization_members om ON o.id = om.organization_id
+			JOIN auth.users u ON om.user_id = u.id
+			JOIN services.organization_services os ON o.id = os.organization_id
+			JOIN services.services s ON os.service_id = s.id
+			WHERE u.email = $1 
+			AND s.name = 'rdm'
+			AND os.status = 'active'
+			ORDER BY o.name
+		`, claims.Username)
 
 	if err != nil {
 		http.Error(w, "Failed to fetch organizations", http.StatusInternalServerError)
@@ -2061,13 +2061,13 @@ func handleGetFolders(w http.ResponseWriter, r *http.Request) {
 
 	var authorized bool
 	err := db.QueryRow(`
-		SELECT EXISTS (
-			SELECT 1 
-			FROM auth.organization_members om
-			JOIN auth.users u ON u.id = om.user_id
-			WHERE u.email = $1 AND om.organization_id = $2
-		)
-	`, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 
 	if err != nil || !authorized {
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
@@ -2075,42 +2075,42 @@ func handleGetFolders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(`
-    WITH RECURSIVE folder_tree AS (
-        SELECT 
-            f.id, 
-            f.name, 
-            f.parent_id, 
-            f.organization_id,
-            f.updated_at,
-            (SELECT COUNT(*) FROM rdm.documents d 
-             WHERE d.folder_id = f.id 
-             AND d.deleted_at IS NULL) as file_count,
-            (SELECT u.email FROM auth.users u 
-             WHERE u.id = f.updated_by) as last_updated_by,
-            ARRAY[f.name::text] as path
-        FROM rdm.folders f
-        WHERE f.parent_id IS NULL 
-        AND f.organization_id = $1
-        AND f.deleted_at IS NULL
-        
-        UNION ALL
-        
-        SELECT 
-            f.id, 
-            f.name, 
-            f.parent_id, 
-            f.organization_id,
-            f.updated_at,
-            (SELECT COUNT(*) FROM rdm.documents d WHERE d.folder_id = f.id) as file_count,
-            (SELECT u.email FROM auth.users u WHERE u.id = f.updated_by) as last_updated_by,
-            ft.path || f.name::text
-        FROM rdm.folders f
-        INNER JOIN folder_tree ft ON f.parent_id = ft.id
-    )
-    SELECT id, name, parent_id, organization_id, updated_at, file_count, last_updated_by
-    FROM folder_tree
-    ORDER BY path;
-	`, organizationId)
+		WITH RECURSIVE folder_tree AS (
+			SELECT 
+				f.id, 
+				f.name, 
+				f.parent_id, 
+				f.organization_id,
+				f.updated_at,
+				(SELECT COUNT(*) FROM rdm.documents d 
+				WHERE d.folder_id = f.id 
+				AND d.deleted_at IS NULL) as file_count,
+				(SELECT u.email FROM auth.users u 
+				WHERE u.id = f.updated_by) as last_updated_by,
+				ARRAY[f.name::text] as path
+			FROM rdm.folders f
+			WHERE f.parent_id IS NULL 
+			AND f.organization_id = $1
+			AND f.deleted_at IS NULL
+			
+			UNION ALL
+			
+			SELECT 
+				f.id, 
+				f.name, 
+				f.parent_id, 
+				f.organization_id,
+				f.updated_at,
+				(SELECT COUNT(*) FROM rdm.documents d WHERE d.folder_id = f.id) as file_count,
+				(SELECT u.email FROM auth.users u WHERE u.id = f.updated_by) as last_updated_by,
+				ft.path || f.name::text
+			FROM rdm.folders f
+			INNER JOIN folder_tree ft ON f.parent_id = ft.id
+		)
+		SELECT id, name, parent_id, organization_id, updated_at, file_count, last_updated_by
+		FROM folder_tree
+		ORDER BY path;
+		`, organizationId)
 
 	if err != nil {
 		log.Printf("Error fetching folders: %v", err)
@@ -2176,14 +2176,14 @@ func handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the folder
 	var authorized bool
 	err = tx.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1
-            FROM rdm.folders f
-            JOIN auth.organization_members om ON f.organization_id = om.organization_id
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE f.id = $1 AND u.email = $2
-        )
-    `, folderID, claims.Username).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1
+				FROM rdm.folders f
+				JOIN auth.organization_members om ON f.organization_id = om.organization_id
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE f.id = $1 AND u.email = $2
+			)
+		`, folderID, claims.Username).Scan(&authorized)
 
 	if err != nil || !authorized {
 		http.Error(w, "Folder not found or access denied", http.StatusForbidden)
@@ -2222,10 +2222,10 @@ func handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 	// First, get the current folder's details
 	var currentFolder Folder
 	err = tx.QueryRow(`
-        SELECT id, name, parent_id, organization_id
-        FROM rdm.folders 
-        WHERE id = $1
-    `, folderID).Scan(&currentFolder.ID, &currentFolder.Name, &currentFolder.ParentID, &currentFolder.OrganizationID)
+			SELECT id, name, parent_id, organization_id
+			FROM rdm.folders 
+			WHERE id = $1
+		`, folderID).Scan(&currentFolder.ID, &currentFolder.Name, &currentFolder.ParentID, &currentFolder.OrganizationID)
 
 	if err != nil {
 		http.Error(w, "Folder not found", http.StatusNotFound)
@@ -2235,14 +2235,14 @@ func handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access
 	var authorized bool
 	err = tx.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1
-            FROM rdm.folders f
-            JOIN auth.organization_members om ON f.organization_id = om.organization_id
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE f.id = $1 AND u.email = $2
-        )
-    `, folderID, claims.Username).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1
+				FROM rdm.folders f
+				JOIN auth.organization_members om ON f.organization_id = om.organization_id
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE f.id = $1 AND u.email = $2
+			)
+		`, folderID, claims.Username).Scan(&authorized)
 
 	if err != nil || !authorized {
 		http.Error(w, "Folder not found or access denied", http.StatusForbidden)
@@ -2267,15 +2267,15 @@ func handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 	// Check for duplicate names at the same level
 	var duplicateExists bool
 	err = tx.QueryRow(`
-    SELECT EXISTS (
-        SELECT 1 
-        FROM rdm.folders 
-        WHERE parent_id IS NOT DISTINCT FROM $1
-        AND organization_id = $2
-        AND name ILIKE $3
-        AND id != $4
-    )
-	`, currentFolder.ParentID, currentFolder.OrganizationID, newName, folderID).Scan(&duplicateExists)
+		SELECT EXISTS (
+			SELECT 1 
+			FROM rdm.folders 
+			WHERE parent_id IS NOT DISTINCT FROM $1
+			AND organization_id = $2
+			AND name ILIKE $3
+			AND id != $4
+		)
+		`, currentFolder.ParentID, currentFolder.OrganizationID, newName, folderID).Scan(&duplicateExists)
 
 	if err != nil {
 		http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
@@ -2289,15 +2289,15 @@ func handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 		for duplicateExists {
 			newName = fmt.Sprintf("%s (%d)", baseName, counter)
 			err = tx.QueryRow(`
-                SELECT EXISTS (
-                    SELECT 1 
-                    FROM rdm.folders 
-                    WHERE parent_id IS NOT DISTINCT FROM $1
-                    AND organization_id = $2
-                    AND LOWER(name) = LOWER($3)
-                    AND id != $4
-                )
-            `, currentFolder.ParentID, currentFolder.OrganizationID, newName, folderID).Scan(&duplicateExists)
+					SELECT EXISTS (
+						SELECT 1 
+						FROM rdm.folders 
+						WHERE parent_id IS NOT DISTINCT FROM $1
+						AND organization_id = $2
+						AND LOWER(name) = LOWER($3)
+						AND id != $4
+					)
+				`, currentFolder.ParentID, currentFolder.OrganizationID, newName, folderID).Scan(&duplicateExists)
 
 			if err != nil {
 				http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
@@ -2309,10 +2309,10 @@ func handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 
 	// Update the folder with the new name
 	_, err = tx.Exec(`
-        UPDATE rdm.folders 
-        SET name = $1, updated_at = CURRENT_TIMESTAMP 
-        WHERE id = $2
-    `, newName, folderID)
+			UPDATE rdm.folders 
+			SET name = $1, updated_at = CURRENT_TIMESTAMP 
+			WHERE id = $2
+		`, newName, folderID)
 
 	if err != nil {
 		log.Printf("Error renaming folder: %v", err)
@@ -2365,11 +2365,11 @@ func handleRenameDocument(w http.ResponseWriter, r *http.Request) {
 	var currentName string
 	var organizationId string
 	err = tx.QueryRow(`
-        SELECT file_path, name, organization_id
-        FROM rdm.documents 
-        WHERE id = $1
-        AND deleted_at IS NULL
-    `, documentId).Scan(&currentBlobUrl, &currentName, &organizationId)
+			SELECT file_path, name, organization_id
+			FROM rdm.documents 
+			WHERE id = $1
+			AND deleted_at IS NULL
+		`, documentId).Scan(&currentBlobUrl, &currentName, &organizationId)
 	if err != nil {
 		http.Error(w, "Document not found", http.StatusNotFound)
 		return
@@ -2378,17 +2378,17 @@ func handleRenameDocument(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access
 	var authorized bool
 	err = tx.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1
-            FROM rdm.documents d
-            JOIN auth.organization_members om ON d.organization_id = om.organization_id
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE d.id = $1 
-            AND d.organization_id = $2
-            AND u.email = $3
-            AND d.deleted_at IS NULL
-        )
-    `, documentId, req.OrganizationID, claims.Username).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1
+				FROM rdm.documents d
+				JOIN auth.organization_members om ON d.organization_id = om.organization_id
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE d.id = $1 
+				AND d.organization_id = $2
+				AND u.email = $3
+				AND d.deleted_at IS NULL
+			)
+		`, documentId, req.OrganizationID, claims.Username).Scan(&authorized)
 	if err != nil || !authorized {
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
@@ -2405,20 +2405,20 @@ func handleRenameDocument(w http.ResponseWriter, r *http.Request) {
 	// Check for duplicate names in the same folder
 	var duplicateExists bool
 	err = tx.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.documents 
-            WHERE folder_id = (
-                SELECT folder_id 
-                FROM rdm.documents 
-                WHERE id = $1
-            )
-            AND organization_id = $2
-            AND name = $3
-            AND id != $1
-            AND deleted_at IS NULL
-        )
-    `, documentId, req.OrganizationID, req.Name).Scan(&duplicateExists)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.documents 
+				WHERE folder_id = (
+					SELECT folder_id 
+					FROM rdm.documents 
+					WHERE id = $1
+				)
+				AND organization_id = $2
+				AND name = $3
+				AND id != $1
+				AND deleted_at IS NULL
+			)
+		`, documentId, req.OrganizationID, req.Name).Scan(&duplicateExists)
 	if err != nil {
 		http.Error(w, "Error checking for duplicates", http.StatusInternalServerError)
 		return
@@ -2525,13 +2525,13 @@ func handleRenameDocument(w http.ResponseWriter, r *http.Request) {
 
 	// Update the document record in the database.
 	res, err := tx.Exec(`
-    UPDATE rdm.documents 
-    SET name = $1,
-        file_path = $2,
-        updated_at = CURRENT_TIMESTAMP,
-        updated_by = (SELECT id FROM auth.users WHERE email = $3)
-    WHERE id = $4
-	`, req.Name, destBlobClient.URL(), claims.Username, documentId)
+		UPDATE rdm.documents 
+		SET name = $1,
+			file_path = $2,
+			updated_at = CURRENT_TIMESTAMP,
+			updated_by = (SELECT id FROM auth.users WHERE email = $3)
+		WHERE id = $4
+		`, req.Name, destBlobClient.URL(), claims.Username, documentId)
 	if err != nil {
 		log.Printf("Failed to update document record: %v", err)
 		http.Error(w, "Failed to update document record", http.StatusInternalServerError)
@@ -2586,14 +2586,14 @@ func handleMoveFolderStructure(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to both folders
 	var authorized bool
 	err = tx.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1
-            FROM rdm.folders f
-            JOIN auth.organization_members om ON f.organization_id = om.organization_id
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE f.id = $1 AND u.email = $2
-        )
-    `, folderID, claims.Username).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1
+				FROM rdm.folders f
+				JOIN auth.organization_members om ON f.organization_id = om.organization_id
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE f.id = $1 AND u.email = $2
+			)
+		`, folderID, claims.Username).Scan(&authorized)
 
 	if err != nil || !authorized {
 		http.Error(w, "Folder not found or access denied", http.StatusForbidden)
@@ -2603,14 +2603,14 @@ func handleMoveFolderStructure(w http.ResponseWriter, r *http.Request) {
 	// If moving to a new parent, verify access to parent folder
 	if req.NewParentID != nil {
 		err = tx.QueryRow(`
-            SELECT EXISTS (
-                SELECT 1
-                FROM rdm.folders f
-                JOIN auth.organization_members om ON f.organization_id = om.organization_id
-                JOIN auth.users u ON u.id = om.user_id
-                WHERE f.id = $1 AND u.email = $2
-            )
-        `, req.NewParentID, claims.Username).Scan(&authorized)
+				SELECT EXISTS (
+					SELECT 1
+					FROM rdm.folders f
+					JOIN auth.organization_members om ON f.organization_id = om.organization_id
+					JOIN auth.users u ON u.id = om.user_id
+					WHERE f.id = $1 AND u.email = $2
+				)
+			`, req.NewParentID, claims.Username).Scan(&authorized)
 
 		if err != nil || !authorized {
 			http.Error(w, "Parent folder not found or access denied", http.StatusForbidden)
@@ -2620,10 +2620,10 @@ func handleMoveFolderStructure(w http.ResponseWriter, r *http.Request) {
 
 	// Update the folder's parent
 	_, err = tx.Exec(`
-        UPDATE rdm.folders 
-        SET parent_id = $1, updated_at = CURRENT_TIMESTAMP 
-        WHERE id = $2
-    `, req.NewParentID, folderID)
+			UPDATE rdm.folders 
+			SET parent_id = $1, updated_at = CURRENT_TIMESTAMP 
+			WHERE id = $2
+		`, req.NewParentID, folderID)
 
 	if err != nil {
 		log.Printf("Error moving folder: %v", err)
@@ -2654,13 +2654,13 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 
 	if err != nil || !authorized {
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
@@ -2669,12 +2669,12 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 
 	// Base query
 	query := `
-    SELECT 
-        d.id, d.name, d.file_type, d.file_size, d.version, d.updated_at, d.folder_id, d.organization_id, d.project_id
-    FROM rdm.documents d
-    WHERE d.organization_id = $1
-    AND d.deleted_at IS NULL
-    `
+		SELECT 
+			d.id, d.name, d.file_type, d.file_size, d.version, d.updated_at, d.folder_id, d.organization_id, d.project_id
+		FROM rdm.documents d
+		WHERE d.organization_id = $1
+		AND d.deleted_at IS NULL
+		`
 	args := []interface{}{organizationId}
 	paramCount := 1
 
@@ -2757,13 +2757,13 @@ func handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 	if err != nil {
 		log.Printf("Error checking authorization: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -2866,14 +2866,14 @@ func handleUploadDocument(w http.ResponseWriter, r *http.Request) {
 
 	var documentId string
 	err = tx.QueryRow(`
-        INSERT INTO rdm.documents (
-            name, original_file_name, file_path, file_type, mime_type,
-            file_size, checksum, version, folder_id, organization_id,
-            created_by, upload_ip, user_agent
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, 
-            (SELECT id FROM auth.users WHERE email = $10), $11, $12)
-        RETURNING id
-    `,
+			INSERT INTO rdm.documents (
+				name, original_file_name, file_path, file_type, mime_type,
+				file_size, checksum, version, folder_id, organization_id,
+				created_by, upload_ip, user_agent
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, 
+				(SELECT id FROM auth.users WHERE email = $10), $11, $12)
+			RETURNING id
+		`,
 		header.Filename,
 		header.Filename,
 		blockBlobClient.URL(),
@@ -2926,10 +2926,10 @@ func handleUpdateDocument(w http.ResponseWriter, r *http.Request) {
 
 	var organizationId string
 	err := db.QueryRow(`
-        SELECT organization_id 
-        FROM rdm.documents 
-        WHERE id = $1
-    `, documentId).Scan(&organizationId)
+			SELECT organization_id 
+			FROM rdm.documents 
+			WHERE id = $1
+		`, documentId).Scan(&organizationId)
 	if err != nil {
 		http.Error(w, "Document not found or error fetching document", http.StatusNotFound)
 		return
@@ -2937,13 +2937,13 @@ func handleUpdateDocument(w http.ResponseWriter, r *http.Request) {
 
 	var authorized bool
 	err = db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 	if err != nil || !authorized {
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
 		return
@@ -2972,10 +2972,10 @@ func handleUpdateDocument(w http.ResponseWriter, r *http.Request) {
 	var currentVersion int
 	var currentBlobPath string
 	err = tx.QueryRow(`
-        SELECT version, file_path 
-        FROM rdm.documents 
-        WHERE id = $1
-    `, documentId).Scan(&currentVersion, &currentBlobPath)
+			SELECT version, file_path 
+			FROM rdm.documents 
+			WHERE id = $1
+		`, documentId).Scan(&currentVersion, &currentBlobPath)
 	if err != nil {
 		http.Error(w, "Failed to get current document version", http.StatusInternalServerError)
 		return
@@ -3014,26 +3014,26 @@ func handleUpdateDocument(w http.ResponseWriter, r *http.Request) {
 	checksum := hex.EncodeToString(hasher.Sum(nil))
 
 	_, err = tx.Exec(`
-        INSERT INTO rdm.document_versions (
-            document_id,
-            version,
-            file_path,
-            file_type,
-            file_size,
-            checksum,
-            created_by
-        )
-        SELECT 
-            id, 
-            version, 
-            file_path, 
-            file_type, 
-            file_size, 
-            checksum, 
-            created_by
-        FROM rdm.documents
-        WHERE id = $1
-    `, documentId)
+			INSERT INTO rdm.document_versions (
+				document_id,
+				version,
+				file_path,
+				file_type,
+				file_size,
+				checksum,
+				created_by
+			)
+			SELECT 
+				id, 
+				version, 
+				file_path, 
+				file_type, 
+				file_size, 
+				checksum, 
+				created_by
+			FROM rdm.documents
+			WHERE id = $1
+		`, documentId)
 	if err != nil {
 		http.Error(w, "Failed to archive current version metadata", http.StatusInternalServerError)
 		return
@@ -3047,21 +3047,21 @@ func handleUpdateDocument(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = tx.Exec(`
-        UPDATE rdm.documents
-        SET 
-            original_file_name = $1,
-            file_path = $2,
-            file_type = $3,
-            mime_type = $4,
-            file_size = $5,
-            checksum = $6,
-            version = $7,
-            upload_ip = $8,
-            user_agent = $9,
-            updated_at = CURRENT_TIMESTAMP,
-            updated_by = (SELECT id FROM auth.users WHERE email = $10)
-        WHERE id = $11
-    `,
+			UPDATE rdm.documents
+			SET 
+				original_file_name = $1,
+				file_path = $2,
+				file_type = $3,
+				mime_type = $4,
+				file_size = $5,
+				checksum = $6,
+				version = $7,
+				upload_ip = $8,
+				user_agent = $9,
+				updated_at = CURRENT_TIMESTAMP,
+				updated_by = (SELECT id FROM auth.users WHERE email = $10)
+			WHERE id = $11
+		`,
 		header.Filename,
 		blobURL,
 		filepath.Ext(header.Filename),
@@ -3112,10 +3112,10 @@ func handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 	// Look up document info.
 	var organizationId, blobUrl string
 	err := db.QueryRow(`
-        SELECT organization_id, file_path
-        FROM rdm.documents 
-        WHERE id = $1
-    `, documentId).Scan(&organizationId, &blobUrl)
+			SELECT organization_id, file_path
+			FROM rdm.documents 
+			WHERE id = $1
+		`, documentId).Scan(&organizationId, &blobUrl)
 	if err != nil {
 		http.Error(w, "Document not found", http.StatusNotFound)
 		return
@@ -3124,13 +3124,13 @@ func handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 	// Verify user's authorization.
 	var authorized bool
 	err = db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1
-            FROM auth.organization_members om
-            JOIN auth.users u ON om.user_id = u.id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1
+				FROM auth.organization_members om
+				JOIN auth.users u ON om.user_id = u.id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 	if err != nil || !authorized {
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
@@ -3259,10 +3259,10 @@ func handleDownloadDocument(w http.ResponseWriter, r *http.Request) {
 	var blobUrl string
 	var fileName string
 	err := db.QueryRow(`
-        SELECT organization_id, file_path, name
-        FROM rdm.documents
-        WHERE id = $1
-    `, documentId).Scan(&organizationId, &blobUrl, &fileName)
+			SELECT organization_id, file_path, name
+			FROM rdm.documents
+			WHERE id = $1
+		`, documentId).Scan(&organizationId, &blobUrl, &fileName)
 
 	if err == sql.ErrNoRows {
 		http.Error(w, "Document not found", http.StatusNotFound)
@@ -3271,13 +3271,13 @@ func handleDownloadDocument(w http.ResponseWriter, r *http.Request) {
 
 	var authorized bool
 	err = db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1
-            FROM auth.organization_members om
-            JOIN auth.users u ON om.user_id = u.id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1
+				FROM auth.organization_members om
+				JOIN auth.users u ON om.user_id = u.id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 
 	if err != nil || !authorized {
 		http.Error(w, "Access denied", http.StatusForbidden)
@@ -3367,11 +3367,11 @@ func handleTrashDocument(w http.ResponseWriter, r *http.Request) {
 
 	// Soft delete the document
 	_, err = db.Exec(`
-        UPDATE rdm.documents 
-        SET deleted_at = CURRENT_TIMESTAMP, 
-            deleted_by = $1 
-        WHERE id = $2
-    `, userId, documentId)
+			UPDATE rdm.documents 
+			SET deleted_at = CURRENT_TIMESTAMP, 
+				deleted_by = $1 
+			WHERE id = $2
+		`, userId, documentId)
 
 	if err != nil {
 		http.Error(w, "Failed to trash document", http.StatusInternalServerError)
@@ -3387,11 +3387,11 @@ func handleRestoreDocument(w http.ResponseWriter, r *http.Request) {
 	documentId := vars["id"]
 
 	_, err := db.Exec(`
-        UPDATE rdm.documents 
-        SET deleted_at = NULL, 
-            deleted_by = NULL 
-        WHERE id = $1
-    `, documentId)
+			UPDATE rdm.documents 
+			SET deleted_at = NULL, 
+				deleted_by = NULL 
+			WHERE id = $1
+		`, documentId)
 
 	if err != nil {
 		http.Error(w, "Failed to restore document", http.StatusInternalServerError)
@@ -3428,17 +3428,17 @@ func handleTrashFolder(w http.ResponseWriter, r *http.Request) {
 
 	// Soft delete the folder and all its contents
 	_, err = tx.Exec(`
-        WITH RECURSIVE folder_tree AS (
-            SELECT id FROM rdm.folders WHERE id = $1
-            UNION ALL
-            SELECT f.id FROM rdm.folders f
-            INNER JOIN folder_tree ft ON f.parent_id = ft.id
-        )
-        UPDATE rdm.folders 
-        SET deleted_at = CURRENT_TIMESTAMP,
-            deleted_by = $2
-        WHERE id IN (SELECT id FROM folder_tree)
-    `, folderId, userId)
+			WITH RECURSIVE folder_tree AS (
+				SELECT id FROM rdm.folders WHERE id = $1
+				UNION ALL
+				SELECT f.id FROM rdm.folders f
+				INNER JOIN folder_tree ft ON f.parent_id = ft.id
+			)
+			UPDATE rdm.folders 
+			SET deleted_at = CURRENT_TIMESTAMP,
+				deleted_by = $2
+			WHERE id IN (SELECT id FROM folder_tree)
+		`, folderId, userId)
 
 	if err != nil {
 		http.Error(w, "Failed to trash folder", http.StatusInternalServerError)
@@ -3447,17 +3447,17 @@ func handleTrashFolder(w http.ResponseWriter, r *http.Request) {
 
 	// Soft delete all documents in the folder tree
 	_, err = tx.Exec(`
-        WITH RECURSIVE folder_tree AS (
-            SELECT id FROM rdm.folders WHERE id = $1
-            UNION ALL
-            SELECT f.id FROM rdm.folders f
-            INNER JOIN folder_tree ft ON f.parent_id = ft.id
-        )
-        UPDATE rdm.documents
-        SET deleted_at = CURRENT_TIMESTAMP,
-            deleted_by = $2
-        WHERE folder_id IN (SELECT id FROM folder_tree)
-    `, folderId, userId)
+			WITH RECURSIVE folder_tree AS (
+				SELECT id FROM rdm.folders WHERE id = $1
+				UNION ALL
+				SELECT f.id FROM rdm.folders f
+				INNER JOIN folder_tree ft ON f.parent_id = ft.id
+			)
+			UPDATE rdm.documents
+			SET deleted_at = CURRENT_TIMESTAMP,
+				deleted_by = $2
+			WHERE folder_id IN (SELECT id FROM folder_tree)
+		`, folderId, userId)
 
 	if err != nil {
 		http.Error(w, "Failed to trash folder contents", http.StatusInternalServerError)
@@ -3488,13 +3488,13 @@ func handleGetTrashItems(w http.ResponseWriter, r *http.Request) {
 
 	// Get trashed folders
 	rows, err := db.Query(`
-        SELECT f.id, f.name, 'folder' as type, f.deleted_at, u.email as deleted_by
-        FROM rdm.folders f
-        JOIN auth.users u ON f.deleted_by = u.id
-        WHERE f.organization_id = $1 
-        AND f.deleted_at IS NOT NULL
-        ORDER BY f.deleted_at DESC
-    `, organizationId)
+			SELECT f.id, f.name, 'folder' as type, f.deleted_at, u.email as deleted_by
+			FROM rdm.folders f
+			JOIN auth.users u ON f.deleted_by = u.id
+			WHERE f.organization_id = $1 
+			AND f.deleted_at IS NOT NULL
+			ORDER BY f.deleted_at DESC
+		`, organizationId)
 
 	if err != nil {
 		http.Error(w, "Failed to fetch trash items", http.StatusInternalServerError)
@@ -3513,13 +3513,13 @@ func handleGetTrashItems(w http.ResponseWriter, r *http.Request) {
 
 	// Get trashed documents
 	rows, err = db.Query(`
-        SELECT d.id, d.name, 'document' as type, d.deleted_at, u.email as deleted_by
-        FROM rdm.documents d
-        JOIN auth.users u ON d.deleted_by = u.id
-        WHERE d.organization_id = $1 
-        AND d.deleted_at IS NOT NULL
-        ORDER BY d.deleted_at DESC
-    `, organizationId)
+			SELECT d.id, d.name, 'document' as type, d.deleted_at, u.email as deleted_by
+			FROM rdm.documents d
+			JOIN auth.users u ON d.deleted_by = u.id
+			WHERE d.organization_id = $1 
+			AND d.deleted_at IS NOT NULL
+			ORDER BY d.deleted_at DESC
+		`, organizationId)
 
 	if err != nil {
 		http.Error(w, "Failed to fetch trash items", http.StatusInternalServerError)
@@ -3583,13 +3583,13 @@ func handleRestoreFolder(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 
 	if err != nil || !authorized {
 		http.Error(w, "Access denied", http.StatusForbidden)
@@ -3605,17 +3605,17 @@ func handleRestoreFolder(w http.ResponseWriter, r *http.Request) {
 
 	// Restore the folder and all its contents
 	_, err = tx.Exec(`
-        WITH RECURSIVE folder_tree AS (
-            SELECT id FROM rdm.folders WHERE id = $1
-            UNION ALL
-            SELECT f.id FROM rdm.folders f
-            INNER JOIN folder_tree ft ON f.parent_id = ft.id
-        )
-        UPDATE rdm.folders 
-        SET deleted_at = NULL,
-            deleted_by = NULL
-        WHERE id IN (SELECT id FROM folder_tree)
-    `, folderId)
+			WITH RECURSIVE folder_tree AS (
+				SELECT id FROM rdm.folders WHERE id = $1
+				UNION ALL
+				SELECT f.id FROM rdm.folders f
+				INNER JOIN folder_tree ft ON f.parent_id = ft.id
+			)
+			UPDATE rdm.folders 
+			SET deleted_at = NULL,
+				deleted_by = NULL
+			WHERE id IN (SELECT id FROM folder_tree)
+		`, folderId)
 
 	if err != nil {
 		http.Error(w, "Failed to restore folder", http.StatusInternalServerError)
@@ -3624,17 +3624,17 @@ func handleRestoreFolder(w http.ResponseWriter, r *http.Request) {
 
 	// Restore all documents in the folder tree
 	_, err = tx.Exec(`
-        WITH RECURSIVE folder_tree AS (
-            SELECT id FROM rdm.folders WHERE id = $1
-            UNION ALL
-            SELECT f.id FROM rdm.folders f
-            INNER JOIN folder_tree ft ON f.parent_id = ft.id
-        )
-        UPDATE rdm.documents
-        SET deleted_at = NULL,
-            deleted_by = NULL
-        WHERE folder_id IN (SELECT id FROM folder_tree)
-    `, folderId)
+			WITH RECURSIVE folder_tree AS (
+				SELECT id FROM rdm.folders WHERE id = $1
+				UNION ALL
+				SELECT f.id FROM rdm.folders f
+				INNER JOIN folder_tree ft ON f.parent_id = ft.id
+			)
+			UPDATE rdm.documents
+			SET deleted_at = NULL,
+				deleted_by = NULL
+			WHERE folder_id IN (SELECT id FROM folder_tree)
+		`, folderId)
 
 	if err != nil {
 		http.Error(w, "Failed to restore folder contents", http.StatusInternalServerError)
@@ -3667,13 +3667,13 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 	if err != nil {
 		log.Printf("[PermanentDelete] Error checking organization membership: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -3699,17 +3699,17 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[PermanentDelete] Processing permanent deletion for folder id=%s", itemId)
 		// Delete all documents in the folder tree from blob storage
 		rows, err := tx.Query(`
-            WITH RECURSIVE folder_tree AS (
-                SELECT id FROM rdm.folders WHERE id = $1
-                UNION ALL
-                SELECT f.id FROM rdm.folders f
-                INNER JOIN folder_tree ft ON f.parent_id = ft.id
-            )
-            SELECT d.id, d.file_path 
-            FROM rdm.documents d
-            JOIN folder_tree ft ON d.folder_id = ft.id
-            WHERE d.deleted_at IS NOT NULL
-        `, itemId)
+				WITH RECURSIVE folder_tree AS (
+					SELECT id FROM rdm.folders WHERE id = $1
+					UNION ALL
+					SELECT f.id FROM rdm.folders f
+					INNER JOIN folder_tree ft ON f.parent_id = ft.id
+				)
+				SELECT d.id, d.file_path 
+				FROM rdm.documents d
+				JOIN folder_tree ft ON d.folder_id = ft.id
+				WHERE d.deleted_at IS NOT NULL
+			`, itemId)
 		if err != nil {
 			log.Printf("[PermanentDelete] Failed to query documents for folder %s: %v", itemId, err)
 			http.Error(w, "Failed to get documents", http.StatusInternalServerError)
@@ -3736,9 +3736,9 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
 
 			// Delete associated project_artifacts
 			_, err = tx.Exec(`
-                DELETE FROM rdm.project_artifacts
-                WHERE document_id = $1
-            `, docId)
+					DELETE FROM rdm.project_artifacts
+					WHERE document_id = $1
+				`, docId)
 			if err != nil {
 				log.Printf("[PermanentDelete] Failed to delete project_artifacts for document %s: %v", docId, err)
 				http.Error(w, "Failed to delete associated artifacts", http.StatusInternalServerError)
@@ -3759,14 +3759,14 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
 		// Permanently delete the folder and its children
 		log.Printf("[PermanentDelete] Attempting to permanently delete folder and its subtree for folder id=%s", itemId)
 		res, err := tx.Exec(`
-            WITH RECURSIVE folder_tree AS (
-                SELECT id FROM rdm.folders WHERE id = $1
-                UNION ALL
-                SELECT f.id FROM rdm.folders f
-                INNER JOIN folder_tree ft ON f.parent_id = ft.id
-            )
-            DELETE FROM rdm.folders WHERE id IN (SELECT id FROM folder_tree)
-        `, itemId)
+				WITH RECURSIVE folder_tree AS (
+					SELECT id FROM rdm.folders WHERE id = $1
+					UNION ALL
+					SELECT f.id FROM rdm.folders f
+					INNER JOIN folder_tree ft ON f.parent_id = ft.id
+				)
+				DELETE FROM rdm.folders WHERE id IN (SELECT id FROM folder_tree)
+			`, itemId)
 		if err != nil {
 			log.Printf("[PermanentDelete] Failed to delete folder: %v", err)
 			http.Error(w, "Failed to delete folder", http.StatusInternalServerError)
@@ -3799,9 +3799,9 @@ func handlePermanentDelete(w http.ResponseWriter, r *http.Request) {
 
 		// Delete associated project_artifacts
 		_, err = tx.Exec(`
-            DELETE FROM rdm.project_artifacts
-            WHERE document_id = $1
-        `, itemId)
+				DELETE FROM rdm.project_artifacts
+				WHERE document_id = $1
+			`, itemId)
 		if err != nil {
 			log.Printf("[PermanentDelete] Failed to delete project_artifacts for document %s: %v", itemId, err)
 			http.Error(w, "Failed to delete associated artifacts", http.StatusInternalServerError)
@@ -3904,13 +3904,13 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 
 	if err != nil {
 		log.Printf("[handleGetPages] Database error checking authorization: %v", err)
@@ -3925,8 +3925,8 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 		// Log additional debugging info
 		var userExists bool
 		err := db.QueryRow(`
-            SELECT EXISTS(SELECT 1 FROM auth.users WHERE email = $1)
-        `, claims.Username).Scan(&userExists)
+				SELECT EXISTS(SELECT 1 FROM auth.users WHERE email = $1)
+			`, claims.Username).Scan(&userExists)
 		if err != nil {
 			log.Printf("[handleGetPages] Error checking user existence: %v", err)
 		} else {
@@ -3935,8 +3935,8 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 
 		var orgExists bool
 		err = db.QueryRow(`
-            SELECT EXISTS(SELECT 1 FROM auth.organizations WHERE id = $1)
-        `, organizationId).Scan(&orgExists)
+				SELECT EXISTS(SELECT 1 FROM auth.organizations WHERE id = $1)
+			`, organizationId).Scan(&orgExists)
 		if err != nil {
 			log.Printf("[handleGetPages] Error checking organization existence: %v", err)
 		} else {
@@ -3945,11 +3945,11 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 
 		// Log membership entries
 		rows, err := db.Query(`
-            SELECT om.user_id, u.email, om.organization_id 
-            FROM auth.organization_members om
-            JOIN auth.users u ON om.user_id = u.id
-            WHERE organization_id = $1
-        `, organizationId)
+				SELECT om.user_id, u.email, om.organization_id 
+				FROM auth.organization_members om
+				JOIN auth.users u ON om.user_id = u.id
+				WHERE organization_id = $1
+			`, organizationId)
 		if err != nil {
 			log.Printf("[handleGetPages] Error querying org members: %v", err)
 		} else {
@@ -3975,25 +3975,25 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 
 	// Build query with parameters
 	query := `
-        SELECT 
-            pc.id, 
-            pc.parent_id,
-            pc.name,
-            COALESCE(pc.content, '') as content,
-            pc.status,
-            cb.email as created_by,
-            ub.email as updated_by,
-            db.email as deleted_by,
-            pc.created_at,
-            pc.updated_at,
-            pc.deleted_at
-        FROM pages.pages_content pc
-        LEFT JOIN auth.users cb ON pc.created_by = cb.id
-        LEFT JOIN auth.users ub ON pc.updated_by = ub.id
-        LEFT JOIN auth.users db ON pc.deleted_by = db.id
-        WHERE pc.organization_id = $1
-        AND pc.deleted_at IS NULL
-    `
+			SELECT 
+				pc.id, 
+				pc.parent_id,
+				pc.name,
+				COALESCE(pc.content, '') as content,
+				pc.status,
+				cb.email as created_by,
+				ub.email as updated_by,
+				db.email as deleted_by,
+				pc.created_at,
+				pc.updated_at,
+				pc.deleted_at
+			FROM pages.pages_content pc
+			LEFT JOIN auth.users cb ON pc.created_by = cb.id
+			LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+			LEFT JOIN auth.users db ON pc.deleted_by = db.id
+			WHERE pc.organization_id = $1
+			AND pc.deleted_at IS NULL
+		`
 	args := []interface{}{organizationId}
 	paramCount := 1
 
@@ -4104,10 +4104,10 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 	var orgId string
 	var currentProjectId sql.NullString
 	err = tx.QueryRow(`
-        SELECT organization_id, project_id
-        FROM rdm.documents
-        WHERE id = $1 AND deleted_at IS NULL
-    `, documentId).Scan(&orgId, &currentProjectId)
+			SELECT organization_id, project_id
+			FROM rdm.documents
+			WHERE id = $1 AND deleted_at IS NULL
+		`, documentId).Scan(&orgId, &currentProjectId)
 	if err == sql.ErrNoRows {
 		log.Printf("Document %s not found", documentId)
 		http.Error(w, "Document not found", http.StatusNotFound)
@@ -4122,13 +4122,13 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 	// Verify user has access to the organization
 	var authorized bool
 	err = tx.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, orgId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, orgId).Scan(&authorized)
 	if err != nil || !authorized {
 		log.Printf("Access denied for user %s to organization %s: %v", claims.Username, orgId, err)
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
@@ -4147,10 +4147,10 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 	// Get the document's original name
 	var docName string
 	err = tx.QueryRow(`
-        SELECT name
-        FROM rdm.documents
-        WHERE id = $1 AND deleted_at IS NULL
-    `, documentId).Scan(&docName)
+			SELECT name
+			FROM rdm.documents
+			WHERE id = $1 AND deleted_at IS NULL
+		`, documentId).Scan(&docName)
 	if err != nil {
 		log.Printf("Failed to fetch document name for %s: %v", documentId, err)
 		http.Error(w, "Failed to fetch document name", http.StatusInternalServerError)
@@ -4161,10 +4161,10 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 		// Linking to a project
 		var projectOrgId string
 		err = tx.QueryRow(`
-            SELECT organization_id
-            FROM rdm.projects
-            WHERE id = $1
-        `, *req.ProjectID).Scan(&projectOrgId)
+				SELECT organization_id
+				FROM rdm.projects
+				WHERE id = $1
+			`, *req.ProjectID).Scan(&projectOrgId)
 		if err == sql.ErrNoRows {
 			log.Printf("Project %s not found", *req.ProjectID)
 			http.Error(w, "Project not found", http.StatusNotFound)
@@ -4184,13 +4184,13 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 		// Verify user is a member of the project
 		var isMember bool
 		err = tx.QueryRow(`
-            SELECT EXISTS (
-                SELECT 1 
-                FROM rdm.project_members pm
-                JOIN auth.users u ON pm.user_id = u.id
-                WHERE pm.project_id = $1 AND u.email = $2
-            )
-        `, *req.ProjectID, claims.Username).Scan(&isMember)
+				SELECT EXISTS (
+					SELECT 1 
+					FROM rdm.project_members pm
+					JOIN auth.users u ON pm.user_id = u.id
+					WHERE pm.project_id = $1 AND u.email = $2
+				)
+			`, *req.ProjectID, claims.Username).Scan(&isMember)
 		if err != nil || !isMember {
 			log.Printf("User %s is not a member of project %s: %v", claims.Username, *req.ProjectID, err)
 			http.Error(w, "User is not a member of the project", http.StatusForbidden)
@@ -4199,12 +4199,12 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 
 		// Update document's project_id
 		_, err = tx.Exec(`
-            UPDATE rdm.documents 
-            SET project_id = $1,
-                updated_at = CURRENT_TIMESTAMP,
-                updated_by = $2
-            WHERE id = $3
-        `, *req.ProjectID, userId, documentId)
+				UPDATE rdm.documents 
+				SET project_id = $1,
+					updated_at = CURRENT_TIMESTAMP,
+					updated_by = $2
+				WHERE id = $3
+			`, *req.ProjectID, userId, documentId)
 		if err != nil {
 			log.Printf("Failed to associate document %s with project %s: %v", documentId, *req.ProjectID, err)
 			http.Error(w, "Failed to associate document with project", http.StatusInternalServerError)
@@ -4260,10 +4260,10 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 
 		// Insert into project_artifacts with preserved extension
 		_, err = tx.Exec(`
-            INSERT INTO rdm.project_artifacts (
-                project_id, name, type, status, document_id, description, created_by, updated_by
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
-        `, *req.ProjectID, artifactName, artifactType, artifactStatus, documentId, req.Description, userId)
+				INSERT INTO rdm.project_artifacts (
+					project_id, name, type, status, document_id, description, created_by, updated_by
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+			`, *req.ProjectID, artifactName, artifactType, artifactStatus, documentId, req.Description, userId)
 		if err != nil {
 			log.Printf("Failed to create artifact for document %s in project %s: %v", documentId, *req.ProjectID, err)
 			http.Error(w, "Failed to create artifact", http.StatusInternalServerError)
@@ -4272,12 +4272,12 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 	} else {
 		// Unlinking from a project
 		_, err = tx.Exec(`
-            UPDATE rdm.documents 
-            SET project_id = NULL,
-                updated_at = CURRENT_TIMESTAMP,
-                updated_by = $1
-            WHERE id = $2
-        `, userId, documentId)
+				UPDATE rdm.documents 
+				SET project_id = NULL,
+					updated_at = CURRENT_TIMESTAMP,
+					updated_by = $1
+				WHERE id = $2
+			`, userId, documentId)
 		if err != nil {
 			log.Printf("Failed to unlink document %s from project: %v", documentId, err)
 			http.Error(w, "Failed to unlink document from project", http.StatusInternalServerError)
@@ -4286,9 +4286,9 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 
 		// Delete the corresponding artifact entry
 		_, err = tx.Exec(`
-            DELETE FROM rdm.project_artifacts
-            WHERE document_id = $1
-        `, documentId)
+				DELETE FROM rdm.project_artifacts
+				WHERE document_id = $1
+			`, documentId)
 		if err != nil {
 			log.Printf("Failed to remove artifact for document %s: %v", documentId, err)
 			http.Error(w, "Failed to remove artifact association", http.StatusInternalServerError)
@@ -4338,8 +4338,8 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 	var projectId string
 	var documentId sql.NullString
 	err := db.QueryRow(`
-        SELECT project_id, document_id FROM rdm.project_artifacts WHERE id = $1
-    `, artifactId).Scan(&projectId, &documentId)
+			SELECT project_id, document_id FROM rdm.project_artifacts WHERE id = $1
+		`, artifactId).Scan(&projectId, &documentId)
 	if err == sql.ErrNoRows {
 		log.Printf("[handleUpdateArtifact] Artifact %s not found - returning 404", artifactId)
 		http.Error(w, "Artifact not found", http.StatusNotFound)
@@ -4354,15 +4354,15 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 	// Check if user is a super admin or a project member
 	var isSuperAdmin bool
 	err = db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.user_roles ur
-            JOIN auth.roles r ON ur.role_id = r.id
-            JOIN auth.users u ON ur.user_id = u.id
-            WHERE u.email = $1 
-            AND r.name = 'super_admin'
-        )
-    `, claims.Username).Scan(&isSuperAdmin)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.user_roles ur
+				JOIN auth.roles r ON ur.role_id = r.id
+				JOIN auth.users u ON ur.user_id = u.id
+				WHERE u.email = $1 
+				AND r.name = 'super_admin'
+			)
+		`, claims.Username).Scan(&isSuperAdmin)
 	if err != nil {
 		log.Printf("[handleUpdateArtifact] Database error checking super admin status: %v", err)
 		http.Error(w, "Failed to check super admin status", http.StatusInternalServerError)
@@ -4371,13 +4371,13 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 
 	var isMember bool
 	err = db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-        )
-    `, projectId, claims.Username).Scan(&isMember)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+			)
+		`, projectId, claims.Username).Scan(&isMember)
 	if err != nil {
 		log.Printf("[handleUpdateArtifact] Database error checking membership: %v", err)
 		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
@@ -4394,8 +4394,8 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 	if updateData.Type == "document" && documentId.Valid {
 		var docName string
 		err = db.QueryRow(`
-            SELECT name FROM rdm.documents WHERE id = $1
-        `, documentId.String).Scan(&docName)
+				SELECT name FROM rdm.documents WHERE id = $1
+			`, documentId.String).Scan(&docName)
 		if err == nil {
 			originalExt := ""
 			if lastDotIndex := strings.LastIndex(docName, "."); lastDotIndex != -1 {
@@ -4419,12 +4419,12 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 
 	// Update rdm.project_artifacts
 	_, err = tx.Exec(`
-        UPDATE rdm.project_artifacts
-        SET name = $1, type = $2, status = $3, description = $4, document_id = $5,
-            updated_at = CURRENT_TIMESTAMP,
-            updated_by = (SELECT id FROM auth.users WHERE email = $6)
-        WHERE id = $7
-    `, updateData.Name, updateData.Type, updateData.Status, updateData.Description, updateData.DocumentId, claims.Username, artifactId)
+			UPDATE rdm.project_artifacts
+			SET name = $1, type = $2, status = $3, description = $4, document_id = $5,
+				updated_at = CURRENT_TIMESTAMP,
+				updated_by = (SELECT id FROM auth.users WHERE email = $6)
+			WHERE id = $7
+		`, updateData.Name, updateData.Type, updateData.Status, updateData.Description, updateData.DocumentId, claims.Username, artifactId)
 	if err != nil {
 		log.Printf("[handleUpdateArtifact] Failed to update project_artifacts: %v", err)
 		http.Error(w, "Failed to update artifact", http.StatusInternalServerError)
@@ -4434,12 +4434,12 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 	// If there's a document_id, update rdm.documents.name as well
 	if documentId.Valid {
 		result, err := tx.Exec(`
-            UPDATE rdm.documents
-            SET name = $1,
-                updated_at = CURRENT_TIMESTAMP,
-                updated_by = (SELECT id FROM auth.users WHERE email = $2)
-            WHERE id = $3
-        `, updateData.Name, claims.Username, documentId.String)
+				UPDATE rdm.documents
+				SET name = $1,
+					updated_at = CURRENT_TIMESTAMP,
+					updated_by = (SELECT id FROM auth.users WHERE email = $2)
+				WHERE id = $3
+			`, updateData.Name, claims.Username, documentId.String)
 		if err != nil {
 			log.Printf("[handleUpdateArtifact] Failed to update documents: %v", err)
 			http.Error(w, "Failed to update document", http.StatusInternalServerError)
@@ -4497,10 +4497,10 @@ func handleAssociatePageWithProject(w http.ResponseWriter, r *http.Request) {
 	// Get page's organization ID
 	var orgId string
 	err = tx.QueryRow(`
-		SELECT organization_id
-		FROM pages.pages_content
-		WHERE id = $1 AND deleted_at IS NULL
-	`, pageId).Scan(&orgId)
+			SELECT organization_id
+			FROM pages.pages_content
+			WHERE id = $1 AND deleted_at IS NULL
+		`, pageId).Scan(&orgId)
 	if err == sql.ErrNoRows {
 		http.Error(w, "Page not found", http.StatusNotFound)
 		return
@@ -4513,13 +4513,13 @@ func handleAssociatePageWithProject(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the organization
 	var authorized bool
 	err = tx.QueryRow(`
-		SELECT EXISTS (
-			SELECT 1 
-			FROM auth.organization_members om
-			JOIN auth.users u ON u.id = om.user_id
-			WHERE u.email = $1 AND om.organization_id = $2
-		)
-	`, claims.Username, orgId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, orgId).Scan(&authorized)
 	if err != nil || !authorized {
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
 		return
@@ -4536,10 +4536,10 @@ func handleAssociatePageWithProject(w http.ResponseWriter, r *http.Request) {
 	// Get the page's name
 	var pageName string
 	err = tx.QueryRow(`
-		SELECT name
-		FROM pages.pages_content
-		WHERE id = $1 AND deleted_at IS NULL
-	`, pageId).Scan(&pageName)
+			SELECT name
+			FROM pages.pages_content
+			WHERE id = $1 AND deleted_at IS NULL
+		`, pageId).Scan(&pageName)
 	if err != nil {
 		http.Error(w, "Failed to fetch page name", http.StatusInternalServerError)
 		return
@@ -4549,10 +4549,10 @@ func handleAssociatePageWithProject(w http.ResponseWriter, r *http.Request) {
 		// Linking to a project - first verify project exists and user has access
 		var projectOrgId string
 		err = tx.QueryRow(`
-		  SELECT organization_id
-		  FROM rdm.projects
-		  WHERE id = $1
-	  `, *req.ProjectID).Scan(&projectOrgId)
+			SELECT organization_id
+			FROM rdm.projects
+			WHERE id = $1
+		`, *req.ProjectID).Scan(&projectOrgId)
 		if err == sql.ErrNoRows {
 			http.Error(w, "Project not found", http.StatusNotFound)
 			return
@@ -4569,13 +4569,13 @@ func handleAssociatePageWithProject(w http.ResponseWriter, r *http.Request) {
 		// Verify user is a member of the project
 		var isMember bool
 		err = tx.QueryRow(`
-		  SELECT EXISTS (
-			  SELECT 1 
-			  FROM rdm.project_members pm
-			  JOIN auth.users u ON pm.user_id = u.id
-			  WHERE pm.project_id = $1 AND u.email = $2
-		  )
-	  `, *req.ProjectID, claims.Username).Scan(&isMember)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+			)
+		`, *req.ProjectID, claims.Username).Scan(&isMember)
 		if err != nil || !isMember {
 			http.Error(w, "User is not a member of the project", http.StatusForbidden)
 			return
@@ -4583,12 +4583,12 @@ func handleAssociatePageWithProject(w http.ResponseWriter, r *http.Request) {
 
 		// Update page's project_id
 		_, err = tx.Exec(`
-		  UPDATE pages.pages_content 
-		  SET project_id = $1,
-			  updated_at = CURRENT_TIMESTAMP,
-			  updated_by = $2
-		  WHERE id = $3
-	  `, *req.ProjectID, userId, pageId)
+			UPDATE pages.pages_content 
+			SET project_id = $1,
+				updated_at = CURRENT_TIMESTAMP,
+				updated_by = $2
+			WHERE id = $3
+		`, *req.ProjectID, userId, pageId)
 		if err != nil {
 			http.Error(w, "Failed to associate page with project", http.StatusInternalServerError)
 			return
@@ -4612,10 +4612,10 @@ func handleAssociatePageWithProject(w http.ResponseWriter, r *http.Request) {
 
 		// Insert into project_artifacts
 		_, err = tx.Exec(`
-		  INSERT INTO rdm.project_artifacts (
-			  project_id, name, type, status, page_id, description, created_by, updated_by
-		  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
-	  `, *req.ProjectID, artifactName, artifactType, artifactStatus, pageId, req.Description, userId)
+			INSERT INTO rdm.project_artifacts (
+				project_id, name, type, status, page_id, description, created_by, updated_by
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+		`, *req.ProjectID, artifactName, artifactType, artifactStatus, pageId, req.Description, userId)
 		if err != nil {
 			http.Error(w, "Failed to create artifact", http.StatusInternalServerError)
 			return
@@ -4623,12 +4623,12 @@ func handleAssociatePageWithProject(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Unlinking from a project
 		_, err = tx.Exec(`
-		  UPDATE pages.pages_content 
-		  SET project_id = NULL,
-			  updated_at = CURRENT_TIMESTAMP,
-			  updated_by = $1
-		  WHERE id = $2
-	  `, userId, pageId)
+			UPDATE pages.pages_content 
+			SET project_id = NULL,
+				updated_at = CURRENT_TIMESTAMP,
+				updated_by = $1
+			WHERE id = $2
+		`, userId, pageId)
 		if err != nil {
 			http.Error(w, "Failed to unlink page from project", http.StatusInternalServerError)
 			return
@@ -4636,9 +4636,9 @@ func handleAssociatePageWithProject(w http.ResponseWriter, r *http.Request) {
 
 		// Delete the corresponding artifact entry
 		_, err = tx.Exec(`
-		  DELETE FROM rdm.project_artifacts
-		  WHERE page_id = $1
-	  `, pageId)
+			DELETE FROM rdm.project_artifacts
+			WHERE page_id = $1
+		`, pageId)
 		if err != nil {
 			http.Error(w, "Failed to remove artifact association", http.StatusInternalServerError)
 			return
@@ -4679,13 +4679,13 @@ func handleCreatePage(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, req.OrganizationID).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, req.OrganizationID).Scan(&authorized)
 	if err != nil || !authorized {
 		http.Error(w, "Unauthorized access to organization", http.StatusForbidden)
 		return
@@ -4706,11 +4706,11 @@ func handleCreatePage(w http.ResponseWriter, r *http.Request) {
 		parentIDParam = &parentIDValue
 		var parentExists bool
 		err = db.QueryRow(`
-            SELECT EXISTS (
-                SELECT 1 FROM pages.pages_content 
-                WHERE id = $1 AND organization_id = $2
-            )
-        `, parentIDParam, req.OrganizationID).Scan(&parentExists)
+				SELECT EXISTS (
+					SELECT 1 FROM pages.pages_content 
+					WHERE id = $1 AND organization_id = $2
+				)
+			`, parentIDParam, req.OrganizationID).Scan(&parentExists)
 		if err != nil || !parentExists {
 			http.Error(w, "Invalid parent ID", http.StatusBadRequest)
 			return
@@ -4725,18 +4725,18 @@ func handleCreatePage(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Inserting: name=%s, parent_id=%v, org_id=%s, type=%s, user_id=%s",
 		req.Name, parentIDParam, req.OrganizationID, req.Type, userId)
 	err = db.QueryRow(`
-        INSERT INTO pages.pages_content (
-            name,
-            parent_id,
-            organization_id,
-            content,
-            type,
-            status,
-            created_by,
-            updated_by
-        ) VALUES ($1, $2, $3, '', $4, 'active', $5, $5)
-        RETURNING id, created_at, updated_at
-    `, req.Name, parentIDParam, req.OrganizationID, req.Type, userId).Scan(&id, &createdAt, &updatedAt)
+			INSERT INTO pages.pages_content (
+				name,
+				parent_id,
+				organization_id,
+				content,
+				type,
+				status,
+				created_by,
+				updated_by
+			) VALUES ($1, $2, $3, '', $4, 'active', $5, $5)
+			RETURNING id, created_at, updated_at
+		`, req.Name, parentIDParam, req.OrganizationID, req.Type, userId).Scan(&id, &createdAt, &updatedAt)
 	if err != nil {
 		log.Printf("Database error: %v", err)
 		http.Error(w, "Failed to create item", http.StatusInternalServerError)
@@ -4804,20 +4804,20 @@ func handleUpdatePage(w http.ResponseWriter, r *http.Request) {
 
 	// Verify user has access and update the page
 	result, err := tx.Exec(`
-        UPDATE pages.pages_content 
-        SET 
-            content = $1,
-            updated_by = $2,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $3
-        AND organization_id = $4
-        AND EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            WHERE om.organization_id = $4
-            AND om.user_id = $2
-        )
-    `, req.Content, userId, pageId, req.OrganizationID)
+			UPDATE pages.pages_content 
+			SET 
+				content = $1,
+				updated_by = $2,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = $3
+			AND organization_id = $4
+			AND EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				WHERE om.organization_id = $4
+				AND om.user_id = $2
+			)
+		`, req.Content, userId, pageId, req.OrganizationID)
 
 	if err != nil {
 		http.Error(w, "Failed to update page", http.StatusInternalServerError)
@@ -4832,23 +4832,23 @@ func handleUpdatePage(w http.ResponseWriter, r *http.Request) {
 
 	// Create version record
 	_, err = tx.Exec(`
-        INSERT INTO pages.pages_versions (
-            page_id,
-            version,
-            content,
-            created_by
-        ) SELECT 
-            id,
-            COALESCE((
-                SELECT MAX(version) + 1
-                FROM pages.pages_versions
-                WHERE page_id = $1
-            ), 1),
-            $2,
-            $3
-        FROM pages.pages_content
-        WHERE id = $1
-    `, pageId, req.Content, userId)
+			INSERT INTO pages.pages_versions (
+				page_id,
+				version,
+				content,
+				created_by
+			) SELECT 
+				id,
+				COALESCE((
+					SELECT MAX(version) + 1
+					FROM pages.pages_versions
+					WHERE page_id = $1
+				), 1),
+				$2,
+				$3
+			FROM pages.pages_content
+			WHERE id = $1
+		`, pageId, req.Content, userId)
 
 	if err != nil {
 		http.Error(w, "Failed to create version record", http.StatusInternalServerError)
@@ -4890,20 +4890,20 @@ func handleRenamePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := db.Exec(`
-        UPDATE pages.pages_content 
-        SET 
-            name = $1,
-            updated_by = $2,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $3
-        AND organization_id = $4
-        AND EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            WHERE om.organization_id = $4
-            AND om.user_id = $2
-        )
-    `, req.Name, userId, pageId, req.OrganizationID)
+			UPDATE pages.pages_content 
+			SET 
+				name = $1,
+				updated_by = $2,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = $3
+			AND organization_id = $4
+			AND EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				WHERE om.organization_id = $4
+				AND om.user_id = $2
+			)
+		`, req.Name, userId, pageId, req.OrganizationID)
 
 	if err != nil {
 		http.Error(w, "Failed to rename page", http.StatusInternalServerError)
@@ -4946,20 +4946,20 @@ func handleMovePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := db.Exec(`
-        UPDATE pages.pages_content 
-        SET 
-            parent_id = $1,
-            updated_by = $2,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $3
-        AND organization_id = $4
-        AND EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            WHERE om.organization_id = $4
-            AND om.user_id = $2
-        )
-    `, req.NewParentID, userId, pageId, req.OrganizationID)
+			UPDATE pages.pages_content 
+			SET 
+				parent_id = $1,
+				updated_by = $2,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = $3
+			AND organization_id = $4
+			AND EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				WHERE om.organization_id = $4
+				AND om.user_id = $2
+			)
+		`, req.NewParentID, userId, pageId, req.OrganizationID)
 
 	if err != nil {
 		http.Error(w, "Failed to move page", http.StatusInternalServerError)
@@ -5057,13 +5057,13 @@ func handleUploadPageImage(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the organization
 	var authorized bool
 	err = db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 
 	if err != nil || !authorized {
 		log.Printf("User %s not authorized for organization %s", claims.Username, organizationId)
@@ -5142,16 +5142,16 @@ func handleUploadPageImage(w http.ResponseWriter, r *http.Request) {
 
 	var imageId string
 	err = tx.QueryRow(`
-        INSERT INTO pages.pages_images (
-            page_id,
-            file_name,
-            file_path,
-            file_size,
-            mime_type,
-            created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id
-    `,
+			INSERT INTO pages.pages_images (
+				page_id,
+				file_name,
+				file_path,
+				file_size,
+				mime_type,
+				created_by
+			) VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING id
+		`,
 		pageId,
 		header.Filename,
 		blobPath,
@@ -5213,13 +5213,13 @@ func handleRefreshImageSasTokens(w http.ResponseWriter, r *http.Request) {
 	// Verify access
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 	if err != nil {
 		log.Printf("[RefreshImageSasTokens] Error checking access: %v", err)
 		http.Error(w, "Access denied", http.StatusForbidden)
@@ -5252,11 +5252,11 @@ func handleRefreshImageSasTokens(w http.ResponseWriter, r *http.Request) {
 
 	// Query the images for the page.
 	rows, err := db.Query(`
-        SELECT id, file_path
-        FROM pages.pages_images
-        WHERE page_id = $1
-        AND deleted_at IS NULL
-    `, pageId)
+			SELECT id, file_path
+			FROM pages.pages_images
+			WHERE page_id = $1
+			AND deleted_at IS NULL
+		`, pageId)
 	if err != nil {
 		log.Printf("[RefreshImageSasTokens] Error querying images: %v", err)
 		http.Error(w, "Failed to fetch images", http.StatusInternalServerError)
@@ -5363,16 +5363,16 @@ func handleDeletePageImage(w http.ResponseWriter, r *http.Request) {
 	// Get image details and verify access
 	var filePath string
 	err = tx.QueryRow(`
-        SELECT i.file_path
-        FROM pages.pages_images i
-        JOIN pages.pages_content p ON i.page_id = p.id
-        JOIN auth.organization_members om ON p.organization_id = om.organization_id
-        JOIN auth.users u ON om.user_id = u.id
-        WHERE i.id = $1 
-        AND p.organization_id = $2
-        AND u.email = $3
-        AND i.deleted_at IS NULL
-    `, imageId, organizationId, claims.Username).Scan(&filePath)
+			SELECT i.file_path
+			FROM pages.pages_images i
+			JOIN pages.pages_content p ON i.page_id = p.id
+			JOIN auth.organization_members om ON p.organization_id = om.organization_id
+			JOIN auth.users u ON om.user_id = u.id
+			WHERE i.id = $1 
+			AND p.organization_id = $2
+			AND u.email = $3
+			AND i.deleted_at IS NULL
+		`, imageId, organizationId, claims.Username).Scan(&filePath)
 
 	if err == sql.ErrNoRows {
 		http.Error(w, "Image not found or access denied", http.StatusNotFound)
@@ -5407,11 +5407,11 @@ func handleDeletePageImage(w http.ResponseWriter, r *http.Request) {
 
 	// Mark the image as deleted in the database
 	_, err = tx.Exec(`
-        UPDATE pages.pages_images 
-        SET deleted_at = CURRENT_TIMESTAMP,
-            deleted_by = $1
-        WHERE id = $2
-    `, userId, imageId)
+			UPDATE pages.pages_images 
+			SET deleted_at = CURRENT_TIMESTAMP,
+				deleted_by = $1
+			WHERE id = $2
+		`, userId, imageId)
 
 	if err != nil {
 		http.Error(w, "Failed to update image record", http.StatusInternalServerError)
@@ -5438,13 +5438,13 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 
 	if err != nil || !authorized {
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
@@ -5452,41 +5452,41 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(`
-		SELECT 
-			pc.id, 
-			pc.parent_id,
-			pc.name,
-			COALESCE(pc.content, '') as content,
-			COALESCE(tc.label, '') as category, 
-			COALESCE(pc.description, '') as description,
-			pc.status,
-			tc.code as template_type,
-			cb.email as created_by,
-			ub.email as updated_by,
-			pc.created_at,
-			pc.updated_at,
-			EXISTS (
-				SELECT 1 FROM pages.user_favorite_templates uft 
-				WHERE uft.template_id = pc.id 
-				AND uft.user_id = (SELECT id FROM auth.users WHERE email = $2)
-			) as is_favorite
-		FROM pages.pages_content pc
-		LEFT JOIN auth.users cb ON pc.created_by = cb.id
-		LEFT JOIN auth.users ub ON pc.updated_by = ub.id
-		LEFT JOIN pages.template_categories tc ON pc.template_category_id = tc.id
-		WHERE (
-			(pc.organization_id = $1 AND pc.status = 'template') 
-			OR 
-			(pc.status = 'system_template')
-		)
-		AND pc.deleted_at IS NULL
-		ORDER BY 
-			CASE 
-				WHEN pc.status = 'system_template' THEN 1 
-				ELSE 2 
-			END,
-			pc.created_at DESC
-	`, organizationId, claims.Username)
+			SELECT 
+				pc.id, 
+				pc.parent_id,
+				pc.name,
+				COALESCE(pc.content, '') as content,
+				COALESCE(tc.label, '') as category, 
+				COALESCE(pc.description, '') as description,
+				pc.status,
+				tc.code as template_type,
+				cb.email as created_by,
+				ub.email as updated_by,
+				pc.created_at,
+				pc.updated_at,
+				EXISTS (
+					SELECT 1 FROM pages.user_favorite_templates uft 
+					WHERE uft.template_id = pc.id 
+					AND uft.user_id = (SELECT id FROM auth.users WHERE email = $2)
+				) as is_favorite
+			FROM pages.pages_content pc
+			LEFT JOIN auth.users cb ON pc.created_by = cb.id
+			LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+			LEFT JOIN pages.template_categories tc ON pc.template_category_id = tc.id
+			WHERE (
+				(pc.organization_id = $1 AND pc.status = 'template') 
+				OR 
+				(pc.status = 'system_template')
+			)
+			AND pc.deleted_at IS NULL
+			ORDER BY 
+				CASE 
+					WHEN pc.status = 'system_template' THEN 1 
+					ELSE 2 
+				END,
+				pc.created_at DESC
+		`, organizationId, claims.Username)
 
 	if err != nil {
 		log.Printf("Error fetching templates: %v", err)
@@ -5583,11 +5583,11 @@ func handleToggleFavoriteTemplate(w http.ResponseWriter, r *http.Request) {
 	// Check if template is already favorited
 	var exists bool
 	err = db.QueryRow(`
-        SELECT EXISTS(
-            SELECT 1 FROM pages.user_favorite_templates 
-            WHERE user_id = $1 AND template_id = $2
-        )
-    `, userId, templateId).Scan(&exists)
+			SELECT EXISTS(
+				SELECT 1 FROM pages.user_favorite_templates 
+				WHERE user_id = $1 AND template_id = $2
+			)
+		`, userId, templateId).Scan(&exists)
 	if err != nil {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
@@ -5596,15 +5596,15 @@ func handleToggleFavoriteTemplate(w http.ResponseWriter, r *http.Request) {
 	if exists {
 		// Remove favorite
 		_, err = db.Exec(`
-            DELETE FROM pages.user_favorite_templates 
-            WHERE user_id = $1 AND template_id = $2
-        `, userId, templateId)
+				DELETE FROM pages.user_favorite_templates 
+				WHERE user_id = $1 AND template_id = $2
+			`, userId, templateId)
 	} else {
 		// Add favorite
 		_, err = db.Exec(`
-            INSERT INTO pages.user_favorite_templates (user_id, template_id)
-            VALUES ($1, $2)
-        `, userId, templateId)
+				INSERT INTO pages.user_favorite_templates (user_id, template_id)
+				VALUES ($1, $2)
+			`, userId, templateId)
 	}
 
 	if err != nil {
@@ -5625,26 +5625,26 @@ func handleGetPagesFolders(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Fetching folders for organizationId: %s", organizationId)
 
 	rows, err := db.Query(`
-        SELECT 
-            pc.id, 
-            pc.name,
-            pc.parent_id,
-            pc.organization_id,
-            pc.created_at,
-            pc.updated_at,
-            pc.deleted_at,
-            cb.email as created_by,
-            ub.email as updated_by,
-            db.email as deleted_by
-        FROM pages.pages_content pc
-        LEFT JOIN auth.users cb ON pc.created_by = cb.id
-        LEFT JOIN auth.users ub ON pc.updated_by = ub.id
-        LEFT JOIN auth.users db ON pc.deleted_by = db.id
-        WHERE pc.organization_id = $1
-        AND pc.type = 'folder'
-        AND pc.deleted_at IS NULL
-        ORDER BY pc.created_at DESC
-    `, organizationId)
+			SELECT 
+				pc.id, 
+				pc.name,
+				pc.parent_id,
+				pc.organization_id,
+				pc.created_at,
+				pc.updated_at,
+				pc.deleted_at,
+				cb.email as created_by,
+				ub.email as updated_by,
+				db.email as deleted_by
+			FROM pages.pages_content pc
+			LEFT JOIN auth.users cb ON pc.created_by = cb.id
+			LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+			LEFT JOIN auth.users db ON pc.deleted_by = db.id
+			WHERE pc.organization_id = $1
+			AND pc.type = 'folder'
+			AND pc.deleted_at IS NULL
+			ORDER BY pc.created_at DESC
+		`, organizationId)
 
 	if err != nil {
 		log.Printf("Error in folder query: %v", err)
@@ -5730,13 +5730,13 @@ func handleCreatePagesFolder(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, req.OrganizationID).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, req.OrganizationID).Scan(&authorized)
 	if err != nil || !authorized {
 		http.Error(w, "Unauthorized", http.StatusForbidden)
 		return
@@ -5764,17 +5764,17 @@ func handleCreatePagesFolder(w http.ResponseWriter, r *http.Request) {
 	// Create the folder in pages_content
 	var folderID string
 	err = db.QueryRow(`
-        INSERT INTO pages.pages_content (
-            name,
-            parent_id,
-            organization_id,
-            type,
-            status,
-            created_by,
-            updated_by
-        ) VALUES ($1, $2, $3, 'folder', 'active', $4, $4)
-        RETURNING id
-    `, req.Name, parentIDParam, req.OrganizationID, userId).Scan(&folderID)
+			INSERT INTO pages.pages_content (
+				name,
+				parent_id,
+				organization_id,
+				type,
+				status,
+				created_by,
+				updated_by
+			) VALUES ($1, $2, $3, 'folder', 'active', $4, $4)
+			RETURNING id
+		`, req.Name, parentIDParam, req.OrganizationID, userId).Scan(&folderID)
 	if err != nil {
 		log.Printf("Error creating folder: %v", err)
 		http.Error(w, "Failed to create folder", http.StatusInternalServerError)
@@ -5793,20 +5793,20 @@ func handleCreatePagesFolder(w http.ResponseWriter, r *http.Request) {
 		UpdatedBy string
 	}
 	err = db.QueryRow(`
-        SELECT 
-            pc.id,
-            pc.name,
-            pc.parent_id,
-            pc.organization_id,
-            pc.created_at,
-            pc.updated_at,
-            cb.email as created_by,
-            ub.email as updated_by
-        FROM pages.pages_content pc
-        LEFT JOIN auth.users cb ON pc.created_by = cb.id
-        LEFT JOIN auth.users ub ON pc.updated_by = ub.id
-        WHERE pc.id = $1
-    `, folderID).Scan(
+			SELECT 
+				pc.id,
+				pc.name,
+				pc.parent_id,
+				pc.organization_id,
+				pc.created_at,
+				pc.updated_at,
+				cb.email as created_by,
+				ub.email as updated_by
+			FROM pages.pages_content pc
+			LEFT JOIN auth.users cb ON pc.created_by = cb.id
+			LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+			WHERE pc.id = $1
+		`, folderID).Scan(
 		&folder.ID,
 		&folder.Name,
 		&folder.ParentID,
@@ -5862,21 +5862,21 @@ func handleUpdatePagesFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := db.Exec(`
-        UPDATE pages.pages_content 
-        SET name = $1,
-            parent_id = $2,
-            updated_by = $3,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $4
-        AND organization_id = $5
-        AND type = 'folder'
-        AND EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            WHERE om.organization_id = $5
-            AND om.user_id = $3
-        )
-    `, req.Name, req.ParentID, userId, folderID, req.OrganizationID)
+			UPDATE pages.pages_content 
+			SET name = $1,
+				parent_id = $2,
+				updated_by = $3,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = $4
+			AND organization_id = $5
+			AND type = 'folder'
+			AND EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				WHERE om.organization_id = $5
+				AND om.user_id = $3
+			)
+		`, req.Name, req.ParentID, userId, folderID, req.OrganizationID)
 	if err != nil {
 		http.Error(w, "Failed to update folder", http.StatusInternalServerError)
 		return
@@ -5916,17 +5916,17 @@ func handleDeletePagesFolder(w http.ResponseWriter, r *http.Request) {
 
 	// Soft delete the folder and all its descendants
 	_, err = tx.Exec(`
-        WITH RECURSIVE content_tree AS (
-            SELECT id FROM pages.pages_content WHERE id = $1 AND type = 'folder'
-            UNION ALL
-            SELECT pc.id FROM pages.pages_content pc
-            INNER JOIN content_tree ct ON pc.parent_id = ct.id
-        )
-        UPDATE pages.pages_content
-        SET deleted_at = CURRENT_TIMESTAMP,
-            deleted_by = $2
-        WHERE id IN (SELECT id FROM content_tree)
-    `, folderID, userId)
+			WITH RECURSIVE content_tree AS (
+				SELECT id FROM pages.pages_content WHERE id = $1 AND type = 'folder'
+				UNION ALL
+				SELECT pc.id FROM pages.pages_content pc
+				INNER JOIN content_tree ct ON pc.parent_id = ct.id
+			)
+			UPDATE pages.pages_content
+			SET deleted_at = CURRENT_TIMESTAMP,
+				deleted_by = $2
+			WHERE id IN (SELECT id FROM content_tree)
+		`, folderID, userId)
 	if err != nil {
 		http.Error(w, "Failed to delete folder and contents", http.StatusInternalServerError)
 		return
@@ -5958,13 +5958,13 @@ func handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, req.OrganizationID).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, req.OrganizationID).Scan(&authorized)
 	if err != nil || !authorized {
 		http.Error(w, "Unauthorized access to organization", http.StatusForbidden)
 		return
@@ -5985,18 +5985,18 @@ func handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	var templateId string
 	var createdAt, updatedAt time.Time
 	err = db.QueryRow(`
-        INSERT INTO pages.pages_content (
-            name,
-            content,
-            description,
-            template_category_id,
-            organization_id,
-            status,
-            created_by,
-            updated_by
-        ) VALUES ($1, $2, $3, $4, $5, 'template', $6, $6)
-        RETURNING id, created_at, updated_at
-    `, req.Name, req.Content, req.Description, req.CategoryId, req.OrganizationID, userId).Scan(&templateId, &createdAt, &updatedAt)
+			INSERT INTO pages.pages_content (
+				name,
+				content,
+				description,
+				template_category_id,
+				organization_id,
+				status,
+				created_by,
+				updated_by
+			) VALUES ($1, $2, $3, $4, $5, 'template', $6, $6)
+			RETURNING id, created_at, updated_at
+		`, req.Name, req.Content, req.Description, req.CategoryId, req.OrganizationID, userId).Scan(&templateId, &createdAt, &updatedAt)
 	if err != nil {
 		log.Printf("Error creating template: %v", err)
 		http.Error(w, "Failed to create template", http.StatusInternalServerError)
@@ -6053,14 +6053,14 @@ func handleDeletePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := db.Exec(`
-        UPDATE pages.pages_content 
-        SET deleted_at = CURRENT_TIMESTAMP, deleted_by = $1
-        WHERE id = $2 AND organization_id = $3
-        AND EXISTS (
-            SELECT 1 FROM auth.organization_members om
-            WHERE om.organization_id = $3 AND om.user_id = $1
-        )
-    `, userId, pageId, organizationId)
+			UPDATE pages.pages_content 
+			SET deleted_at = CURRENT_TIMESTAMP, deleted_by = $1
+			WHERE id = $2 AND organization_id = $3
+			AND EXISTS (
+				SELECT 1 FROM auth.organization_members om
+				WHERE om.organization_id = $3 AND om.user_id = $1
+			)
+		`, userId, pageId, organizationId)
 	if err != nil {
 		http.Error(w, "Failed to delete page", http.StatusInternalServerError)
 		return
@@ -6124,13 +6124,13 @@ func handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
 	if err != nil {
 		log.Printf("[handleGetTemplate] Error checking authorization: %v", err)
 		http.Error(w, "Error checking access", http.StatusInternalServerError)
@@ -6162,33 +6162,33 @@ func handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = db.QueryRow(`
-        SELECT 
-            pc.id, 
-            pc.parent_id,
-            pc.name,
-            COALESCE(pc.content, '') as content,
-            COALESCE(tc.label, '') as category,
-            pc.template_category_id,
-            COALESCE(pc.description, '') as description,
-            pc.status,
-            tc.code as template_type,
-            cb.email as created_by,
-            pc.updated_by,
-            pc.created_at,
-            pc.updated_at,
-            EXISTS (
-                SELECT 1 FROM pages.user_favorite_templates uft 
-                WHERE uft.template_id = pc.id 
-                AND uft.user_id = (SELECT id FROM auth.users WHERE email = $2)
-            ) as is_favorite
-        FROM pages.pages_content pc
-        LEFT JOIN auth.users cb ON pc.created_by = cb.id
-        LEFT JOIN auth.users ub ON pc.updated_by = ub.id
-        LEFT JOIN pages.template_categories tc ON pc.template_category_id = tc.id
-        WHERE pc.id = $1
-        AND pc.organization_id = $3
-        AND pc.deleted_at IS NULL
-    `, templateId, claims.Username, organizationId).Scan(
+			SELECT 
+				pc.id, 
+				pc.parent_id,
+				pc.name,
+				COALESCE(pc.content, '') as content,
+				COALESCE(tc.label, '') as category,
+				pc.template_category_id,
+				COALESCE(pc.description, '') as description,
+				pc.status,
+				tc.code as template_type,
+				cb.email as created_by,
+				pc.updated_by,
+				pc.created_at,
+				pc.updated_at,
+				EXISTS (
+					SELECT 1 FROM pages.user_favorite_templates uft 
+					WHERE uft.template_id = pc.id 
+					AND uft.user_id = (SELECT id FROM auth.users WHERE email = $2)
+				) as is_favorite
+			FROM pages.pages_content pc
+			LEFT JOIN auth.users cb ON pc.created_by = cb.id
+			LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+			LEFT JOIN pages.template_categories tc ON pc.template_category_id = tc.id
+			WHERE pc.id = $1
+			AND pc.organization_id = $3
+			AND pc.deleted_at IS NULL
+		`, templateId, claims.Username, organizationId).Scan(
 		&template.ID,
 		&template.ParentID,
 		&template.Name,
@@ -6281,24 +6281,24 @@ func handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 
 	// Verify access and update the template
 	result, err := tx.Exec(`
-        UPDATE pages.pages_content 
-        SET 
-            name = $1,
-            content = $2,
-            description = $3,
-            template_category_id = $4,
-            updated_by = $5,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $6
-        AND organization_id = $7
-        AND status = 'template'
-        AND EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            WHERE om.organization_id = $7
-            AND om.user_id = $5
-        )
-    `, req.Name, req.Content, req.Description, req.CategoryId, userId, templateId, req.OrganizationID)
+			UPDATE pages.pages_content 
+			SET 
+				name = $1,
+				content = $2,
+				description = $3,
+				template_category_id = $4,
+				updated_by = $5,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = $6
+			AND organization_id = $7
+			AND status = 'template'
+			AND EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				WHERE om.organization_id = $7
+				AND om.user_id = $5
+			)
+		`, req.Name, req.Content, req.Description, req.CategoryId, userId, templateId, req.OrganizationID)
 	if err != nil {
 		log.Printf("[handleUpdateTemplate] Error updating template: %v", err)
 		http.Error(w, "Failed to update template", http.StatusInternalServerError)
@@ -6335,13 +6335,13 @@ func handleGetProjectArtifacts(w http.ResponseWriter, r *http.Request) {
 
 	var isMember bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-        )
-    `, projectId, claims.Username).Scan(&isMember)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+			)
+		`, projectId, claims.Username).Scan(&isMember)
 	if err != nil {
 		log.Printf("Error checking project membership: %v", err)
 		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
@@ -6355,11 +6355,11 @@ func handleGetProjectArtifacts(w http.ResponseWriter, r *http.Request) {
 	log.Printf("User %s is a member of project %s", claims.Username, projectId)
 
 	rows, err := db.Query(`
-        SELECT id, project_id, name, type, status, assigned_to, due_date,
-               document_id, page_id, created_by, updated_by, created_at, updated_at
-        FROM rdm.project_artifacts
-        WHERE project_id = $1
-    `, projectId)
+			SELECT id, project_id, name, type, status, assigned_to, due_date,
+				document_id, page_id, created_by, updated_by, created_at, updated_at
+			FROM rdm.project_artifacts
+			WHERE project_id = $1
+		`, projectId)
 	if err != nil {
 		log.Printf("Error fetching artifacts: %v", err)
 		http.Error(w, "Failed to fetch artifacts", http.StatusInternalServerError)
@@ -6423,15 +6423,15 @@ func handleGetProjects(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
 
 	rows, err := db.Query(`
-        SELECT p.id, p.name, p.description, p.organization_id, 
-               p.status, p.start_date, p.end_date,
-               p.created_by, p.updated_by, p.created_at, p.updated_at
-        FROM rdm.projects p
-        JOIN auth.organization_members om ON p.organization_id = om.organization_id 
-        JOIN auth.users u ON om.user_id = u.id
-        WHERE p.organization_id = $1 AND u.email = $2
-        ORDER BY p.created_at DESC
-    `, organizationId, claims.Username)
+			SELECT p.id, p.name, p.description, p.organization_id, 
+				p.status, p.start_date, p.end_date,
+				p.created_by, p.updated_by, p.created_at, p.updated_at
+			FROM rdm.projects p
+			JOIN auth.organization_members om ON p.organization_id = om.organization_id 
+			JOIN auth.users u ON om.user_id = u.id
+			WHERE p.organization_id = $1 AND u.email = $2
+			ORDER BY p.created_at DESC
+		`, organizationId, claims.Username)
 
 	if err != nil {
 		http.Error(w, "Failed to fetch projects", http.StatusInternalServerError)
@@ -6455,6 +6455,132 @@ func handleGetProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(projects)
+}
+
+func handleGetProjectMilestones(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("Fetching milestones for projectId: %s, user: %s", projectId, claims.Username)
+	// Verify user has access to the project
+	var isMember bool
+	err := db.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+			)
+		`, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil {
+		log.Printf("Error checking project membership: %v", err)
+		http.Error(w, "Failed to check project access", http.StatusInternalServerError)
+		return
+	}
+
+	if !isMember {
+		http.Error(w, "Access denied to project milestones", http.StatusForbidden)
+		return
+	}
+
+	// Fetch milestones for the project
+	rows, err := db.Query(`
+			SELECT 
+				id, project_id, name, description, status, 
+				start_date, due_date, priority, category, 
+				roadmap_item_id, created_by, updated_by, 
+				created_at, updated_at
+			FROM rdm.project_milestones
+			WHERE project_id = $1
+			ORDER BY due_date ASC NULLS LAST, priority DESC
+		`, projectId)
+
+	if err != nil {
+		log.Printf("Error fetching milestones: %v", err)
+		http.Error(w, "Failed to fetch milestones", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var milestones []map[string]interface{}
+	for rows.Next() {
+		var milestone struct {
+			ID            string
+			ProjectID     string
+			Name          string
+			Description   sql.NullString
+			Status        sql.NullString
+			StartDate     sql.NullTime
+			DueDate       sql.NullTime
+			Priority      int
+			Category      sql.NullString
+			RoadmapItemID sql.NullString
+			CreatedBy     string
+			UpdatedBy     sql.NullString
+			CreatedAt     time.Time
+			UpdatedAt     time.Time
+		}
+
+		err := rows.Scan(
+			&milestone.ID,
+			&milestone.ProjectID,
+			&milestone.Name,
+			&milestone.Description,
+			&milestone.Status,
+			&milestone.StartDate,
+			&milestone.DueDate,
+			&milestone.Priority,
+			&milestone.Category,
+			&milestone.RoadmapItemID,
+			&milestone.CreatedBy,
+			&milestone.UpdatedBy,
+			&milestone.CreatedAt,
+			&milestone.UpdatedAt,
+		)
+
+		if err != nil {
+			log.Printf("Error scanning milestone row: %v", err)
+			continue
+		}
+
+		// Format the milestone data for JSON response
+		milestoneMap := map[string]interface{}{
+			"id":            milestone.ID,
+			"projectId":     milestone.ProjectID,
+			"name":          milestone.Name,
+			"description":   nullStringValue(milestone.Description),
+			"status":        nullStringValue(milestone.Status),
+			"startDate":     formatTimeToDateString(milestone.StartDate),
+			"dueDate":       formatTimeToDateString(milestone.DueDate),
+			"priority":      milestone.Priority,
+			"category":      nullStringValue(milestone.Category),
+			"roadmapItemId": nullStringValue(milestone.RoadmapItemID),
+			"createdBy":     milestone.CreatedBy,
+			"updatedBy":     nullStringValue(milestone.UpdatedBy),
+			"createdAt":     milestone.CreatedAt,
+			"updatedAt":     milestone.UpdatedAt,
+		}
+
+		milestones = append(milestones, milestoneMap)
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating milestone rows: %v", err)
+		http.Error(w, "Error processing milestones", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(milestones)
+}
+
+// Helper function to format sql.NullTime to ISO date string
+func formatTimeToDateString(nt sql.NullTime) interface{} {
+	if nt.Valid {
+		return nt.Time.Format("2006-01-02")
+	}
+	return nil
 }
 
 func handleCreateProject(w http.ResponseWriter, r *http.Request) {
@@ -6492,12 +6618,12 @@ func handleCreateProject(w http.ResponseWriter, r *http.Request) {
 
 	var project Project
 	err = tx.QueryRow(`
-        INSERT INTO rdm.projects 
-        (name, description, organization_id, status, created_by)
-        VALUES ($1, $2, $3, 'active', $4)
-        RETURNING id, name, description, organization_id, status, 
-                  created_by, created_at, updated_at
-    `, req.Name, req.Description, req.OrganizationID, userId).Scan(
+			INSERT INTO rdm.projects 
+			(name, description, organization_id, status, created_by)
+			VALUES ($1, $2, $3, 'active', $4)
+			RETURNING id, name, description, organization_id, status, 
+					created_by, created_at, updated_at
+		`, req.Name, req.Description, req.OrganizationID, userId).Scan(
 		&project.ID, &project.Name, &project.Description,
 		&project.OrganizationID, &project.Status, &project.CreatedBy,
 		&project.CreatedAt, &project.UpdatedAt,
@@ -6510,10 +6636,10 @@ func handleCreateProject(w http.ResponseWriter, r *http.Request) {
 
 	// Add creator as project owner
 	_, err = tx.Exec(`
-        INSERT INTO rdm.project_members 
-        (project_id, user_id, role, created_by)
-        VALUES ($1, $2, 'owner', $2)
-    `, project.ID, userId)
+			INSERT INTO rdm.project_members 
+			(project_id, user_id, role, created_by)
+			VALUES ($1, $2, 'owner', $2)
+		`, project.ID, userId)
 
 	if err != nil {
 		http.Error(w, "Failed to add project owner", http.StatusInternalServerError)
@@ -6534,13 +6660,13 @@ func handleGetProjectMembers(w http.ResponseWriter, r *http.Request) {
 	projectId := vars["id"]
 
 	rows, err := db.Query(`
-        SELECT pm.id, pm.project_id, pm.user_id, u.email,
-               CONCAT(u.first_name, ' ', u.last_name) as user_name,
-               pm.role, pm.created_at
-        FROM rdm.project_members pm
-        JOIN auth.users u ON pm.user_id = u.id
-        WHERE pm.project_id = $1
-    `, projectId)
+			SELECT pm.id, pm.project_id, pm.user_id, u.email,
+				CONCAT(u.first_name, ' ', u.last_name) as user_name,
+				pm.role, pm.created_at
+			FROM rdm.project_members pm
+			JOIN auth.users u ON pm.user_id = u.id
+			WHERE pm.project_id = $1
+		`, projectId)
 
 	if err != nil {
 		http.Error(w, "Failed to fetch members", http.StatusInternalServerError)
@@ -6590,14 +6716,14 @@ func handleGetProject(w http.ResponseWriter, r *http.Request) {
 
 	var project Project
 	err := db.QueryRow(`
-        SELECT p.id, p.name, p.description, p.organization_id, 
-               p.status, p.start_date, p.end_date,
-               p.created_by, p.updated_by, p.created_at, p.updated_at
-        FROM rdm.projects p
-        JOIN auth.organization_members om ON p.organization_id = om.organization_id 
-        JOIN auth.users u ON om.user_id = u.id
-        WHERE p.id = $1 AND u.email = $2
-    `, projectId, claims.Username).Scan(
+			SELECT p.id, p.name, p.description, p.organization_id, 
+				p.status, p.start_date, p.end_date,
+				p.created_by, p.updated_by, p.created_at, p.updated_at
+			FROM rdm.projects p
+			JOIN auth.organization_members om ON p.organization_id = om.organization_id 
+			JOIN auth.users u ON om.user_id = u.id
+			WHERE p.id = $1 AND u.email = $2
+		`, projectId, claims.Username).Scan(
 		&project.ID, &project.Name, &project.Description,
 		&project.OrganizationID, &project.Status, &project.StartDate,
 		&project.EndDate, &project.CreatedBy, &project.UpdatedBy,
@@ -6712,13 +6838,13 @@ func handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
 
 	result, err := db.Exec(`
-		DELETE FROM rdm.projects p
-		USING auth.users u, auth.organization_members om
-		WHERE p.id = $1 
-		AND p.organization_id = om.organization_id
-		AND om.user_id = u.id 
-		AND u.email = $2
-	`, projectId, claims.Username)
+			DELETE FROM rdm.projects p
+			USING auth.users u, auth.organization_members om
+			WHERE p.id = $1 
+			AND p.organization_id = om.organization_id
+			AND om.user_id = u.id 
+			AND u.email = $2
+		`, projectId, claims.Username)
 
 	if err != nil {
 		http.Error(w, "Failed to delete project", http.StatusInternalServerError)
@@ -6753,9 +6879,9 @@ func handleAddProjectMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = db.Exec(`
-		INSERT INTO rdm.project_members (project_id, user_id, role, created_by)
-		VALUES ($1, $2, $3, $4)
-	`, projectId, req.UserID, req.Role, creatorId)
+			INSERT INTO rdm.project_members (project_id, user_id, role, created_by)
+			VALUES ($1, $2, $3, $4)
+		`, projectId, req.UserID, req.Role, creatorId)
 
 	if err != nil {
 		http.Error(w, "Failed to add member", http.StatusInternalServerError)
@@ -6776,10 +6902,10 @@ func handleUpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&req)
 
 	result, err := db.Exec(`
-		UPDATE rdm.project_members 
-		SET role = $1
-		WHERE project_id = $2 AND user_id = $3
-	`, req.Role, projectId, userId)
+			UPDATE rdm.project_members 
+			SET role = $1
+			WHERE project_id = $2 AND user_id = $3
+		`, req.Role, projectId, userId)
 
 	if err != nil {
 		http.Error(w, "Failed to update role", http.StatusInternalServerError)
@@ -6800,9 +6926,9 @@ func handleRemoveProjectMember(w http.ResponseWriter, r *http.Request) {
 	userId := vars["userId"]
 
 	result, err := db.Exec(`
-		DELETE FROM rdm.project_members
-		WHERE project_id = $1 AND user_id = $2
-	`, projectId, userId)
+			DELETE FROM rdm.project_members
+			WHERE project_id = $1 AND user_id = $2
+		`, projectId, userId)
 
 	if err != nil {
 		http.Error(w, "Failed to remove member", http.StatusInternalServerError)
@@ -6826,14 +6952,14 @@ func handleCreateProjectArtifact(w http.ResponseWriter, r *http.Request) {
 	// Verify user is a member of the project with appropriate permissions
 	var isMember bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-            AND (pm.role = 'owner' OR pm.role = 'admin' OR pm.role = 'member')
-        )
-    `, projectId, claims.Username).Scan(&isMember)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+				AND (pm.role = 'owner' OR pm.role = 'admin' OR pm.role = 'member')
+			)
+		`, projectId, claims.Username).Scan(&isMember)
 	if err != nil {
 		log.Printf("Error checking project membership: %v", err)
 		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
@@ -6898,11 +7024,11 @@ func handleCreateProjectArtifact(w http.ResponseWriter, r *http.Request) {
 
 	// Insert into project_artifacts
 	_, err = db.Exec(`
-        INSERT INTO rdm.project_artifacts (
-            id, project_id, name, description, type, status, assigned_to, document_id, 
-            page_id, due_date, created_by, updated_by, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `, uuid.New(), projectId, req.Name, req.Description, req.Type, req.Status,
+			INSERT INTO rdm.project_artifacts (
+				id, project_id, name, description, type, status, assigned_to, document_id, 
+				page_id, due_date, created_by, updated_by, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, uuid.New(), projectId, req.Name, req.Description, req.Type, req.Status,
 		req.AssignedTo, req.DocumentId, req.PageId, dueDate, userId, userId)
 	if err != nil {
 		log.Printf("Failed to create artifact: %v", err)
@@ -6935,13 +7061,13 @@ func handleGetProjectActivity(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the project
 	var isMember bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-        )
-    `, projectId, claims.Username).Scan(&isMember)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+			)
+		`, projectId, claims.Username).Scan(&isMember)
 
 	if err != nil {
 		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
@@ -6972,23 +7098,23 @@ func handleGetProjectActivity(w http.ResponseWriter, r *http.Request) {
 
 	// Build query with optional filters
 	query := `
-        SELECT 
-            pa.id, 
-            pa.project_id, 
-            pa.user_id, 
-            u.email as user_email,
-            CONCAT(u.first_name, ' ', u.last_name) as user_name,
-            pa.activity_type, 
-            pa.entity_type, 
-            pa.entity_id, 
-            pa.description, 
-            pa.created_at,
-            pa.old_values,
-            pa.new_values
-        FROM rdm.project_activity pa
-        LEFT JOIN auth.users u ON pa.user_id = u.id
-        WHERE pa.project_id = $1
-    `
+			SELECT 
+				pa.id, 
+				pa.project_id, 
+				pa.user_id, 
+				u.email as user_email,
+				CONCAT(u.first_name, ' ', u.last_name) as user_name,
+				pa.activity_type, 
+				pa.entity_type, 
+				pa.entity_id, 
+				pa.description, 
+				pa.created_at,
+				pa.old_values,
+				pa.new_values
+			FROM rdm.project_activity pa
+			LEFT JOIN auth.users u ON pa.user_id = u.id
+			WHERE pa.project_id = $1
+		`
 	args := []interface{}{projectId}
 	paramCount := 1
 
@@ -7013,7 +7139,8 @@ func handleGetProjectActivity(w http.ResponseWriter, r *http.Request) {
 	var activities []map[string]interface{}
 	for rows.Next() {
 		var (
-			id, projectId, userId, userEmail, userName      string
+			id, projectId                                   string
+			userId, userEmail, userName                     sql.NullString // Changed to sql.NullString
 			activityType, entityType, entityId, description string
 			createdAt                                       time.Time
 			oldValues, newValues                            []byte
@@ -7045,9 +7172,9 @@ func handleGetProjectActivity(w http.ResponseWriter, r *http.Request) {
 		activity := map[string]interface{}{
 			"id":            id,
 			"projectId":     projectId,
-			"userId":        userId,
-			"userEmail":     userEmail,
-			"userName":      userName,
+			"userId":        nullStringValue(userId),
+			"userEmail":     nullStringValue(userEmail),
+			"userName":      nullStringValue(userName),
 			"activityType":  activityType,
 			"entityType":    entityType,
 			"entityId":      entityId,
@@ -7066,9 +7193,9 @@ func handleGetProjectActivity(w http.ResponseWriter, r *http.Request) {
 	// Get total count for pagination
 	var totalCount int
 	countQuery := `
-        SELECT COUNT(*) FROM rdm.project_activity 
-        WHERE project_id = $1
-    `
+			SELECT COUNT(*) FROM rdm.project_activity 
+			WHERE project_id = $1
+		`
 	countArgs := []interface{}{projectId}
 	paramCount = 1
 
@@ -7103,13 +7230,13 @@ func handleGetRoadmapItems(w http.ResponseWriter, r *http.Request) {
 	// Verify user is a project member
 	var isMember bool
 	err := db.QueryRow(`
-	  SELECT EXISTS (
-		SELECT 1 
-		FROM rdm.project_members pm
-		JOIN auth.users u ON pm.user_id = u.id
-		WHERE pm.project_id = $1 AND u.email = $2
-	  )
-	`, projectId, claims.Username).Scan(&isMember)
+		SELECT EXISTS (
+			SELECT 1 
+			FROM rdm.project_members pm
+			JOIN auth.users u ON pm.user_id = u.id
+			WHERE pm.project_id = $1 AND u.email = $2
+		)
+		`, projectId, claims.Username).Scan(&isMember)
 	if err != nil {
 		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
 		return
@@ -7120,12 +7247,12 @@ func handleGetRoadmapItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(`
-	  SELECT id, project_id, title, description, start_date, end_date, status, 
-			 priority, parent_id, category, created_by, updated_by, created_at, updated_at
-	  FROM rdm.project_roadmap_items
-	  WHERE project_id = $1
-	  ORDER BY created_at DESC
-	`, projectId)
+		SELECT id, project_id, title, description, start_date, end_date, status, 
+				priority, parent_id, category, created_by, updated_by, created_at, updated_at
+		FROM rdm.project_roadmap_items
+		WHERE project_id = $1
+		ORDER BY created_at DESC
+		`, projectId)
 	if err != nil {
 		http.Error(w, "Failed to fetch roadmap items", http.StatusInternalServerError)
 		return
@@ -7185,7 +7312,346 @@ func nullTime(nt sql.NullTime) interface{} {
 	return nil
 }
 
-// In your main.go file
+func handleUpdateMilestoneStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	statusId := vars["statusId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var isMember bool
+	err := db.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+			)
+		`, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil || !isMember {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Name        string `json:"name"`
+		Color       string `json:"color"`
+		Description string `json:"description"`
+		OrderIndex  int    `json:"orderIndex"`
+		IsDefault   bool   `json:"isDefault"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// If this status is being set as default, unset any existing default
+	if req.IsDefault {
+		_, err = tx.Exec(`
+				UPDATE rdm.project_milestone_statuses
+				SET is_default = false
+				WHERE project_id = $1 AND id != $2
+			`, projectId, statusId)
+		if err != nil {
+			http.Error(w, "Failed to update default status", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Update the status
+	result, err := tx.Exec(`
+			UPDATE rdm.project_milestone_statuses
+			SET 
+				name = $1,
+				color = $2,
+				description = $3,
+				order_index = $4,
+				is_default = $5,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = $6 AND project_id = $7
+		`, req.Name, req.Color, req.Description, req.OrderIndex, req.IsDefault, statusId, projectId)
+
+	if err != nil {
+		http.Error(w, "Failed to update status", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Status not found or not authorized", http.StatusNotFound)
+		return
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	// Return updated status
+	var status struct {
+		ID          string    `json:"id"`
+		Name        string    `json:"name"`
+		Color       string    `json:"color"`
+		Description string    `json:"description"`
+		OrderIndex  int       `json:"orderIndex"`
+		IsDefault   bool      `json:"isDefault"`
+		UpdatedAt   time.Time `json:"updatedAt"`
+	}
+
+	err = db.QueryRow(`
+			SELECT id, name, color, description, order_index, is_default, updated_at
+			FROM rdm.project_milestone_statuses
+			WHERE id = $1
+		`, statusId).Scan(
+		&status.ID,
+		&status.Name,
+		&status.Color,
+		&status.Description,
+		&status.OrderIndex,
+		&status.IsDefault,
+		&status.UpdatedAt,
+	)
+
+	if err != nil {
+		http.Error(w, "Failed to fetch updated status", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+func handleDeleteMilestoneStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	statusId := vars["statusId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var isMember bool
+	err := db.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+			)
+		`, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil || !isMember {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Check if this is the default status
+	var isDefault bool
+	err = tx.QueryRow(`
+			SELECT is_default
+			FROM rdm.project_milestone_statuses
+			WHERE id = $1 AND project_id = $2
+		`, statusId, projectId).Scan(&isDefault)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Status not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to check status", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if there are any milestones using this status
+	var milestonesCount int
+	err = tx.QueryRow(`
+			SELECT COUNT(*)
+			FROM rdm.project_milestones
+			WHERE status_id = $1
+		`, statusId).Scan(&milestonesCount)
+
+	if err != nil {
+		http.Error(w, "Failed to check milestones", http.StatusInternalServerError)
+		return
+	}
+
+	if milestonesCount > 0 {
+		http.Error(w, "Cannot delete status that is being used by milestones", http.StatusBadRequest)
+		return
+	}
+
+	// If this is the default status and there are other statuses,
+	// we need to set a new default
+	if isDefault {
+		var newDefaultId string
+		err = tx.QueryRow(`
+				SELECT id
+				FROM rdm.project_milestone_statuses
+				WHERE project_id = $1 AND id != $2
+				ORDER BY order_index ASC, created_at ASC
+				LIMIT 1
+			`, projectId, statusId).Scan(&newDefaultId)
+
+		if err != nil && err != sql.ErrNoRows {
+			http.Error(w, "Failed to find new default status", http.StatusInternalServerError)
+			return
+		}
+
+		if newDefaultId != "" {
+			_, err = tx.Exec(`
+					UPDATE rdm.project_milestone_statuses
+					SET is_default = true
+					WHERE id = $1
+				`, newDefaultId)
+
+			if err != nil {
+				http.Error(w, "Failed to set new default status", http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
+	// Delete the status
+	result, err := tx.Exec(`
+			DELETE FROM rdm.project_milestone_statuses
+			WHERE id = $1 AND project_id = $2
+		`, statusId, projectId)
+
+	if err != nil {
+		http.Error(w, "Failed to delete status", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Status not found or not authorized", http.StatusNotFound)
+		return
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Status deleted successfully",
+	})
+}
+
+func handleGetMilestoneStatuses(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+
+	// Fetch all system statuses and any project-specific statuses
+	rows, err := db.Query(`
+			SELECT id, name, color, description, is_default, is_system
+			FROM rdm.project_milestone_statuses
+			WHERE is_system = true 
+			OR project_id = $1
+			ORDER BY order_index ASC
+		`, projectId)
+	if err != nil {
+		http.Error(w, "Failed to fetch milestone statuses", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var statuses []map[string]interface{}
+	for rows.Next() {
+		var status struct {
+			ID          string
+			Name        string
+			Color       string
+			Description sql.NullString
+			IsDefault   bool
+			IsSystem    bool
+		}
+		if err := rows.Scan(&status.ID, &status.Name, &status.Color,
+			&status.Description, &status.IsDefault, &status.IsSystem); err != nil {
+			continue
+		}
+
+		statuses = append(statuses, map[string]interface{}{
+			"id":          status.ID,
+			"name":        status.Name,
+			"color":       status.Color,
+			"description": status.Description.String,
+			"is_default":  status.IsDefault,
+			"is_system":   status.IsSystem,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(statuses)
+}
+
+func handleCreateMilestoneStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var req struct {
+		Name        string `json:"name"`
+		Color       string `json:"color"`
+		Description string `json:"description"`
+		OrderIndex  int    `json:"orderIndex"`
+		IsDefault   bool   `json:"isDefault"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	var statusId string
+	err = db.QueryRow(`
+			INSERT INTO rdm.project_milestone_statuses 
+			(project_id, name, color, description, order_index, is_default, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			RETURNING id
+		`, projectId, req.Name, req.Color, req.Description, req.OrderIndex, req.IsDefault, userId).Scan(&statusId)
+
+	if err != nil {
+		http.Error(w, "Failed to create status", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":          statusId,
+		"name":        req.Name,
+		"color":       req.Color,
+		"description": req.Description,
+		"orderIndex":  req.OrderIndex,
+		"isDefault":   req.IsDefault,
+	})
+}
 
 func handleCreateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
@@ -7193,41 +7659,40 @@ func handleCreateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ProjectID   string  `json:"projectId"`
 		Title       string  `json:"title"`
-		Description *string `json:"description"`
+		Description string  `json:"description"`
 		StartDate   *string `json:"startDate"`
 		EndDate     *string `json:"endDate"`
 		Status      string  `json:"status"`
-		Priority    *int    `json:"priority"`
+		Priority    int     `json:"priority"`
 		ParentID    *string `json:"parentId"`
 		Category    *string `json:"category"`
+		AsMilestone bool    `json:"asMilestone"`
+		StatusID    *string `json:"statusId"` // For custom milestone status
 	}
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	// Validate required fields
-	if req.ProjectID == "" || req.Title == "" || req.Status == "" {
-		http.Error(w, "Project ID, title, and status are required", http.StatusBadRequest)
+	if req.ProjectID == "" || req.Title == "" {
+		http.Error(w, "Project ID and title are required", http.StatusBadRequest)
 		return
 	}
 
-	// Verify user has permission (member or higher)
+	// Verify user has permission
 	var isMember bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-        )
-    `, req.ProjectID, claims.Username).Scan(&isMember)
-	if err != nil {
-		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
-		return
-	}
-	if !isMember {
-		http.Error(w, "Access denied to create roadmap items", http.StatusForbidden)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+			)
+		`, req.ProjectID, claims.Username).Scan(&isMember)
+	if err != nil || !isMember {
+		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
 
@@ -7239,33 +7704,7 @@ func handleCreateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse dates if provided
-	var startDate, endDate *time.Time
-	if req.StartDate != nil && *req.StartDate != "" {
-		parsedDate, err := time.Parse("2006-01-02", *req.StartDate)
-		if err != nil {
-			http.Error(w, "Invalid start date format. Use YYYY-MM-DD", http.StatusBadRequest)
-			return
-		}
-		startDate = &parsedDate
-	}
-
-	if req.EndDate != nil && *req.EndDate != "" {
-		parsedDate, err := time.Parse("2006-01-02", *req.EndDate)
-		if err != nil {
-			http.Error(w, "Invalid end date format. Use YYYY-MM-DD", http.StatusBadRequest)
-			return
-		}
-		endDate = &parsedDate
-	}
-
-	// Set default priority if not provided
-	priority := 0
-	if req.Priority != nil {
-		priority = *req.Priority
-	}
-
-	// Begin transaction
+	// Start transaction
 	tx, err := db.Begin()
 	if err != nil {
 		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
@@ -7273,48 +7712,53 @@ func handleCreateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Insert roadmap item
+	// Create roadmap item
 	var roadmapItemId string
-	err = db.QueryRow(`
-    INSERT INTO rdm.project_roadmap_items (
-        project_id, 
-        title, 
-        description, 
-        start_date, 
-        end_date, 
-        status, 
-        priority, 
-        parent_id,
-        category,
-        created_by, 
-        updated_by
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
-    RETURNING id
-`, req.ProjectID, req.Title, req.Description, startDate, endDate, req.Status, priority, req.ParentID, req.Category, userId).Scan(&roadmapItemId)
+	err = tx.QueryRow(`
+			INSERT INTO rdm.project_roadmap_items (
+				project_id, title, description, start_date, end_date,
+				status, priority, parent_id, category, created_by
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			RETURNING id
+		`, req.ProjectID, req.Title, req.Description, req.StartDate, req.EndDate,
+		req.Status, req.Priority, req.ParentID, req.Category, userId).Scan(&roadmapItemId)
 
 	if err != nil {
-		http.Error(w, "Failed to create roadmap item: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to create roadmap item", http.StatusInternalServerError)
 		return
 	}
 
-	// Log activity
-	_, err = tx.Exec(`
-        INSERT INTO rdm.project_activity (
-            project_id,
-            user_id,
-            activity_type,
-            entity_type,
-            entity_id,
-            description,
-            new_values
-        ) VALUES ($1, $2, 'create', 'roadmap', $3, $4, $5)
-    `, req.ProjectID, userId, roadmapItemId,
-		"Created roadmap item: "+req.Title,
-		fmt.Sprintf(`{"title":"%s","status":"%s"}`, req.Title, req.Status))
+	// If creating as milestone, also create milestone entry
+	if req.AsMilestone {
+		var milestoneId string
 
-	if err != nil {
-		http.Error(w, "Failed to log activity", http.StatusInternalServerError)
-		return
+		// If no custom status provided, get default status
+		if req.StatusID == nil {
+			err = tx.QueryRow(`
+					SELECT id FROM rdm.project_milestone_statuses
+					WHERE project_id = $1 AND is_default = true
+				`, req.ProjectID).Scan(&req.StatusID)
+			if err != nil && err != sql.ErrNoRows {
+				http.Error(w, "Failed to get default milestone status", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		err = tx.QueryRow(`
+				INSERT INTO rdm.project_milestones (
+					project_id, name, description, status_id,
+					start_date, due_date, priority, category,
+					roadmap_item_id, created_by, updated_by
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+				RETURNING id
+			`, req.ProjectID, req.Title, req.Description, req.StatusID,
+			req.StartDate, req.EndDate, req.Priority, req.Category,
+			roadmapItemId, userId).Scan(&milestoneId)
+
+		if err != nil {
+			http.Error(w, "Failed to create milestone", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Commit transaction
@@ -7323,33 +7767,52 @@ func handleCreateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return success
+	// Return created item
+	var createdItem struct {
+		ID          string     `json:"id"`
+		ProjectID   string     `json:"projectId"`
+		Title       string     `json:"title"`
+		Description string     `json:"description"`
+		StartDate   *time.Time `json:"startDate"`
+		EndDate     *time.Time `json:"endDate"`
+		Status      string     `json:"status"`
+		Priority    int        `json:"priority"`
+		ParentID    *string    `json:"parentId"`
+		Category    *string    `json:"category"`
+		CreatedAt   time.Time  `json:"createdAt"`
+		UpdatedAt   time.Time  `json:"updatedAt"`
+		IsMilestone bool       `json:"isMilestone"`
+	}
+
+	err = db.QueryRow(`
+			SELECT 
+				id, project_id, title, description, 
+				start_date, end_date, status, priority,
+				parent_id, category, created_at, updated_at,
+				EXISTS(SELECT 1 FROM rdm.project_milestones WHERE roadmap_item_id = id) as is_milestone
+			FROM rdm.project_roadmap_items 
+			WHERE id = $1
+		`, roadmapItemId).Scan(
+		&createdItem.ID, &createdItem.ProjectID, &createdItem.Title, &createdItem.Description,
+		&createdItem.StartDate, &createdItem.EndDate, &createdItem.Status, &createdItem.Priority,
+		&createdItem.ParentID, &createdItem.Category, &createdItem.CreatedAt, &createdItem.UpdatedAt,
+		&createdItem.IsMilestone,
+	)
+
+	if err != nil {
+		http.Error(w, "Failed to fetch created item", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":          roadmapItemId,
-		"projectId":   req.ProjectID,
-		"title":       req.Title,
-		"description": req.Description,
-		"startDate":   req.StartDate,
-		"endDate":     req.EndDate,
-		"status":      req.Status,
-		"priority":    priority,
-		"parentId":    req.ParentID,
-		"createdBy":   userId,
-		"updatedBy":   userId,
-		"createdAt":   time.Now(),
-		"updatedAt":   time.Now(),
-	})
+	json.NewEncoder(w).Encode(createdItem)
 }
 
 func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	itemId := vars["id"]
 	claims := r.Context().Value(claimsKey).(*Claims)
-
 	log.Printf("[DEBUG] Starting update for roadmap item %s", itemId)
-
 	var req struct {
 		Title       *string `json:"title"`
 		Description *string `json:"description"`
@@ -7359,37 +7822,26 @@ func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 		Priority    *int    `json:"priority"`
 		ParentID    *string `json:"parentId"`
 		Category    *string `json:"category"`
+		AsMilestone *bool   `json:"asMilestone"`
+		StatusID    *string `json:"statusId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-
-	// Log the parentId value
 	if req.ParentID == nil {
 		log.Printf("[DEBUG] Received parentId is nil")
 	} else {
 		log.Printf("[DEBUG] Received parentId: '%s'", *req.ParentID)
 	}
-
-	// First get the project ID to verify permissions
 	var projectId string
 	err := db.QueryRow("SELECT project_id FROM rdm.project_roadmap_items WHERE id = $1", itemId).Scan(&projectId)
 	if err != nil {
 		http.Error(w, "Roadmap item not found", http.StatusNotFound)
 		return
 	}
-
-	// Verify user has permission
 	var isMember bool
-	err = db.QueryRow(`
-	  SELECT EXISTS (
-		SELECT 1 
-		FROM rdm.project_members pm
-		JOIN auth.users u ON pm.user_id = u.id
-		WHERE pm.project_id = $1 AND u.email = $2
-	  )
-	`, projectId, claims.Username).Scan(&isMember)
+	err = db.QueryRow(`SELECT EXISTS (SELECT 1 FROM rdm.project_members pm JOIN auth.users u ON pm.user_id = u.id WHERE pm.project_id = $1 AND u.email = $2)`, projectId, claims.Username).Scan(&isMember)
 	if err != nil {
 		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
 		return
@@ -7398,15 +7850,12 @@ func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Access denied to update roadmap items", http.StatusForbidden)
 		return
 	}
-
 	var userId uuid.UUID
 	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
 	if err != nil {
 		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
 		return
 	}
-
-	// Process date fields if provided
 	var startDate, endDate *time.Time
 	if req.StartDate != nil {
 		if *req.StartDate != "" {
@@ -7418,7 +7867,6 @@ func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 			startDate = &parsed
 		}
 	}
-
 	if req.EndDate != nil {
 		if *req.EndDate != "" {
 			parsed, err := time.Parse("2006-01-02", *req.EndDate)
@@ -7429,67 +7877,45 @@ func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 			endDate = &parsed
 		}
 	}
-
-	// Get current values to merge with updates
 	var currentTitle, currentStatus string
 	var currentDescription, currentCategory sql.NullString
 	var currentStartDate, currentEndDate sql.NullTime
 	var currentPriority int
 	var currentParentId sql.NullString
-
-	err = db.QueryRow(`
-	  SELECT title, description, start_date, end_date, status, priority, parent_id, category
-	  FROM rdm.project_roadmap_items
-	  WHERE id = $1
-	`, itemId).Scan(&currentTitle, &currentDescription, &currentStartDate, &currentEndDate,
-		&currentStatus, &currentPriority, &currentParentId, &currentCategory)
-
+	err = db.QueryRow(`SELECT title, description, start_date, end_date, status, priority, parent_id, category FROM rdm.project_roadmap_items WHERE id = $1`, itemId).Scan(&currentTitle, &currentDescription, &currentStartDate, &currentEndDate, &currentStatus, &currentPriority, &currentParentId, &currentCategory)
 	if err != nil {
 		http.Error(w, "Failed to get current values", http.StatusInternalServerError)
 		return
 	}
-
-	// Log current database values
-	log.Printf("[DEBUG] Current parentId in DB - Valid: %v, Value: %s",
-		currentParentId.Valid, currentParentId.String)
-
-	// Merge current with updates
+	log.Printf("[DEBUG] Current parentId in DB - Valid: %v, Value: %s", currentParentId.Valid, currentParentId.String)
 	title := currentTitle
 	if req.Title != nil {
 		title = *req.Title
 	}
-
 	description := currentDescription.String
 	if req.Description != nil {
 		description = *req.Description
 	}
-
 	status := currentStatus
 	if req.Status != nil {
 		status = *req.Status
 	}
-
 	priority := currentPriority
 	if req.Priority != nil {
 		priority = *req.Priority
 	}
-
 	var parentId *string
 	if currentParentId.Valid {
 		parentId = &currentParentId.String
 		log.Printf("[DEBUG] Using existing parentId: %s", *parentId)
 	}
-
 	if req.ParentID != nil {
 		parentId = req.ParentID
 		log.Printf("[DEBUG] Overriding with request parentId")
 	} else {
-		// This is the important part - if req.ParentID is nil, it means null was sent
-		// and we should explicitly clear the parent ID
 		log.Printf("[DEBUG] Request has null parentId, clearing value")
 		parentId = nil
 	}
-
 	var parentIdUUID *uuid.UUID
 	if parentId != nil && *parentId != "" {
 		parsedUUID, err := uuid.Parse(*parentId)
@@ -7502,16 +7928,12 @@ func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 	} else {
 		log.Printf("[DEBUG] parentIdUUID is nil")
 	}
-
 	if startDate == nil && currentStartDate.Valid {
 		startDate = &currentStartDate.Time
 	}
-
 	if endDate == nil && currentEndDate.Valid {
 		endDate = &currentEndDate.Time
 	}
-
-	// Handle category updates
 	var category *string
 	if currentCategory.Valid {
 		category = &currentCategory.String
@@ -7519,45 +7941,59 @@ func handleUpdateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 	if req.Category != nil {
 		category = req.Category
 	}
-
-	// Convert item ID to UUID
 	itemUUID, err := uuid.Parse(itemId)
 	if err != nil {
 		http.Error(w, "Invalid item ID", http.StatusBadRequest)
 		return
 	}
-
-	// Call the update stored procedure
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
 	log.Printf("[DEBUG] Calling procedure with parentIdUUID: %v", parentIdUUID)
-	_, err = db.Exec(`
-	  CALL rdm.update_roadmap_item(
-		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-	  )
-	`,
-		itemUUID,     // Item ID
-		title,        // Title
-		description,  // Description
-		startDate,    // Start date
-		endDate,      // End date
-		status,       // Status
-		priority,     // Priority
-		parentIdUUID, // Parent ID
-		category,     // Category
-		userId,       // Updated by
-	)
-
+	_, err = tx.Exec(`CALL rdm.update_roadmap_item($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, itemUUID, title, description, startDate, endDate, status, priority, parentIdUUID, category, userId)
 	if err != nil {
 		log.Printf("[DEBUG] Procedure call failed: %v", err)
 		http.Error(w, "Failed to update roadmap item: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	// Verify the update
+	var hasMilestone bool
+	err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM rdm.project_milestones WHERE roadmap_item_id = $1)`, itemId).Scan(&hasMilestone)
+	if err != nil {
+		http.Error(w, "Failed to check milestone existence", http.StatusInternalServerError)
+		return
+	}
+	if req.AsMilestone != nil {
+		if *req.AsMilestone && !hasMilestone {
+			if req.StatusID == nil {
+				err = tx.QueryRow(`SELECT id FROM rdm.project_milestone_statuses WHERE project_id = $1 AND is_default = true`, projectId).Scan(&req.StatusID)
+				if err != nil && err != sql.ErrNoRows {
+					http.Error(w, "Failed to get default milestone status", http.StatusInternalServerError)
+					return
+				}
+			}
+			_, err = tx.Exec(`INSERT INTO rdm.project_milestones (project_id, name, description, status_id, start_date, due_date, priority, category, roadmap_item_id, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)`, projectId, title, description, req.StatusID, startDate, endDate, priority, category, itemId, userId)
+			if err != nil {
+				http.Error(w, "Failed to create milestone", http.StatusInternalServerError)
+				return
+			}
+		} else if !*req.AsMilestone && hasMilestone {
+			_, err = tx.Exec(`DELETE FROM rdm.project_milestones WHERE roadmap_item_id = $1`, itemId)
+			if err != nil {
+				http.Error(w, "Failed to remove milestone", http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
 	var afterParentId sql.NullString
 	db.QueryRow(`SELECT parent_id FROM rdm.project_roadmap_items WHERE id = $1`, itemId).Scan(&afterParentId)
-	log.Printf("[DEBUG] After update, parentId - Valid: %v, Value: %s",
-		afterParentId.Valid, afterParentId.String)
-
+	log.Printf("[DEBUG] After update, parentId - Valid: %v, Value: %s", afterParentId.Valid, afterParentId.String)
 	log.Printf("[DEBUG] Update completed successfully")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"id": itemId})
@@ -7568,30 +8004,41 @@ func handleDeleteRoadmapItem(w http.ResponseWriter, r *http.Request) {
 	itemId := vars["id"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
+	log.Printf("[DEBUG] Starting handleDeleteRoadmapItem for itemId: %s", itemId)
+	log.Printf("[DEBUG] User requesting deletion: %s", claims.Username)
+
 	// First get the project ID to verify permissions
 	var projectId string
 	err := db.QueryRow("SELECT project_id FROM rdm.project_roadmap_items WHERE id = $1", itemId).Scan(&projectId)
 	if err != nil {
+		log.Printf("[ERROR] Failed to find roadmap item %s: %v", itemId, err)
 		http.Error(w, "Roadmap item not found", http.StatusNotFound)
 		return
 	}
+	log.Printf("[DEBUG] Found roadmap item in project: %s", projectId)
 
 	// Verify user has permission (e.g., owner or admin)
 	var isAdmin bool
 	err = db.QueryRow(`
-	  SELECT EXISTS (
-		SELECT 1 
-		FROM rdm.project_members pm
-		JOIN auth.users u ON pm.user_id = u.id
-		WHERE pm.project_id = $1 AND u.email = $2
-		AND pm.role IN ('owner', 'admin')
-	  )
-	`, projectId, claims.Username).Scan(&isAdmin)
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+            AND pm.role IN ('owner', 'admin', 'super_admin')
+        )
+    `, projectId, claims.Username).Scan(&isAdmin)
+
 	if err != nil {
+		log.Printf("[ERROR] Failed to check project membership: %v", err)
 		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
 		return
 	}
+
+	log.Printf("[DEBUG] User has admin privileges: %v", isAdmin)
 	if !isAdmin {
+		log.Printf("[WARNING] Access denied for user %s to delete roadmap item in project %s",
+			claims.Username, projectId)
 		http.Error(w, "Access denied to delete roadmap items", http.StatusForbidden)
 		return
 	}
@@ -7599,24 +8046,87 @@ func handleDeleteRoadmapItem(w http.ResponseWriter, r *http.Request) {
 	var userId uuid.UUID
 	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
 	if err != nil {
+		log.Printf("[ERROR] Failed to get user ID for %s: %v", claims.Username, err)
 		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("[DEBUG] User ID: %s", userId)
 
 	// Convert item ID to UUID
 	itemUUID, err := uuid.Parse(itemId)
 	if err != nil {
+		log.Printf("[ERROR] Invalid item ID format: %s - %v", itemId, err)
 		http.Error(w, "Invalid item ID", http.StatusBadRequest)
 		return
 	}
+	log.Printf("[DEBUG] Parsed item UUID: %s", itemUUID)
+
+	// Check if this item has children
+	var hasChildren bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_roadmap_items 
+            WHERE parent_id = $1
+        )
+    `, itemId).Scan(&hasChildren)
+
+	if err != nil {
+		log.Printf("[ERROR] Failed to check for child items: %v", err)
+	} else if hasChildren {
+		log.Printf("[DEBUG] Item has children: %v", hasChildren)
+	}
+
+	// Check if this item is linked to a milestone
+	var isMilestone bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_milestones 
+            WHERE roadmap_item_id = $1
+        )
+    `, itemId).Scan(&isMilestone)
+
+	if err != nil {
+		log.Printf("[ERROR] Failed to check milestone relationship: %v", err)
+	} else {
+		log.Printf("[DEBUG] Item is linked to milestone: %v", isMilestone)
+	}
+
+	// Try to get the stored procedure definition
+	var procExists bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM pg_proc 
+            WHERE proname = 'delete_roadmap_item' 
+            AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'rdm')
+        )
+    `).Scan(&procExists)
+
+	if err != nil {
+		log.Printf("[WARNING] Failed to check if procedure exists: %v", err)
+	} else {
+		log.Printf("[DEBUG] Procedure rdm.delete_roadmap_item exists: %v", procExists)
+	}
 
 	// Execute the delete stored procedure
+	log.Printf("[DEBUG] Calling procedure: CALL rdm.delete_roadmap_item(%s, %s)", itemUUID, userId)
 	_, err = db.Exec(`CALL rdm.delete_roadmap_item($1, $2)`, itemUUID, userId)
 	if err != nil {
+		log.Printf("[ERROR] Failed to delete roadmap item: %v", err)
+
+		// Check for specific error types
+		if pqErr, ok := err.(*pq.Error); ok {
+			log.Printf("[ERROR] PostgreSQL error: Code=%s, Message=%s, Detail=%s, Hint=%s, Where=%s",
+				pqErr.Code, pqErr.Message, pqErr.Detail, pqErr.Hint, pqErr.Where)
+		}
+
 		http.Error(w, "Failed to delete roadmap item: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("[INFO] Successfully deleted roadmap item %s", itemId)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -7631,13 +8141,13 @@ func handleGetCategories(w http.ResponseWriter, r *http.Request) {
 	claims := r.Context().Value(claimsKey).(*Claims)
 	var isMember bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-        )
-    `, projectId, claims.Username).Scan(&isMember)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+			)
+		`, projectId, claims.Username).Scan(&isMember)
 	if err != nil {
 		log.Printf("[handleGetCategories] Error verifying membership: %v", err)
 		http.Error(w, "Failed to verify membership", http.StatusInternalServerError)
@@ -7652,10 +8162,10 @@ func handleGetCategories(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch categories from the database, including those with NULL project_id
 	rows, err := db.Query(`
-        SELECT category_name 
-        FROM rdm.project_categories 
-        WHERE project_id = $1 OR project_id IS NULL
-    `, projectId)
+			SELECT category_name 
+			FROM rdm.project_categories 
+			WHERE project_id = $1 OR project_id IS NULL
+		`, projectId)
 	if err != nil {
 		log.Printf("[handleGetCategories] Database query error: %v", err)
 		http.Error(w, "Failed to fetch categories", http.StatusInternalServerError)
@@ -7685,7 +8195,115 @@ func handleGetCategories(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(categories)
 }
 
-// Add these handlers to your main.go file
+func handleDeleteMilestone(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	milestoneId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	log.Printf("Deleting milestone with ID: %s", milestoneId)
+
+	// First get the project ID to verify permissions
+	var projectId string
+	err := db.QueryRow("SELECT project_id FROM rdm.project_milestones WHERE id = $1", milestoneId).Scan(&projectId)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Milestone not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error fetching milestone: %v", err)
+		http.Error(w, "Failed to fetch milestone", http.StatusInternalServerError)
+		return
+	}
+
+	// Verify user has permission (member of the project)
+	var isMember bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil {
+		log.Printf("Error checking project membership: %v", err)
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+
+	if !isMember {
+		http.Error(w, "Access denied to delete milestone", http.StatusForbidden)
+		return
+	}
+
+	// Get user ID for activity logging
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		log.Printf("Error getting user ID: %v", err)
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Get milestone details for activity log
+	var milestoneName string
+	var milestoneData []byte
+	err = tx.QueryRow(`
+        SELECT name, row_to_json(m) 
+        FROM rdm.project_milestones m
+        WHERE id = $1
+    `, milestoneId).Scan(&milestoneName, &milestoneData)
+
+	if err != nil {
+		log.Printf("Error getting milestone details: %v", err)
+		http.Error(w, "Failed to get milestone details", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete the milestone
+	_, err = tx.Exec("DELETE FROM rdm.project_milestones WHERE id = $1", milestoneId)
+	if err != nil {
+		log.Printf("Error deleting milestone: %v", err)
+		http.Error(w, "Failed to delete milestone", http.StatusInternalServerError)
+		return
+	}
+
+	// Log the activity
+	_, err = tx.Exec(`
+        INSERT INTO rdm.project_activity (
+            project_id, user_id, activity_type, entity_type, entity_id,
+            description, old_values
+        ) VALUES ($1, $2, 'delete', 'milestone', $3, $4, $5)
+    `, projectId, userId, milestoneId,
+		"Deleted milestone: "+milestoneName,
+		milestoneData)
+
+	if err != nil {
+		log.Printf("Error logging activity: %v", err)
+		http.Error(w, "Failed to log activity", http.StatusInternalServerError)
+		return
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Error committing transaction: %v", err)
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
 
 func handleGetProjectTasks(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -7695,13 +8313,13 @@ func handleGetProjectTasks(w http.ResponseWriter, r *http.Request) {
 	// Verify user is a project member
 	var isMember bool
 	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-        )
-    `, projectId, claims.Username).Scan(&isMember)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+			)
+		`, projectId, claims.Username).Scan(&isMember)
 
 	if err != nil || !isMember {
 		http.Error(w, "Access denied to project tasks", http.StatusForbidden)
@@ -7715,14 +8333,14 @@ func handleGetProjectTasks(w http.ResponseWriter, r *http.Request) {
 
 	// Build dynamic query with filters
 	query := `
-        SELECT t.id, t.project_id, t.name, t.description, t.status, t.priority,
-               t.assigned_to, CONCAT(u.first_name, ' ', u.last_name) as assignee_name,
-               t.due_date, t.estimated_hours, t.actual_hours, t.tags,
-               t.parent_id, t.created_by, t.updated_by, t.created_at, t.updated_at
-        FROM rdm.project_tasks t
-        LEFT JOIN auth.users u ON t.assigned_to = u.id
-        WHERE t.project_id = $1
-    `
+			SELECT t.id, t.project_id, t.name, t.description, t.status, t.priority,
+				t.assigned_to, CONCAT(u.first_name, ' ', u.last_name) as assignee_name,
+				t.due_date, t.estimated_hours, t.actual_hours, t.tags,
+				t.parent_id, t.created_by, t.updated_by, t.created_at, t.updated_at
+			FROM rdm.project_tasks t
+			LEFT JOIN auth.users u ON t.assigned_to = u.id
+			WHERE t.project_id = $1
+		`
 
 	args := []interface{}{projectId}
 	paramCount := 1
@@ -7878,13 +8496,13 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// Verify user has permission to create tasks
 	var isMember bool
 	err := db.QueryRow(`
-		SELECT EXISTS (
-			SELECT 1 
-			FROM rdm.project_members pm
-			JOIN auth.users u ON pm.user_id = u.id
-			WHERE pm.project_id = $1 AND u.email = $2
-		)
-	`, projectId, claims.Username).Scan(&isMember)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+			)
+		`, projectId, claims.Username).Scan(&isMember)
 
 	if err != nil {
 		log.Printf("Error checking project membership: %v", err)
@@ -7918,13 +8536,13 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// Create task
 	var taskId string
 	err = tx.QueryRow(`
-		INSERT INTO rdm.project_tasks (
-			project_id, name, description, status, priority,
-			assigned_to, due_date, estimated_hours, actual_hours,
-			tags, parent_id, created_by, updated_by
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
-		RETURNING id
-	`, projectId, taskData.Name, taskData.Description, taskData.Status, taskData.Priority,
+			INSERT INTO rdm.project_tasks (
+				project_id, name, description, status, priority,
+				assigned_to, due_date, estimated_hours, actual_hours,
+				tags, parent_id, created_by, updated_by
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+			RETURNING id
+		`, projectId, taskData.Name, taskData.Description, taskData.Status, taskData.Priority,
 		taskData.AssignedTo, taskData.DueDate, nil, nil,
 		pq.Array([]string{}), taskData.ParentID, userId).Scan(&taskId)
 
@@ -7951,10 +8569,10 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Create activity log
 	_, err = tx.Exec(`
-		INSERT INTO rdm.project_activity (
-			project_id, user_id, activity_type, entity_type, entity_id, description, metadata
-		) VALUES ($1, $2, 'create', 'task', $3, $4, $5)
-	`, projectId, userId, taskId,
+			INSERT INTO rdm.project_activity (
+				project_id, user_id, activity_type, entity_type, entity_id, description, metadata
+			) VALUES ($1, $2, 'create', 'task', $3, $4, $5)
+		`, projectId, userId, taskId,
 		"Created task: "+taskData.Name,
 		fmt.Sprintf(`{"name":"%s","status":"%s"}`, taskData.Name, taskData.Status))
 
@@ -8009,13 +8627,13 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var isMember bool
 	log.Printf("handleUpdateTask: Verifying permission for projectId: %s, user: %s", projectId, claims.Username)
 	err = db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-        )
-    `, projectId, claims.Username).Scan(&isMember)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+			)
+		`, projectId, claims.Username).Scan(&isMember)
 	if err != nil {
 		log.Printf("handleUpdateTask: Error checking membership: %v", err)
 		http.Error(w, "Access denied", http.StatusForbidden)
@@ -8053,13 +8671,13 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var currentValuesBytes []byte
 	log.Printf("handleUpdateTask: Fetching current task values for taskId: %s", taskId)
 	err = db.QueryRow(`
-        SELECT row_to_json(t) FROM (
-            SELECT name, description, status, priority, assigned_to,
-                   due_date, estimated_hours, actual_hours, tags, parent_id
-            FROM rdm.project_tasks
-            WHERE id = $1
-        ) t
-    `, taskId).Scan(&currentValuesBytes)
+			SELECT row_to_json(t) FROM (
+				SELECT name, description, status, priority, assigned_to,
+					due_date, estimated_hours, actual_hours, tags, parent_id
+				FROM rdm.project_tasks
+				WHERE id = $1
+			) t
+		`, taskId).Scan(&currentValuesBytes)
 	if err != nil {
 		log.Printf("handleUpdateTask: Error fetching current values: %v", err)
 		http.Error(w, "Failed to get current task values", http.StatusInternalServerError)
@@ -8207,11 +8825,11 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	// Log activity
 	log.Printf("handleUpdateTask: Logging activity for taskId: %s", taskId)
 	_, err = tx.Exec(`
-        INSERT INTO rdm.project_activity (
-            project_id, user_id, activity_type, entity_type, entity_id,
-            description, old_values, new_values
-        ) VALUES ($1, $2, 'update', 'task', $3, $4, $5, $6)
-    `, projectId, userId, taskId,
+			INSERT INTO rdm.project_activity (
+				project_id, user_id, activity_type, entity_type, entity_id,
+				description, old_values, new_values
+			) VALUES ($1, $2, 'update', 'task', $3, $4, $5, $6)
+		`, projectId, userId, taskId,
 		"Updated task details",
 		currentValuesBytes,
 		newValuesBytes) // Use marshaled byte slice
@@ -8253,14 +8871,14 @@ func handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	// Verify user has permission (owner or admin)
 	var isAdmin bool
 	err = db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM rdm.project_members pm
-            JOIN auth.users u ON pm.user_id = u.id
-            WHERE pm.project_id = $1 AND u.email = $2
-            AND pm.role IN ('owner', 'admin')
-        )
-    `, projectId, claims.Username).Scan(&isAdmin)
+			SELECT EXISTS (
+				SELECT 1 
+				FROM rdm.project_members pm
+				JOIN auth.users u ON pm.user_id = u.id
+				WHERE pm.project_id = $1 AND u.email = $2
+				AND pm.role IN ('owner', 'admin')
+			)
+		`, projectId, claims.Username).Scan(&isAdmin)
 
 	if err != nil || !isAdmin {
 		http.Error(w, "Access denied", http.StatusForbidden)
@@ -8299,10 +8917,10 @@ func handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	// Save current task data for activity log
 	var taskDataBytes []byte
 	err = tx.QueryRow(`
-		SELECT row_to_json(t) FROM (
-			SELECT * FROM rdm.project_tasks WHERE id = $1
-		) t
-	`, taskId).Scan(&taskDataBytes)
+			SELECT row_to_json(t) FROM (
+				SELECT * FROM rdm.project_tasks WHERE id = $1
+			) t
+		`, taskId).Scan(&taskDataBytes)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, "Task not found", http.StatusNotFound)
@@ -8322,11 +8940,11 @@ func handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 
 	// Log activity using taskDataBytes directly
 	_, err = tx.Exec(`
-		INSERT INTO rdm.project_activity (
-			project_id, user_id, activity_type, entity_type, entity_id,
-			description, old_values
-		) VALUES ($1, $2, 'delete', 'task', $3, $4, $5)
-	`, projectId, userId, taskId,
+			INSERT INTO rdm.project_activity (
+				project_id, user_id, activity_type, entity_type, entity_id,
+				description, old_values
+			) VALUES ($1, $2, 'delete', 'task', $3, $4, $5)
+		`, projectId, userId, taskId,
 		"Deleted task: "+taskName,
 		taskDataBytes)
 	if err != nil {
@@ -8588,6 +9206,12 @@ func main() {
 	r.HandleFunc("/projects/{projectId}/tasks", authMiddleware(handleCreateTask)).Methods("POST")
 	r.HandleFunc("/tasks/{id}", authMiddleware(handleUpdateTask)).Methods("PUT")
 	r.HandleFunc("/tasks/{id}", authMiddleware(handleDeleteTask)).Methods("DELETE")
+	r.HandleFunc("/projects/{projectId}/milestone-statuses", authMiddleware(handleGetMilestoneStatuses)).Methods("GET")
+	r.HandleFunc("/projects/{projectId}/milestone-statuses", authMiddleware(handleCreateMilestoneStatus)).Methods("POST")
+	r.HandleFunc("/projects/{projectId}/milestone-statuses/{statusId}", authMiddleware(handleUpdateMilestoneStatus)).Methods("PUT")
+	r.HandleFunc("/projects/{projectId}/milestone-statuses/{statusId}", authMiddleware(handleDeleteMilestoneStatus)).Methods("DELETE")
+	r.HandleFunc("/projects/{projectId}/milestones", authMiddleware(handleGetProjectMilestones)).Methods("GET")
+	r.HandleFunc("/milestones/{id}", authMiddleware(handleDeleteMilestone)).Methods("DELETE")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

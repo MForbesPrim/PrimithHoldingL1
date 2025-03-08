@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react"
+import { useState, useMemo, useRef, useEffect } from "react"
 import { RoadmapItem } from "@/types/projects"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -9,7 +9,10 @@ import {
   Edit, 
   Trash2, 
   MoreHorizontal, 
-  CalendarDays 
+  CalendarDays,
+  ChevronUp,
+  ChevronsUpDown,
+  Loader2
 } from "lucide-react"
 import { 
   DropdownMenu,
@@ -40,7 +43,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { Check, ChevronsUpDown } from "lucide-react"
+import { Check } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -48,6 +51,8 @@ import { Calendar } from "@/components/ui/calendar"
 import { format, parseISO, getQuarter } from "date-fns"
 import GanttChart from "./ganttChart"
 import { ProjectService } from "@/services/projectService";
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
 
 // Helper function to capitalize the first letter of each word
 const capitalizeWords = (str: string) => {
@@ -57,12 +62,27 @@ const capitalizeWords = (str: string) => {
     .join(' ');
 };
 
+interface MilestoneStatus {
+  id: string;
+  name: string;
+  color: string;
+  description?: string;
+  is_default: boolean;
+  is_system: boolean;
+}
+
+
 interface RoadmapViewProps {
   items: RoadmapItem[];
   onItemCreate: (item: Partial<RoadmapItem>) => Promise<void>;
   onItemUpdate: (itemId: string, item: Partial<RoadmapItem>) => Promise<void>;
   onItemDelete?: (itemId: string) => Promise<void>;
   projectId: string;
+}
+
+type RoadmapFormData = Partial<RoadmapItem> & { 
+  asMilestone?: boolean;
+  statusId?: string;
 }
 
 export function RoadmapView({ 
@@ -87,20 +107,47 @@ export function RoadmapView({
   const [startDate, setStartDate] = useState<Date | undefined>(undefined)
   const [endDate, setEndDate] = useState<Date | undefined>(undefined)
   const [isSaving, setIsSaving] = useState(false) // State for saving status
+  const [isDeleting, setIsDeleting] = useState(false) // State for delete status
   const categorySelectRef = useRef<HTMLButtonElement>(null)
   const parentSelectRef = useRef<HTMLButtonElement>(null)
   const projectsService = new ProjectService()
   const safeItems = items || []
-  
+  const [milestoneStatuses, setMilestoneStatuses] = useState<MilestoneStatus[]>([]);
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(null);
+
   // Form state for new/edit item
-  const [formData, setFormData] = useState<Partial<RoadmapItem>>({
+  const [formData, setFormData] = useState<RoadmapFormData>({
     title: "",
     description: "",
     status: "planned",
     priority: 0,
     category: "",
-    parentId: undefined
-  })
+    parentId: undefined,
+    asMilestone: false,
+    statusId: undefined
+  });
+
+  const fetchMilestoneStatuses = async () => {
+    try {
+      const statuses = await projectsService.getMilestoneStatuses(projectId);
+      const formattedStatuses = statuses.map(status => ({
+        ...status,
+        color: status.color || '#6B7280',
+        is_default: status.is_default || false,
+        is_system: status.is_system || false
+      })) as MilestoneStatus[];
+      setMilestoneStatuses(formattedStatuses);
+    } catch (error) {
+      console.error("Failed to fetch milestone statuses:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (showAddModal || showEditModal) {
+      fetchMilestoneStatuses();
+    }
+  }, [showAddModal, showEditModal, projectId]);
 
   // Reset form when opening the add modal
   const handleAddClick = async () => {
@@ -160,8 +207,8 @@ export function RoadmapView({
     setOpenParent(false);
     
     // Set date values
-    setStartDate(item.startDate ? new Date(item.startDate) : undefined);
-    setEndDate(item.endDate ? new Date(item.endDate) : undefined);
+    setStartDate(item.startDate ? parseISO(item.startDate) : undefined);
+    setEndDate(item.endDate ? parseISO(item.endDate) : undefined);
     
     // Set form data
     setFormData({
@@ -217,12 +264,18 @@ const handleParentSelect = (value: string) => {
   // Handle date changes
   const handleStartDateChange = (date: Date | undefined) => {
     setStartDate(date)
-    setFormData({ ...formData, startDate: date ? format(date, "yyyy-MM-dd") : undefined })
+    setFormData({ 
+      ...formData, 
+      startDate: date ? format(date, "yyyy-MM-dd") : undefined 
+    })
   }
 
   const handleEndDateChange = (date: Date | undefined) => {
     setEndDate(date)
-    setFormData({ ...formData, endDate: date ? format(date, "yyyy-MM-dd") : undefined })
+    setFormData({ 
+      ...formData, 
+      endDate: date ? format(date, "yyyy-MM-dd") : undefined 
+    })
   }
 
   // Handle delete confirmation
@@ -241,6 +294,8 @@ const handleParentSelect = (value: string) => {
     try {
       await onItemCreate({ ...formData, category: finalCategory })
       setShowAddModal(false)
+    } catch (error) {
+      console.error('Error creating item:', error)
     } finally {
       setIsSaving(false); // Re-enable button and revert text
     }
@@ -278,8 +333,15 @@ const handleEditSubmit = async () => {
   // Handle delete confirmation
   const handleDeleteConfirm = async () => {
     if (editingItem && editingItem.id && onItemDelete) {
-      await onItemDelete(editingItem.id)
-      setShowDeleteConfirm(false)
+      setIsDeleting(true); // Disable button and show "Deleting..."
+      try {
+        await onItemDelete(editingItem.id)
+        setShowDeleteConfirm(false)
+      } catch (error) {
+        console.error("Error deleting item:", error);
+      } finally {
+        setIsDeleting(false); // Re-enable button and revert text
+      }
     }
   }
 
@@ -413,6 +475,28 @@ const handleEditSubmit = async () => {
 
 // Add this function to your RoadmapView component
 const renderListView = () => {
+    // Sort items if sorting is active
+    let sortedItems = [...safeItems];
+    if (sortColumn && sortDirection) {
+      sortedItems.sort((a, b) => {
+        let aValue = a[sortColumn as keyof RoadmapItem];
+        let bValue = b[sortColumn as keyof RoadmapItem];
+        
+        // Handle special cases for sorting
+        if (sortColumn === 'startDate' || sortColumn === 'endDate') {
+          aValue = aValue ? new Date(aValue as string).getTime() : 0;
+          bValue = bValue ? new Date(bValue as string).getTime() : 0;
+        }
+        
+        if (aValue === bValue) return 0;
+        if (aValue === null || aValue === undefined) return 1;
+        if (bValue === null || bValue === undefined) return -1;
+        
+        const result = aValue < bValue ? -1 : 1;
+        return sortDirection === 'asc' ? result : -result;
+      });
+    }
+
     return (
       <div className="space-y-6">
         {safeItems.length > 0 && (
@@ -428,16 +512,111 @@ const renderListView = () => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-muted/20">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timeline</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <div className="flex items-center">
+                      Title
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort('title')}
+                        className="ml-2 h-8 w-8 p-0"
+                      >
+                        {sortColumn === 'title' ? (
+                          sortDirection === 'asc' ? (
+                            <ChevronUp className="h-4 w-4" />
+                          ) : sortDirection === 'desc' ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : null
+                        ) : (
+                          <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </Button>
+                    </div>
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <div className="flex items-center">
+                      Status
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort('status')}
+                        className="ml-2 h-8 w-8 p-0"
+                      >
+                        {sortColumn === 'status' ? (
+                          sortDirection === 'asc' ? (
+                            <ChevronUp className="h-4 w-4" />
+                          ) : sortDirection === 'desc' ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : null
+                        ) : (
+                          <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </Button>
+                    </div>
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <div className="flex items-center">
+                      Category
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort('category')}
+                        className="ml-2 h-8 w-8 p-0"
+                      >
+                        {sortColumn === 'category' ? (
+                          sortDirection === 'asc' ? (
+                            <ChevronUp className="h-4 w-4" />
+                          ) : sortDirection === 'desc' ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : null
+                        ) : (
+                          <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </Button>
+                    </div>
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <div className="flex items-center">
+                      Timeline
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort('startDate')}
+                        className="ml-2 h-8 w-8 p-0"
+                      >
+                        {sortColumn === 'startDate' ? (
+                          sortDirection === 'asc' ? (
+                            <ChevronUp className="h-4 w-4" />
+                          ) : sortDirection === 'desc' ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : null
+                        ) : (
+                          <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </Button>
+                    </div>
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <div className="flex items-center">
+                      Priority
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort('priority')}
+                        className="ml-2 h-8 w-8 p-0"
+                      >
+                        {sortColumn === 'priority' ? (
+                          sortDirection === 'asc' ? (
+                            <ChevronUp className="h-4 w-4" />
+                          ) : sortDirection === 'desc' ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : null
+                        ) : (
+                          <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </Button>
+                    </div>
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {safeItems.map((item) => (
+                {sortedItems.map((item) => (
                   <tr key={item.id} className="hover:bg-muted/10 transition-colors cursor-pointer" onClick={() => handleEditClick(item)}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium">{item.title}</div>
@@ -469,13 +648,13 @@ const renderListView = () => {
                         <div className="flex items-center text-xs text-gray-500">
                           <CalendarDays className="h-3 w-3 mr-1" />
                           {item.startDate && (
-                            <span>{new Date(item.startDate).toLocaleDateString()}</span>
+                            <span>{format(parseISO(item.startDate), 'MMM d, yyyy')}</span>
                           )}
                           {item.startDate && item.endDate && (
                             <span className="mx-1">—</span>
                           )}
                           {item.endDate && (
-                            <span>{new Date(item.endDate).toLocaleDateString()}</span>
+                            <span>{format(parseISO(item.endDate), 'MMM d, yyyy')}</span>
                           )}
                         </div>
                       ) : (
@@ -582,13 +761,13 @@ const renderListView = () => {
                     <div className="flex items-center text-xs text-gray-500 mt-2">
                       <CalendarDays className="h-3 w-3 mr-1" />
                       {item.startDate && (
-                        <span>{new Date(item.startDate).toLocaleDateString()}</span>
+                        <span>{format(parseISO(item.startDate), 'MMM d, yyyy')}</span>
                       )}
                       {item.startDate && item.endDate && (
                         <span className="mx-1">—</span>
                       )}
                       {item.endDate && (
-                        <span>{new Date(item.endDate).toLocaleDateString()}</span>
+                        <span>{format(parseISO(item.endDate), 'MMM d, yyyy')}</span>
                       )}
                     </div>
                   )}
@@ -641,13 +820,13 @@ const renderListView = () => {
             <div className="flex items-center text-xs text-gray-500 mt-2">
               <CalendarDays className="h-3 w-3 mr-1" />
               {item.startDate && (
-                <span>{new Date(item.startDate).toLocaleDateString()}</span>
+                <span>{format(parseISO(item.startDate), 'MMM d, yyyy')}</span>
               )}
               {item.startDate && item.endDate && (
                 <span className="mx-1">—</span>
               )}
               {item.endDate && (
-                <span>{new Date(item.endDate).toLocaleDateString()}</span>
+                <span>{format(parseISO(item.endDate), 'MMM d, yyyy')}</span>
               )}
             </div>
           )}
@@ -693,13 +872,13 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
               <CalendarDays className="h-3 w-3 mr-1 flex-shrink-0" />
               <span className="truncate">
                 {item.startDate && (
-                  <span>{new Date(item.startDate).toLocaleDateString()}</span>
+                  <span>{format(parseISO(item.startDate), 'MMM d, yyyy')}</span>
                 )}
                 {item.startDate && item.endDate && (
                   <span className="mx-1">—</span>
                 )}
                 {item.endDate && (
-                  <span>{new Date(item.endDate).toLocaleDateString()}</span>
+                  <span>{format(parseISO(item.endDate), 'MMM d, yyyy')}</span>
                 )}
               </span>
             </div>
@@ -832,6 +1011,21 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
   const parentItems = useMemo(() => {
     return safeItems.filter(item => item.id !== editingItem?.id);
   }, [safeItems, editingItem]);
+
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      // Cycle through: asc -> desc -> null (unsorted)
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortDirection(null);
+        setSortColumn(null);
+      }
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
 
   return (
     <div className="space-y-6 mt-4">
@@ -1131,13 +1325,56 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
                 </PopoverContent>
               </Popover>
             </div>
+            <div className="grid gap-2">
+              <div className="flex items-center space-x-2">
+                  <Checkbox
+                      checked={formData.asMilestone}
+                      onCheckedChange={(checked) => 
+                          setFormData({...formData, asMilestone: checked as boolean})}
+                  />
+                  <Label htmlFor="as-milestone">Create milestone for this item</Label>
+              </div>
+          </div>
+          {formData.asMilestone && (
+            <div className="grid gap-2">
+              <label htmlFor="milestone-status" className="text-sm font-medium">
+                Milestone Status
+              </label>
+              <Select
+                value={formData.statusId || ""}
+                onValueChange={(value) => setFormData({...formData, statusId: value})}
+              >
+                <SelectTrigger id="milestone-status">
+                  <SelectValue placeholder="Select milestone status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {milestoneStatuses.map((status) => (
+                    <SelectItem 
+                      key={status.id} 
+                      value={status.id}
+                      className="hover:bg-gray-100"
+                    >
+                      {status.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddModal(false)}>
               Cancel
             </Button>
             <Button onClick={handleAddSubmit} disabled={isSaving || !formData.title}>
-              {isSaving ? "Saving..." : "Add Item"}
+              {isSaving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Add Item"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1374,7 +1611,14 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
               Cancel
             </Button>
             <Button onClick={handleEditSubmit} disabled={isSaving || !formData.title}>
-              {isSaving ? "Saving..." : "Save Changes"}
+              {isSaving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Save Changes"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1394,8 +1638,15 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
               <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>
                 Cancel
               </Button>
-              <Button variant="destructive" onClick={handleDeleteConfirm}>
-                Delete
+              <Button variant="destructive" onClick={handleDeleteConfirm} disabled={isDeleting}>
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete"
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>

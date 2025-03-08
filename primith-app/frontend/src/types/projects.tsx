@@ -149,3 +149,31 @@ export interface ProjectMember {
     updatedAt: string;
     children?: ProjectTask[];
   }
+
+  export interface ProjectMilestone {
+    id: string;
+    projectId: string;
+    name: string;
+    title?: string;
+    description?: string;
+    status: 'planned' | 'in_progress' | 'completed' | 'delayed';
+    startDate?: string;
+    dueDate?: string;
+    endDate?: string;
+    priority: number;
+    category?: string;
+    roadmapItemId?: string;
+    createdBy: string;
+    updatedBy?: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface MilestoneStatus {
+  id: string;
+  name: string;
+  color: string;
+  description?: string;
+  is_default: boolean;
+  is_system: boolean;
+}
