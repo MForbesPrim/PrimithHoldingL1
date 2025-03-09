@@ -7180,7 +7180,7 @@ func handleCreateProjectArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate type and status against allowed values
-	validTypes := []string{"document", "task", "page", "image", "milestone", "deliverable"}
+	validTypes := []string{"document", "task", "page", "image", "video", "file", "other"}
 	validStatuses := []string{"draft", "in_review", "approved", "rejected"}
 	if !contains(validTypes, req.Type) {
 		http.Error(w, "Invalid artifact type", http.StatusBadRequest)

@@ -17,22 +17,24 @@ import {
   flexRender,
   getFilteredRowModel,
 } from "@tanstack/react-table"
-import { ChevronsUpDown, ChevronUp, ChevronDown, Edit, X, Search } from "lucide-react"
+import { ChevronsUpDown, ChevronUp, ChevronDown, Edit, X, Search, Eye, Download } from "lucide-react"
 
 interface ArtifactsPageProps {
   artifacts: ProjectArtifact[];
   projectId: string;
   projectService: any;
   artifactStatuses?: ArtifactStatus[];
-  onStatusChange?: (artifactId: string, status: string) => Promise<void>;
   onUpdateArtifact?: (artifactId: string, data: Partial<ProjectArtifact>) => Promise<void>;
+  onDownloadArtifact?: (artifactId: string, fileName: string) => Promise<void>;
+  onViewPage?: (pageId: string) => void;
 }
 
 export function ArtifactsPage({ 
   artifacts = [], 
   projectId,
-  onStatusChange,
   onUpdateArtifact,
+  onDownloadArtifact,
+  onViewPage,
   projectService
 }: ArtifactsPageProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -343,24 +345,38 @@ useEffect(() => {
     },
     {
       id: "actions",
-      cell: ({ row }) => (
-        <div className="flex gap-2">
-          <Button 
-            variant="ghost" 
-            size="sm"
-            onClick={() => handleEditClick(row.original)}
-          >
-            <Edit className="h-4 w-4" />
-          </Button>
-          <Button 
-            variant="ghost" 
-            size="sm"
-            onClick={() => onStatusChange && onStatusChange(row.original.id, 'viewed')}
-          >
-            View
-          </Button>
-        </div>
-      ),
+      cell: ({ row }) => {
+        const artifact = row.original;
+        return (
+          <div className="flex gap-2">
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={() => handleEditClick(artifact)}
+            >
+              <Edit className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={() => {
+                if (artifact.type === 'page' && onViewPage && artifact.pageId) {
+                  onViewPage(artifact.pageId);
+                } else if (artifact.type !== 'page' && onDownloadArtifact && artifact.documentId) {
+                  onDownloadArtifact(artifact.documentId, artifact.name);
+                }
+              }}
+              title={artifact.type === 'page' ? 'View Page' : 'Download'}
+            >
+              {artifact.type === 'page' ? (
+                <Eye className="h-4 w-4" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+        );
+      },
     },
   ];
 

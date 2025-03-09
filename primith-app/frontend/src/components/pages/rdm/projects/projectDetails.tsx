@@ -35,7 +35,7 @@ import {
   Plus,
   Activity,
   Variable,
-  Loader2,
+  Loader2
 } from "lucide-react";
 import { RoadmapView } from "@/components/pages/rdm/projects/roadmapView";
 import { ArtifactsPage } from "@/components/pages/rdm/projects/artifactsTable";
@@ -70,6 +70,71 @@ import {
 
 import { useToast } from '@/hooks/use-toast';
 import { MilestonesView } from "@/components/pages/rdm/projects/milestonesView";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { useOrganization } from "@/components/pages/rdm/context/organizationContext";
+
+interface PageViewerProps {
+  pageId: string | null;
+  onClose: () => void;
+}
+
+function PageViewer({ pageId, onClose }: PageViewerProps) {
+  const [page, setPage] = useState<PageNode | null>(null);
+  const [loading, setLoading] = useState(true);
+  const pagesService = new PagesService();
+  const { selectedOrgId } = useOrganization();
+
+  useEffect(() => {
+    const loadPage = async () => {
+      if (!pageId || !selectedOrgId) return;
+      setLoading(true);
+      try {
+        const pages = await pagesService.getPages(selectedOrgId);
+        const pageData = pages.find(p => p.id === pageId);
+        if (pageData) {
+          setPage(pageData);
+        } else {
+          console.error('Page not found');
+        }
+      } catch (error) {
+        console.error('Failed to load page:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadPage();
+  }, [pageId, selectedOrgId]);
+
+  if (!pageId) return null;
+
+  return (
+    <Sheet open={!!pageId} onOpenChange={() => onClose()}>
+      <SheetContent side="right" className="w-[800px] sm:w-[800px]">
+        <SheetHeader>
+          <div className="flex justify-between items-center">
+            <SheetTitle>{page?.name || 'Loading...'}</SheetTitle>
+          </div>
+        </SheetHeader>
+        <div className="mt-4">
+          {loading ? (
+            <div className="flex justify-center p-8">
+              <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+            </div>
+          ) : page ? (
+            <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: page.content || '' }} />
+          ) : (
+            <div className="text-center p-8 text-gray-500">Failed to load page content.</div>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
 
 export function ProjectDetailPage() {
   const { toast } = useToast();    
@@ -87,7 +152,7 @@ export function ProjectDetailPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [newArtifact, setNewArtifact] = useState({
     name: "",
-    type: "document" as "document" | "image",
+    type: "document" as "document" | "image" | "video" | "audio" | "file" | "other",
     status: "draft" as "draft" | "in_review" | "approved" | "rejected",
     description: "",
     file: null as File | null,
@@ -105,7 +170,7 @@ export function ProjectDetailPage() {
   const [sortColumn, setSortColumn] = useState('createdAt');
   const [sortDirection, setSortDirection] = useState('desc');
   const [artifactStatuses, setArtifactStatuses] = useState<ArtifactStatus[]>([]);
-
+  const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
 
   const projectService = new ProjectService();
   const documentService = new DocumentService();
@@ -115,6 +180,10 @@ export function ProjectDetailPage() {
   const artifactTypes = [
     { value: "document", label: "Document" },
     { value: "image", label: "Image" },
+    { value: "video", label: "Video" },
+    { value: "audio", label: "Audio" },
+    { value: "file", label: "File" },
+    { value: "other", label: "Other" },
   ];
 
   useEffect(() => {
@@ -415,6 +484,16 @@ export function ProjectDetailPage() {
     }
   };
 
+  const capitalizeWords = (str: string) => {
+    return str.split('_').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    ).join(' ');
+  };
+
+  const handleViewPage = (pageId: string) => {
+    setSelectedPageId(pageId);
+  };
+
   if (loading) {
     return (
       <div className="h-full overflow-y-auto pt-4 pl-4 pr-6">
@@ -518,6 +597,10 @@ export function ProjectDetailPage() {
 
   return (
     <div className="h-full overflow-y-auto pt-4 pl-4 pr-6">
+      <PageViewer 
+        pageId={selectedPageId} 
+        onClose={() => setSelectedPageId(null)} 
+      />
       <EditProjectDialog
         open={editingProject}
         onClose={() => setEditingProject(false)}
@@ -567,7 +650,7 @@ export function ProjectDetailPage() {
                 onValueChange={(value) =>
                   setNewArtifact((prev) => ({
                     ...prev,
-                    type: value as "document" | "image",
+                    type: value as "document" | "image" | "video" | "audio" | "file" | "other",
                   }))
                 }
                 disabled={isUploading}
@@ -848,10 +931,6 @@ export function ProjectDetailPage() {
                 projectId={projectId || ""}
                 projectService={projectService}
                 artifactStatuses={artifactStatuses}
-                onStatusChange={async (artifactId: string, status: string) => {
-                  await projectService.updateArtifactStatus(artifactId, status);
-                  loadProjectData();
-                }}
                 onUpdateArtifact={async (artifactId: string, data: Partial<ProjectArtifact>) => {
                   try {
                     await projectService.updateArtifact(projectId || "", artifactId, data);
@@ -869,6 +948,8 @@ export function ProjectDetailPage() {
                     });
                   }
                 }}
+                onDownloadArtifact={handleDownloadDocument}
+                onViewPage={handleViewPage}
               />
           </div>
         </TabsContent>
@@ -1093,7 +1174,7 @@ export function ProjectDetailPage() {
                           Type {sortColumn === 'activityType' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
                         </TableHead>
                         <TableHead onClick={() => handleSort('entityType')} className="cursor-pointer">
-                          Entity {sortColumn === 'entityType' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                          Entity Type {sortColumn === 'entityType' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
                         </TableHead>
                         <TableHead onClick={() => handleSort('description')} className="cursor-pointer">
                           Description {sortColumn === 'description' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
@@ -1107,10 +1188,10 @@ export function ProjectDetailPage() {
                         sortedActivities.map((activity) => (
                           <TableRow key={activity.id}>
                             <TableCell>{activity.formattedDate}</TableCell>
-                            <TableCell>{activity.formattedTime}</TableCell>
+                            <TableCell>{new Date(activity.timestamp).toLocaleTimeString()}</TableCell>
                             <TableCell>{activity.userName || activity.userEmail}</TableCell>
-                            <TableCell>{activity.activityType}</TableCell>
-                            <TableCell>{activity.entityType}</TableCell>
+                            <TableCell>{capitalizeWords(activity.activityType)}</TableCell>
+                            <TableCell>{capitalizeWords(activity.entityType)}</TableCell>
                             <TableCell>{activity.description}</TableCell>
                             <TableCell>
                               {activity.activityType === 'update' && activity.oldValues && activity.newValues && (
