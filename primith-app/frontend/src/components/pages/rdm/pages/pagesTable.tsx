@@ -2,19 +2,19 @@ import { useMemo, useState } from 'react';
 import {
   FileText,
   MoreHorizontal,
-  ChevronRight,
-  ChevronDown,
+
   Folder,
   FilePen,
   FolderPen,
   Link2,
   Plus,
   Trash2,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
   Search,
-  Unlink, 
+  Unlink,
+  ChevronsUpDown, 
+  ChevronUp, 
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 import { PageNode, FolderNode } from '@/types/pages';
 import { Button } from '@/components/ui/button';
@@ -326,11 +326,11 @@ export function PagesTable({
                       className="ml-2 h-4 w-4 p-0"
                     >
                       {column.getIsSorted() === 'asc' ? (
-                        <ArrowUp className="h-4 w-4" />
+                        <ChevronUp className="h-4 w-4" />
                       ) : column.getIsSorted() === 'desc' ? (
-                        <ArrowDown className="h-4 w-4" />
+                        <ChevronDown className="h-4 w-4" />
                       ) : (
-                        <ArrowUpDown className="h-4 w-4" />
+                        <ChevronsUpDown className="h-4 w-4" />
                       )}
                     </Button>
                   </div>
@@ -410,11 +410,11 @@ export function PagesTable({
                       className="ml-2 h-4 w-4 p-0"
                     >
                       {column.getIsSorted() === 'asc' ? (
-                        <ArrowUp className="h-4 w-4" />
+                        <ChevronUp className="h-4 w-4" />
                       ) : column.getIsSorted() === 'desc' ? (
-                        <ArrowDown className="h-4 w-4" />
+                        <ChevronDown className="h-4 w-4" />
                       ) : (
-                        <ArrowUpDown className="h-4 w-4" />
+                        <ChevronsUpDown className="h-4 w-4" />
                       )}
                     </Button>
                   </div>
@@ -441,11 +441,11 @@ export function PagesTable({
                       className="ml-2 h-4 w-4 p-0"
                     >
                       {column.getIsSorted() === 'asc' ? (
-                        <ArrowUp className="h-4 w-4" />
+                        <ChevronUp className="h-4 w-4" />
                       ) : column.getIsSorted() === 'desc' ? (
-                        <ArrowDown className="h-4 w-4" />
+                        <ChevronDown className="h-4 w-4" />
                       ) : (
-                        <ArrowUpDown className="h-4 w-4" />
+                        <ChevronsUpDown className="h-4 w-4" />
                       )}
                     </Button>
                   </div>

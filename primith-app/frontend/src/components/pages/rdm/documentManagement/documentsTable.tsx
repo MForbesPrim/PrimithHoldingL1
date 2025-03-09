@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { ArrowUpDown, ChevronDown, ChevronUp, Download, File, Settings2, Upload, Trash2, MoreHorizontal } from "lucide-react"
+import { ChevronDown, ChevronUp, Download, File, Settings2, Upload, Trash2, MoreHorizontal, ChevronsUpDown } from "lucide-react"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu"
 import {
   ColumnDef,
@@ -382,7 +382,7 @@ export const DocumentsTable = memo(function DocumentsTable({
                             ) : header.column.getIsSorted() === "desc" ? (
                               <ChevronDown className="h-4 w-4" />
                             ) : (
-                              <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+                              <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
                             )}
                           </span>
                         )}

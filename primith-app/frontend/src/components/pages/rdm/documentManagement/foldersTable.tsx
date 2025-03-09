@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { ArrowUpDown, ChevronDown, ChevronUp, Folder, FolderPlus, Settings2, Trash2, MoreHorizontal } from "lucide-react"
+import { ChevronDown, ChevronUp, Folder, FolderPlus, Settings2, Trash2, MoreHorizontal, ChevronsUpDown } from "lucide-react"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu"
 import {
     Dialog,
@@ -340,7 +340,7 @@ export const FoldersTable = memo(function FoldersTable({
                                                         ) : header.column.getIsSorted() === "desc" ? (
                                                             <ChevronDown className="h-4 w-4" />
                                                         ) : (
-                                                            <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+                                                            <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
                                                         )}
                                                     </span>
                                                 )}

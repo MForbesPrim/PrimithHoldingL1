@@ -37,7 +37,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useEffect, useMemo, useState, useRef } from "react"
 import { DocumentMetadata, FolderMetadata, TableItem } from "@/types/document"
 import { DataTablePagination } from "./dataTablePagination"
-import { File, ArrowUpDown, ChevronUp, ChevronDown, FolderPlus, Upload, Link2, Unlink, Folder, Settings2, Download, Trash2, MoreHorizontal, Pen } from "lucide-react"
+import { File, ChevronUp, ChevronDown, FolderPlus, Upload, Link2, Unlink, Folder, Settings2, Download, Trash2, MoreHorizontal, Pen, ChevronsUpDown } from "lucide-react"
 import {
     DropdownMenu,
     DropdownMenuCheckboxItem,
@@ -602,7 +602,7 @@ export const DashboardTable = memo(function DashboardTable({
                                                         ) : sort === "desc" ? (
                                                             <ChevronDown className="h-4 w-4 text-primary" />
                                                         ) : (
-                                                            <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+                                                            <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
                                                         )}
                                                     </span>
                                                 )}
