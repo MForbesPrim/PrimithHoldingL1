@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { ProjectService } from '@/services/projectService';
-import { ProjectMilestone } from '@/types/projects';
+import { ProjectMilestone, MilestoneStatus } from '@/types/projects';
+import { MilestoneDialog } from '@/components/pages/rdm/projects/milestoneDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Calendar, Flag, ChevronRight, CheckCircle2, Clock, AlertCircle, Loader2, Filter, Edit, Trash2, Settings2, ChevronsUpDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { Plus, Calendar, Flag, CheckCircle2, Clock, AlertCircle, Loader2, Filter, Edit, Trash2, Settings2, ChevronsUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CreateMilestoneDialog } from '@/components/pages/rdm/projects/createMilestoneDialog';
 import { Input } from '@/components/ui/input';
@@ -56,9 +57,18 @@ import {
 } from "@/components/ui/tooltip";
 
 interface MilestonesViewProps {
-  projectId: string;
-  projectService: ProjectService;
-}
+    projectId: string;
+    projectService: ProjectService;
+  }
+  
+  // Define a type for the form data
+  interface MilestoneFormData {
+    name: string;
+    description?: string;
+    status: string;
+    dueDate?: string;
+    statusId?: string;
+  }
 
 const formatDate = (dateString: string | undefined | null) => {
     if (!dateString) return 'Not set';
@@ -88,11 +98,14 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [viewMode, setViewMode] = useState<'grid' | 'timeline' | 'list'>('list');
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
   const [selectedMilestone, setSelectedMilestone] = useState<ProjectMilestone | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [milestoneStatuses, setMilestoneStatuses] = useState<MilestoneStatus[]>([]);
+  const [viewMode, setViewMode] = useState<'grid' | 'timeline' | 'list'>('list');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   // Add table state
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -102,14 +115,37 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
   const [statusFilter, setStatusFilter] = useState<string>("none");
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [dueDateFilter, setDueDateFilter] = useState<string>("none");
+  const [formData, setFormData] = useState<MilestoneFormData>({
+    name: "",
+    description: "",
+    status: "planned",
+    dueDate: undefined,
+    statusId: undefined
+  });
+
+  const fetchMilestoneStatuses = async () => {
+    try {
+      const statuses = await projectService.getMilestoneStatuses(projectId);
+      setMilestoneStatuses(statuses);
+    } catch (error) {
+      console.error("Failed to fetch milestone statuses:", error);
+    }
+  };
 
   useEffect(() => {
     loadMilestones();
+    fetchMilestoneStatuses();
   }, [projectId]);
 
   useEffect(() => {
     filterMilestones();
   }, [milestones, searchQuery, statusFilter, dueDateFilter, selectedDate]);
+
+  useEffect(() => {
+    if (showCreateDialog || showEditDialog) {
+      fetchMilestoneStatuses();
+    }
+  }, [showCreateDialog, showEditDialog, projectId]);
 
   const loadMilestones = async () => {
     try {
@@ -126,13 +162,61 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
     }
   };
 
-  const handleEditMilestone = async (milestone: ProjectMilestone) => {
+  const handleEditMilestone = async (milestone: ProjectMilestone): Promise<void> => {
     try {
-      // You can either implement inline editing or navigate to an edit page
-      // For now, we'll just log the action
-      console.log('Edit milestone:', milestone);
+      // Set the milestone for editing
+      setSelectedMilestone(milestone);
+      
+      // Find the statusId that corresponds to the milestone's status
+      const statusObj = milestoneStatuses.find(s => 
+        s.name.toLowerCase().replace(/ /g, '_') === milestone.status.toLowerCase()
+      );
+      
+      console.log("Editing milestone:", milestone);
+      console.log("Found status:", statusObj);
+      
+      // Set up the form data with the current milestone values
+      setFormData({
+        name: milestone.name,
+        description: milestone.description || "",
+        status: milestone.status,
+        dueDate: milestone.dueDate,
+        // Use the found statusId, or the existing one, or undefined
+        statusId: statusObj?.id || milestone.statusId
+      });
+      
+      // Open the edit dialog
+      setShowEditDialog(true);
     } catch (error) {
-      console.error('Error editing milestone:', error);
+      console.error('Error preparing to edit milestone:', error);
+      toast({
+        title: "Error",
+        description: "Failed to prepare milestone for editing",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleUpdateMilestone = async (milestoneId: string, milestoneData: Partial<ProjectMilestone>): Promise<void> => {
+    setIsUpdating(true);
+    try {
+      console.log("Updating milestone, ID:", milestoneId, "Data:", milestoneData);
+      await projectService.updateMilestone(milestoneId, milestoneData);
+      toast({
+        title: "Success",
+        description: "Milestone updated successfully",
+      });
+      await loadMilestones();
+      setShowEditDialog(false);
+    } catch (error) {
+      console.error('Error updating milestone:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update milestone: " + ((error as Error).message || "Unknown error"),
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -291,7 +375,7 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
       case 'delayed':
         return <AlertCircle className="h-5 w-5 text-red-500" />;
       default:
-        return <ChevronRight className="h-5 w-5 text-gray-500" />;
+        return <Flag className="h-5 w-5 text-gray-500" />;
     }
   };
 
@@ -907,12 +991,26 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
         </Dialog>
 
       {/* Create Milestone Dialog */}
-      <CreateMilestoneDialog
+        <CreateMilestoneDialog
         open={showCreateDialog}
         onClose={() => setShowCreateDialog(false)}
         onCreate={handleCreateMilestone}
         isCreating={isCreating}
-      />
+        statuses={milestoneStatuses}
+        />
+
+        {selectedMilestone && (
+        <MilestoneDialog
+            open={showEditDialog}
+            onClose={() => setShowEditDialog(false)}
+            onUpdate={handleUpdateMilestone}
+            milestone={selectedMilestone}
+            isUpdating={isUpdating}
+            statuses={milestoneStatuses}
+            formData={formData}
+            setFormData={setFormData}
+        />
+        )}
 
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes fade-in-up {

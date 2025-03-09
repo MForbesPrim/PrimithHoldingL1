@@ -494,18 +494,6 @@ async getProjectTasks(projectId: string, filters?: {
         return response.json();
     }
 
-    async updateMilestone(milestoneId: string, milestone: Partial<ProjectMilestone>): Promise<ProjectMilestone> {
-        const headers = await this.getAuthHeader();
-        const response = await fetch(`${this.baseUrl}/milestones/${milestoneId}`, {
-            method: 'PUT',
-            credentials: 'include',
-            headers,
-            body: JSON.stringify(milestone)
-        });
-        if (!response.ok) throw new Error('Failed to update milestone');
-        return response.json();
-    }
-
     async deleteMilestone(milestoneId: string): Promise<void> {
       const headers = await this.getAuthHeader();
       const response = await fetch(`${this.baseUrl}/milestones/${milestoneId}`, {
@@ -524,5 +512,51 @@ async getProjectTasks(projectId: string, filters?: {
       });
       if (!response.ok) throw new Error('Failed to fetch milestone statuses');
       return response.json();
+  }
+
+  async updateMilestone(milestoneId: string, milestoneData: Partial<ProjectMilestone>): Promise<ProjectMilestone> {
+    console.log(`Updating milestone ${milestoneId}:`, milestoneData);
+    
+    try {
+        const headers = await this.getAuthHeader();
+        
+        const sanitizedData: Record<string, any> = {};
+        Object.entries(milestoneData).forEach(([key, value]) => {
+            if (value !== undefined) {
+                sanitizedData[key] = value;
+            }
+        });
+        
+        console.log("Sending sanitized data:", sanitizedData);
+        
+        const response = await fetch(`${this.baseUrl}/milestones/${milestoneId}`, {
+            method: 'PUT',
+            credentials: 'include',
+            headers,
+            body: JSON.stringify(sanitizedData)
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Failed to update milestone (${response.status}):`, errorText);
+            throw new Error(`Failed to update milestone: ${response.status} - ${errorText || 'Unknown error'}`);
+        }
+        
+        try {
+            return await response.json();
+        } catch (e) {
+            console.warn("Response not parseable JSON:", e);
+            return {
+                id: milestoneId,
+                ...milestoneData,
+                projectId: '', // Required fields must have some value
+                name: milestoneData.name || '',
+                priority: 0
+            } as ProjectMilestone;
+        }
+    } catch (error) {
+        console.error("Error in updateMilestone:", error);
+        throw error;
+    }
   }
   }

@@ -156,13 +156,14 @@ export interface ProjectMember {
     name: string;
     title?: string;
     description?: string;
-    status: 'planned' | 'in_progress' | 'completed' | 'delayed';
+    status: string;
     startDate?: string;
     dueDate?: string;
     endDate?: string;
     priority: number;
     category?: string;
     roadmapItemId?: string;
+    statusId?: string; 
     createdBy: string;
     updatedBy?: string;
     createdAt: string;
@@ -176,4 +177,5 @@ export interface MilestoneStatus {
   description?: string;
   is_default: boolean;
   is_system: boolean;
+  status_code?: string;
 }

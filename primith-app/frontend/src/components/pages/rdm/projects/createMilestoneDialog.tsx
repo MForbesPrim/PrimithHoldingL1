@@ -1,56 +1,68 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ProjectMilestone } from '@/types/projects';
+import { ProjectMilestone, MilestoneStatus } from '@/types/projects';
+
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { Loader2 } from 'lucide-react';
-
-type MilestoneStatus = 'planned' | 'in_progress' | 'completed' | 'delayed';
 
 interface CreateMilestoneDialogProps {
   open: boolean;
   onClose: () => void;
   onCreate: (milestone: Partial<ProjectMilestone>) => Promise<void>;
   isCreating: boolean;
+  statuses: MilestoneStatus[];
 }
 
-export function CreateMilestoneDialog({ open, onClose, onCreate, isCreating }: CreateMilestoneDialogProps) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>();
-  const [status, setStatus] = useState<MilestoneStatus>('planned');
-
-  const handleSubmit = async () => {
-    if (!title.trim()) {
-      alert('Title is required');
-      return;
-    }
-
-    await onCreate({
-      name: title,
-      description: description.trim() || undefined,
-      dueDate: selectedDate ? format(selectedDate, 'yyyy-MM-dd') : undefined,
-      status,
-      priority: 0,
-    });
-    setTitle('');
-    setDescription('');
-    setSelectedDate(undefined);
-    setStatus('planned');
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Create New Milestone</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 py-4">
+export function CreateMilestoneDialog({ open, onClose, onCreate, isCreating, statuses }: CreateMilestoneDialogProps) {
+    const [title, setTitle] = useState('');
+    const [description, setDescription] = useState('');
+    const [selectedDate, setSelectedDate] = useState<Date | undefined>();
+    const [status, setStatus] = useState<string>('planned');
+    const [statusId, setStatusId] = useState<string | undefined>();
+  
+    // Set default status when component mounts
+    useEffect(() => {
+      const defaultStatus = statuses.find(s => s.is_default);
+      if (defaultStatus) {
+        setStatusId(defaultStatus.id);
+        setStatus(defaultStatus.name.toLowerCase().replace(/ /g, '_'));
+      }
+    }, [statuses]);
+  
+    const handleSubmit = async () => {
+      if (!title.trim()) {
+        alert('Title is required');
+        return;
+      }
+  
+      await onCreate({
+        name: title,
+        description: description.trim() || undefined,
+        dueDate: selectedDate ? format(selectedDate, 'yyyy-MM-dd') : undefined,
+        status: status as any, // Using type assertion to bypass type checking
+        statusId,
+        priority: 0,
+      });
+      setTitle('');
+      setDescription('');
+      setSelectedDate(undefined);
+      setStatus('planned');
+      setStatusId(undefined);
+    };
+  
+    return (
+      <Dialog open={open} onOpenChange={onClose}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create New Milestone</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
           <div>
             <label className="block text-sm font-medium mb-1">Name</label>
             <Input
@@ -99,15 +111,32 @@ export function CreateMilestoneDialog({ open, onClose, onCreate, isCreating }: C
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Status</label>
-            <Select value={status} onValueChange={(value: MilestoneStatus) => setStatus(value)} disabled={isCreating}>
+            <Select 
+              value={statusId || ""} 
+              onValueChange={(value) => {
+                setStatusId(value);
+                const selectedStatus = statuses.find(s => s.id === value);
+                if (selectedStatus) {
+                  setStatus(selectedStatus.name.toLowerCase().replace(/ /g, '_'));
+                }
+              }} 
+              disabled={isCreating}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="planned">Planned</SelectItem>
-                <SelectItem value="in_progress">In Progress</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="delayed">Delayed</SelectItem>
+                {statuses.map((status) => (
+                  <SelectItem key={status.id} value={status.id}>
+                    <div className="flex items-center gap-2">
+                      <div 
+                        className="w-3 h-3 rounded-full" 
+                        style={{ backgroundColor: status.color }}
+                      />
+                      {status.name}
+                    </div>
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

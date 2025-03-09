@@ -1344,7 +1344,17 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
                 onValueChange={(value) => setFormData({...formData, statusId: value})}
               >
                 <SelectTrigger id="milestone-status">
-                  <SelectValue placeholder="Select milestone status" />
+                  <SelectValue placeholder="Select milestone status">
+                    {formData.statusId && (
+                      <div className="flex items-center gap-2">
+                        <div 
+                          className="w-3 h-3 rounded-full" 
+                          style={{ backgroundColor: milestoneStatuses.find(s => s.id === formData.statusId)?.color }}
+                        />
+                        {milestoneStatuses.find(s => s.id === formData.statusId)?.name}
+                      </div>
+                    )}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {milestoneStatuses.map((status) => (
@@ -1353,7 +1363,13 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
                       value={status.id}
                       className="hover:bg-gray-100"
                     >
-                      {status.name}
+                      <div className="flex items-center gap-2">
+                        <div 
+                          className="w-3 h-3 rounded-full" 
+                          style={{ backgroundColor: status.color }}
+                        />
+                        {status.name}
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>

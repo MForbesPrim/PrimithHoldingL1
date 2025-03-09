@@ -6487,7 +6487,7 @@ func handleGetProjectMilestones(w http.ResponseWriter, r *http.Request) {
 	// Fetch milestones for the project
 	rows, err := db.Query(`
 			SELECT 
-				id, project_id, name, description, status, 
+				id, project_id, name, description, status, status_id,
 				start_date, due_date, priority, category, 
 				roadmap_item_id, created_by, updated_by, 
 				created_at, updated_at
@@ -6511,6 +6511,7 @@ func handleGetProjectMilestones(w http.ResponseWriter, r *http.Request) {
 			Name          string
 			Description   sql.NullString
 			Status        sql.NullString
+			StatusID      sql.NullString
 			StartDate     sql.NullTime
 			DueDate       sql.NullTime
 			Priority      int
@@ -6528,6 +6529,7 @@ func handleGetProjectMilestones(w http.ResponseWriter, r *http.Request) {
 			&milestone.Name,
 			&milestone.Description,
 			&milestone.Status,
+			&milestone.StatusID,
 			&milestone.StartDate,
 			&milestone.DueDate,
 			&milestone.Priority,
@@ -6551,6 +6553,7 @@ func handleGetProjectMilestones(w http.ResponseWriter, r *http.Request) {
 			"name":          milestone.Name,
 			"description":   nullStringValue(milestone.Description),
 			"status":        nullStringValue(milestone.Status),
+			"statusId":      nullStringValue(milestone.StatusID),
 			"startDate":     formatTimeToDateString(milestone.StartDate),
 			"dueDate":       formatTimeToDateString(milestone.DueDate),
 			"priority":      milestone.Priority,
@@ -8347,6 +8350,171 @@ func handleDeleteMilestone(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
+func handleUpdateMilestone(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	milestoneId := vars["id"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Log request information for debugging
+	log.Printf("Updating milestone ID: %s by user: %s", milestoneId, claims.Username)
+
+	var req struct {
+		Name        *string `json:"name"`
+		Description *string `json:"description"`
+		Status      *string `json:"status"`
+		StatusID    *string `json:"statusId"`
+		DueDate     *string `json:"dueDate"`
+		// Other fields as needed
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding milestone update request: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("Milestone update request data: %+v", req)
+
+	// Validate that at least one field is being updated
+	if req.Name == nil && req.Description == nil && req.Status == nil &&
+		req.StatusID == nil && req.DueDate == nil {
+		http.Error(w, "No fields to update", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user has access to the milestone's project
+	var projectId string
+	err := db.QueryRow(`
+        SELECT project_id FROM rdm.project_milestones WHERE id = $1
+    `, milestoneId).Scan(&projectId)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Milestone not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		log.Printf("Database error checking milestone: %v", err)
+		http.Error(w, "Failed to verify milestone", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user is a member of the project
+	var isMember bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil {
+		log.Printf("Error checking project membership: %v", err)
+		http.Error(w, "Failed to verify permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !isMember {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Build dynamic update query
+	updates := []string{"updated_at = CURRENT_TIMESTAMP"}
+	args := []interface{}{}
+	paramCount := 0
+
+	if req.Name != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("name = $%d", paramCount))
+		args = append(args, *req.Name)
+	}
+
+	if req.Description != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("description = $%d", paramCount))
+		args = append(args, *req.Description)
+	}
+
+	if req.Status != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("status = $%d", paramCount))
+		args = append(args, *req.Status)
+	}
+
+	if req.StatusID != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("status_id = $%d", paramCount))
+		args = append(args, *req.StatusID)
+	}
+
+	if req.DueDate != nil {
+		var dueDate *time.Time
+		if *req.DueDate != "" {
+			parsedDate, err := time.Parse("2006-01-02", *req.DueDate)
+			if err != nil {
+				log.Printf("Invalid date format: %s - %v", *req.DueDate, err)
+				http.Error(w, "Invalid date format. Use YYYY-MM-DD", http.StatusBadRequest)
+				return
+			}
+			dueDate = &parsedDate
+		}
+
+		paramCount++
+		updates = append(updates, fmt.Sprintf("due_date = $%d", paramCount))
+		args = append(args, dueDate)
+	}
+
+	// Add milestone ID to args
+	paramCount++
+	args = append(args, milestoneId)
+
+	// Execute update
+	query := fmt.Sprintf(`
+        UPDATE rdm.project_milestones 
+        SET %s 
+        WHERE id = $%d
+    `, strings.Join(updates, ", "), paramCount)
+
+	log.Printf("Executing update query: %s with args: %v", query, args)
+	result, err := tx.Exec(query, args...)
+
+	if err != nil {
+		log.Printf("Error updating milestone: %v", err)
+		http.Error(w, "Failed to update milestone", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		http.Error(w, "Milestone not found", http.StatusNotFound)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		log.Printf("Error committing transaction: %v", err)
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	log.Printf("Successfully updated milestone %s", milestoneId)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Milestone updated successfully",
+		"id":      milestoneId,
+	})
+}
+
 func handleGetProjectTasks(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectId := vars["projectId"]
@@ -9254,6 +9422,7 @@ func main() {
 	r.HandleFunc("/projects/{projectId}/milestone-statuses/{statusId}", authMiddleware(handleDeleteMilestoneStatus)).Methods("DELETE")
 	r.HandleFunc("/projects/{projectId}/milestones", authMiddleware(handleGetProjectMilestones)).Methods("GET")
 	r.HandleFunc("/milestones/{id}", authMiddleware(handleDeleteMilestone)).Methods("DELETE")
+	r.HandleFunc("/milestones/{id}", authMiddleware(handleUpdateMilestone)).Methods("PUT")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
