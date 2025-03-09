@@ -99,8 +99,6 @@ export function RoadmapView({
   const [expandedItems, setExpandedItems] = useState<{[key: string]: boolean}>({})
   const [view, setView] = useState<"list" | "timeline" | "status" | "category" | "gantt">("timeline")
   const [selectedCategory, setSelectedCategory] = useState<string>("")
-  const [customCategory, setCustomCategory] = useState<string>("")
-  const [isCustomCategory, setIsCustomCategory] = useState<boolean>(false)
   const [categories, setCategories] = useState<string[]>([])
   const [openCategory, setOpenCategory] = useState(false) // State for category Popover
   const [openParent, setOpenParent] = useState(false) // State for parent Popover
@@ -152,8 +150,6 @@ export function RoadmapView({
   // Reset form when opening the add modal
   const handleAddClick = async () => {
     setSelectedCategory("");
-    setCustomCategory("");
-    setIsCustomCategory(false);
     setOpenCategory(false); // Reset category Popover state
     setOpenParent(false); // Reset parent Popover state
     setStartDate(undefined)
@@ -164,7 +160,9 @@ export function RoadmapView({
       status: "planned",
       priority: 0,
       category: "",
-      parentId: undefined
+      parentId: undefined,
+      asMilestone: false,
+      statusId: undefined
     });
     try {
       const fetchedCategories = await projectsService.getCategories(projectId);
@@ -199,8 +197,6 @@ export function RoadmapView({
     
     // Set the appropriate state values - using empty string instead of undefined
     setSelectedCategory(categoryExists ? category : "");
-    setCustomCategory(categoryExists ? "" : category);
-    setIsCustomCategory(!categoryExists && category !== "");
     
     // Reset dropdown states
     setOpenCategory(false);
@@ -227,17 +223,6 @@ export function RoadmapView({
       setShowEditModal(true);
     }, 100);
   };
-
-  const handleCustomCategoryChange = (value: string) => {
-    setCustomCategory(value)
-    if (value.trim()) {
-      setIsCustomCategory(true)
-      setSelectedCategory("")
-    } else {
-      setIsCustomCategory(false)
-    }
-    setFormData({ ...formData, category: value.trim() || selectedCategory })
-  }
 
   // Handle category selection from combobox
   const handleCategorySelect = (value: string) => {
@@ -285,50 +270,70 @@ const handleParentSelect = (value: string) => {
   }
 
   // Submit new item
-  const handleAddSubmit = async () => {
-    const finalCategory = customCategory.trim() || selectedCategory
-    if (!formData.title || !finalCategory) {
-      return
-    }
-    setIsSaving(true); // Disable button and show "Saving..."
-    try {
-      await onItemCreate({ ...formData, category: finalCategory })
-      setShowAddModal(false)
-    } catch (error) {
-      console.error('Error creating item:', error)
-    } finally {
-      setIsSaving(false); // Re-enable button and revert text
-    }
+// Already modified in your code, but ensure they're working correctly
+const handleAddSubmit = async () => {
+  if (!formData.title || !selectedCategory) {
+    return;
   }
+  setIsSaving(true);
+  
+  try {
+    // Create a properly typed object with the milestone data
+    const roadmapData: Partial<RoadmapItem> & { 
+      asMilestone?: boolean; 
+      statusId?: string; 
+    } = {
+      ...formData,
+      category: selectedCategory,
+    };
+    
+    // Only include statusId if asMilestone is true
+    if (formData.asMilestone) {
+      roadmapData.asMilestone = true;
+      roadmapData.statusId = formData.statusId;
+    }
+    
+    await onItemCreate(roadmapData);
+    setShowAddModal(false);
+  } catch (error) {
+    console.error('Error creating item:', error);
+  } finally {
+    setIsSaving(false);
+  }
+  };
 
   // Submit edit
-const handleEditSubmit = async () => {
+  const handleEditSubmit = async () => {
     if (editingItem && editingItem.id) {
-        const finalCategory = customCategory.trim() || selectedCategory;
-        if (!formData.title || !finalCategory) {
+      if (!formData.title || !selectedCategory) {
         return;
-        }
-        
-        // Create a copy of formData for submitting to the API
-        const submissionData = { ...formData, category: finalCategory };
-        
-        // Convert undefined to null for the API
-        if (submissionData.parentId === undefined) {
-        // @ts-ignore - We're intentionally setting null despite TypeScript's objections
+      }
+      
+      // Create a copy of formData for submitting to the API
+      const submissionData = {
+        ...formData,
+        category: selectedCategory,
+        // Include statusId when asMilestone is true
+        statusId: formData.asMilestone ? formData.statusId : undefined
+      };
+      
+      // Convert undefined to null for the API
+      if (submissionData.parentId === undefined) {
+        // @ts-ignore - We're intentionally setting null
         submissionData.parentId = null;
-        }
-        
-        setIsSaving(true); // Disable button and show "Saving..."
-        try {
+      }
+      
+      setIsSaving(true);
+      try {
         await onItemUpdate(editingItem.id, submissionData);
         setShowEditModal(false);
-        } catch (error) {
+      } catch (error) {
         console.error("Error updating item:", error);
-        } finally {
-        setIsSaving(false); // Re-enable button and revert text
-        }
+      } finally {
+        setIsSaving(false);
+      }
     }
-    }
+  }
 
   // Handle delete confirmation
   const handleDeleteConfirm = async () => {
@@ -1225,7 +1230,7 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
                 Category
               </label>
               <Popover open={openCategory} onOpenChange={setOpenCategory}>
-                <PopoverTrigger asChild disabled={isCustomCategory}>
+                <PopoverTrigger asChild>
                   <Button
                     variant="outline"
                     role="combobox"
@@ -1267,12 +1272,6 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
                   </Command>
                 </PopoverContent>
               </Popover>
-              <Input
-                placeholder="Enter custom category"
-                value={customCategory}
-                onChange={(e) => handleCustomCategoryChange(e.target.value)}
-                className="mt-1"
-              />
             </div>
             <div className="grid gap-2">
               <label htmlFor="parent" className="text-sm font-medium">
@@ -1505,7 +1504,7 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
                 Category
               </label>
               <Popover open={openCategory} onOpenChange={setOpenCategory}>
-                <PopoverTrigger asChild disabled={isCustomCategory}>
+                <PopoverTrigger asChild>
                   <Button
                     variant="outline"
                     role="combobox"
@@ -1547,12 +1546,6 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
                   </Command>
                 </PopoverContent>
               </Popover>
-              <Input
-                placeholder="Enter custom category"
-                value={customCategory}
-                onChange={(e) => handleCustomCategoryChange(e.target.value)}
-                className="mt-1"
-              />
             </div>
             <div className="grid gap-2">
               <label htmlFor="parent" className="text-sm font-medium">

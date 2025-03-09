@@ -179,13 +179,13 @@
         return response.json();
     }
 
-    async createRoadmapItem(item: Partial<RoadmapItem> & { asMilestone?: boolean }): Promise<RoadmapItem> {
+    async createRoadmapItem(item: Partial<RoadmapItem> & { asMilestone?: boolean, statusId?: string }): Promise<RoadmapItem> {
       const headers = await this.getAuthHeader();
       const response = await fetch(`${this.baseUrl}/roadmap-items`, {
-          method: 'POST',
-          credentials: 'include',
-          headers,
-          body: JSON.stringify(item)
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        body: JSON.stringify(item)
       });
       if (!response.ok) throw new Error('Failed to create roadmap item');
       return response.json();

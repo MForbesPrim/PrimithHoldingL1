@@ -7730,35 +7730,77 @@ func handleCreateRoadmapItem(w http.ResponseWriter, r *http.Request) {
 
 	// If creating as milestone, also create milestone entry
 	if req.AsMilestone {
+		log.Printf("[DEBUG] Creating milestone for roadmap item: %s (AsMilestone=true)", req.Title)
+		log.Printf("[DEBUG] Initial StatusID value: %v", req.StatusID)
+
 		var milestoneId string
+		var statusName string // Add this to store the status name
 
 		// If no custom status provided, get default status
 		if req.StatusID == nil {
+			log.Printf("[DEBUG] No StatusID provided, looking for default status for project: %s", req.ProjectID)
 			err = tx.QueryRow(`
-					SELECT id FROM rdm.project_milestone_statuses
-					WHERE project_id = $1 AND is_default = true
-				`, req.ProjectID).Scan(&req.StatusID)
+                SELECT id, name FROM rdm.project_milestone_statuses
+                WHERE project_id = $1 AND is_default = true
+            `, req.ProjectID).Scan(&req.StatusID, &statusName)
+
 			if err != nil && err != sql.ErrNoRows {
+				log.Printf("[ERROR] Failed to get default milestone status: %v", err)
 				http.Error(w, "Failed to get default milestone status", http.StatusInternalServerError)
 				return
 			}
+
+			if err == sql.ErrNoRows {
+				log.Printf("[DEBUG] No default milestone status found for project %s", req.ProjectID)
+				statusName = "planned" // Default fallback status name
+			} else {
+				log.Printf("[DEBUG] Using default StatusID: %v, StatusName: %s", req.StatusID, statusName)
+			}
+		} else {
+			// Get the status name from the status ID
+			err = tx.QueryRow(`
+                SELECT name FROM rdm.project_milestone_statuses
+                WHERE id = $1
+            `, req.StatusID).Scan(&statusName)
+
+			if err != nil {
+				if err == sql.ErrNoRows {
+					log.Printf("[DEBUG] No status found with ID %v, using default status name", *req.StatusID)
+					statusName = "planned" // Default fallback status name
+				} else {
+					log.Printf("[ERROR] Failed to get status name: %v", err)
+					http.Error(w, "Failed to get status name", http.StatusInternalServerError)
+					return
+				}
+			} else {
+				log.Printf("[DEBUG] Using provided StatusID: %v, StatusName: %s", *req.StatusID, statusName)
+			}
 		}
 
+		// Insert the milestone with both status_id and status fields
 		err = tx.QueryRow(`
-				INSERT INTO rdm.project_milestones (
-					project_id, name, description, status_id,
-					start_date, due_date, priority, category,
-					roadmap_item_id, created_by, updated_by
-				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
-				RETURNING id
-			`, req.ProjectID, req.Title, req.Description, req.StatusID,
+            INSERT INTO rdm.project_milestones (
+                project_id, name, description, status_id, status,
+                start_date, due_date, priority, category,
+                roadmap_item_id, created_by, updated_by
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+            RETURNING id
+        `, req.ProjectID, req.Title, req.Description, req.StatusID, statusName,
 			req.StartDate, req.EndDate, req.Priority, req.Category,
 			roadmapItemId, userId).Scan(&milestoneId)
 
 		if err != nil {
+			log.Printf("[ERROR] Failed to create milestone: %v", err)
+			// Check for specific error types
+			if pqErr, ok := err.(*pq.Error); ok {
+				log.Printf("[ERROR] PostgreSQL error: Code=%s, Message=%s, Detail=%s, Hint=%s",
+					pqErr.Code, pqErr.Message, pqErr.Detail, pqErr.Hint)
+			}
 			http.Error(w, "Failed to create milestone", http.StatusInternalServerError)
 			return
 		}
+
+		log.Printf("[DEBUG] Successfully created milestone with ID: %s, Status: %s", milestoneId, statusName)
 	}
 
 	// Commit transaction
