@@ -53,6 +53,12 @@ import GanttChart from "./ganttChart"
 import { ProjectService } from "@/services/projectService";
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { 
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 // Helper function to capitalize the first letter of each word
 const capitalizeWords = (str: string) => {
@@ -800,50 +806,131 @@ const renderListView = () => {
   // Render a card for individual item
   const renderItemCard = (item: RoadmapItem) => (
     <Card key={item.id} className="p-3">
-      <div className="flex justify-between">
+      <div className="flex justify-between gap-2">
         <div>
-          <div className="font-medium text-sm">{item.title}</div>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="font-medium text-sm truncate mt-1">{item.title}</div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Title: {item.title}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {item.description && (
-            <p className="text-xs text-gray-600 mt-1 line-clamp-2">{item.description}</p>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <p className="text-xs text-gray-600 mt-1 line-clamp-2">{item.description}</p>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Description: {item.description}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
           <div className="flex items-center mt-2 space-x-2">
-            <span className={`px-2 py-1 rounded-full text-xs ${
-              item.status === 'completed' ? 'bg-green-100 text-green-800' :
-              item.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-              item.status === 'delayed' ? 'bg-red-100 text-red-800' :
-              'bg-gray-100 text-gray-800'
-            }`}>
-              {capitalizeWords(item.status)}
-            </span>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={`px-2 py-1 rounded-full text-xs ${
+                    item.status === 'completed' ? 'bg-green-100 text-green-800' :
+                    item.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
+                    item.status === 'delayed' ? 'bg-red-100 text-red-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}>
+                    {capitalizeWords(item.status)}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Status: {capitalizeWords(item.status)}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             {item.category && (
-              <span className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full">
-                {item.category}
-              </span>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full truncate max-w-[100px]">
+                      {item.category}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Category: {item.category}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
           </div>
           {(item.startDate || item.endDate) && (
             <div className="flex items-center text-xs text-gray-500 mt-2">
               <CalendarDays className="h-3 w-3 mr-1" />
-              {item.startDate && (
-                <span>{format(parseISO(item.startDate), 'MMM d, yyyy')}</span>
-              )}
-              {item.startDate && item.endDate && (
-                <span className="mx-1">—</span>
-              )}
-              {item.endDate && (
-                <span>{format(parseISO(item.endDate), 'MMM d, yyyy')}</span>
-              )}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="truncate">
+                      {item.startDate && (
+                        <span>{format(parseISO(item.startDate), 'MMM d, yyyy')}</span>
+                      )}
+                      {item.startDate && item.endDate && (
+                        <span className="mx-1">—</span>
+                      )}
+                      {item.endDate && (
+                        <span>{format(parseISO(item.endDate), 'MMM d, yyyy')}</span>
+                      )}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>
+                      Timeline: {item.startDate && format(parseISO(item.startDate), 'MMM d, yyyy')}
+                      {item.startDate && item.endDate && " — "}
+                      {item.endDate && format(parseISO(item.endDate), 'MMM d, yyyy')}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           )}
         </div>
-        <Button 
-            variant="ghost" 
-            size="sm" 
-            className="min-h-8 min-w-8 p-0"
-            onClick={() => handleEditClick(item)}
-            >
-            <Edit className="h-4 w-4" />
-            </Button>
+        <div className="flex space-x-1">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="min-h-8 min-w-8 p-0"
+                  onClick={() => handleEditClick(item)}
+                >
+                  <Edit className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Action: Edit item</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          {onItemDelete && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="min-h-8 min-w-8 p-0"
+                    onClick={() => handleDeleteClick(item)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Action: Delete item</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
       </div>
     </Card>
   )
@@ -853,50 +940,129 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
     <Card key={item.id} className="px-4 py-3">
       <div className="flex justify-between items-start">
         <div className="flex-1 min-w-0">
-          <div className="font-medium text-sm truncate">{item.title}</div>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="font-medium text-sm truncate mt-1">{item.title}</div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Title: {item.title}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {item.description && (
-            <p className="text-xs text-gray-600 line-clamp-1 my-2">{item.description}</p>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <p className="text-xs text-gray-600 line-clamp-1 my-2">{item.description}</p>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Description: {item.description}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
           <div className="flex items-center my-2 flex-wrap gap-1">
-            <span className={`px-1.5 py-0.5 rounded-full text-xs ${
-              item.status === 'completed' ? 'bg-green-100 text-green-800' :
-              item.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-              item.status === 'delayed' ? 'bg-red-100 text-red-800' :
-              'bg-gray-100 text-gray-800'
-            }`}>
-              {capitalizeWords(item.status)}
-            </span>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+                    item.status === 'completed' ? 'bg-green-100 text-green-800' :
+                    item.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
+                    item.status === 'delayed' ? 'bg-red-100 text-red-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}>
+                    {capitalizeWords(item.status)}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Status: {capitalizeWords(item.status)}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             {item.category && (
-              <span className="text-xs bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded-full truncate max-w-[100px]">
-                {item.category}
-              </span>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-xs bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded-full truncate max-w-[100px]">
+                      {item.category}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Category: {item.category}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
           </div>
           {(item.startDate || item.endDate) && (
             <div className="flex items-center text-xs text-gray-500 mt-2">
               <CalendarDays className="h-3 w-3 mr-1 flex-shrink-0" />
-              <span className="truncate">
-                {item.startDate && (
-                  <span>{format(parseISO(item.startDate), 'MMM d, yyyy')}</span>
-                )}
-                {item.startDate && item.endDate && (
-                  <span className="mx-1">—</span>
-                )}
-                {item.endDate && (
-                  <span>{format(parseISO(item.endDate), 'MMM d, yyyy')}</span>
-                )}
-              </span>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="truncate">
+                      {item.startDate && (
+                        <span>{format(parseISO(item.startDate), 'MMM d, yyyy')}</span>
+                      )}
+                      {item.startDate && item.endDate && (
+                        <span className="mx-1">—</span>
+                      )}
+                      {item.endDate && (
+                        <span>{format(parseISO(item.endDate), 'MMM d, yyyy')}</span>
+                      )}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>
+                      Timeline: {item.startDate && format(parseISO(item.startDate), 'MMM d, yyyy')}
+                      {item.startDate && item.endDate && " — "}
+                      {item.endDate && format(parseISO(item.endDate), 'MMM d, yyyy')}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           )}
         </div>
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          className="h-6 w-6 p-0 ml-1 flex-shrink-0"
-          onClick={() => handleEditClick(item)}
-        >
-          <Edit className="h-3 w-3" />
-        </Button>
+        <div className="flex space-x-1 flex-shrink-0 ml-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-6 w-6 p-0"
+                  onClick={() => handleEditClick(item)}
+                >
+                  <Edit className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Action: Edit item</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          {onItemDelete && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-6 w-6 p-0"
+                    onClick={() => handleDeleteClick(item)}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Action: Delete item</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
       </div>
     </Card>
   )
