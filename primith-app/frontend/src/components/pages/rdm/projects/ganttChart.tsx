@@ -294,7 +294,7 @@ const GanttChart: React.FC<GanttChartProps> = ({ items, onItemClick }) => {
     
     return {
       left: `${Math.max(startOffsetUnits * unitBaseWidth, 0)}px`,
-      width: `${Math.max(durationUnits * unitBaseWidth, 8)}px`, // Ensure minimum width for visibility
+      width: `${Math.max(durationUnits * unitBaseWidth, 8)}px`,
       backgroundColor: getStatusColor(item.status, false),
       borderColor: getStatusColor(item.status, true),
     };

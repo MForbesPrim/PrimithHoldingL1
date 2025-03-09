@@ -106,12 +106,12 @@ export function RoadmapView({
   const [view, setView] = useState<"list" | "timeline" | "status" | "category" | "gantt">("timeline")
   const [selectedCategory, setSelectedCategory] = useState<string>("")
   const [categories, setCategories] = useState<string[]>([])
-  const [openCategory, setOpenCategory] = useState(false) // State for category Popover
-  const [openParent, setOpenParent] = useState(false) // State for parent Popover
+  const [openCategory, setOpenCategory] = useState(false)
+  const [openParent, setOpenParent] = useState(false)
   const [startDate, setStartDate] = useState<Date | undefined>(undefined)
   const [endDate, setEndDate] = useState<Date | undefined>(undefined)
-  const [isSaving, setIsSaving] = useState(false) // State for saving status
-  const [isDeleting, setIsDeleting] = useState(false) // State for delete status
+  const [isSaving, setIsSaving] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const categorySelectRef = useRef<HTMLButtonElement>(null)
   const parentSelectRef = useRef<HTMLButtonElement>(null)
   const projectsService = new ProjectService()
@@ -239,7 +239,6 @@ export function RoadmapView({
   }
 
   // Handle parent selection from combobox
-// Handle parent selection from combobox
 const handleParentSelect = (value: string) => {
     // Check if we're deselecting the currently selected parent
     // Convert to undefined instead of null for TypeScript compatibility

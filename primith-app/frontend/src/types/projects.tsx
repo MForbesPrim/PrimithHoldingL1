@@ -18,9 +18,11 @@ export interface Project {
     projectId: string;
     name: string;
     description?: string;
-    type: 'document' | 'image';
-    status: 'draft' | 'in_review' | 'approved' | 'rejected';
+    type: string;
+    status: string;  // Keep the existing status property
+    statusId?: string;  // Add the new statusId property
     assignedTo?: string;
+    assignedToEmail?: string;
     documentId?: string;
     pageId?: string;
     dueDate?: string;
@@ -68,7 +70,14 @@ export interface Project {
     createdAt: string;
   }
 
-  // Add to src/types/project.ts
+  export interface ArtifactStatus {
+    id: string;
+    name: string;
+    color: string;
+    description?: string;
+    is_default: boolean;
+    is_system: boolean;
+  }
 
 export interface ProjectMember {
     id: string;

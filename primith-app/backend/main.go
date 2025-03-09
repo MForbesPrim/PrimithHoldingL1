@@ -4312,6 +4312,76 @@ func handleAssociateDocumentWithProject(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(Response{Success: true, Message: message})
 }
 
+// Add this handler to your main.go file
+func handleGetArtifactStatuses(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the project
+	var isMember bool
+	err := db.QueryRow(`
+	  SELECT EXISTS (
+		SELECT 1 
+		FROM rdm.project_members pm
+		JOIN auth.users u ON pm.user_id = u.id
+		WHERE pm.project_id = $1 AND u.email = $2
+	  )
+	`, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil {
+		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
+		return
+	}
+
+	if !isMember {
+		http.Error(w, "Access denied to project artifact statuses", http.StatusForbidden)
+		return
+	}
+
+	// Fetch all system statuses and any project-specific statuses
+	rows, err := db.Query(`
+	  SELECT id, name, color, description, is_default, is_system
+	  FROM rdm.project_artifact_statuses
+	  WHERE is_system = true 
+	  OR project_id = $1
+	  ORDER BY order_index ASC
+	`, projectId)
+	if err != nil {
+		http.Error(w, "Failed to fetch artifact statuses", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var statuses []map[string]interface{}
+	for rows.Next() {
+		var status struct {
+			ID          string
+			Name        string
+			Color       string
+			Description sql.NullString
+			IsDefault   bool
+			IsSystem    bool
+		}
+		if err := rows.Scan(&status.ID, &status.Name, &status.Color,
+			&status.Description, &status.IsDefault, &status.IsSystem); err != nil {
+			continue
+		}
+
+		statuses = append(statuses, map[string]interface{}{
+			"id":          status.ID,
+			"name":        status.Name,
+			"color":       status.Color,
+			"description": status.Description.String,
+			"is_default":  status.IsDefault,
+			"is_system":   status.IsSystem,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(statuses)
+}
+
 func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	artifactId := vars["id"]
@@ -4325,6 +4395,8 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 		Status      string  `json:"status"`
 		Description *string `json:"description"`
 		DocumentId  *string `json:"documentId"`
+		PageId      *string `json:"pageId"`
+		AssignedTo  *string `json:"assignedTo"` // Add assignedTo field
 	}
 	if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
 		log.Printf("[handleUpdateArtifact] Invalid request body: %v", err)
@@ -4334,12 +4406,12 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[handleUpdateArtifact] Update data received: %+v", updateData)
 
-	// Verify artifact exists and get project ID and document ID
+	// Verify artifact exists and get project ID and related IDs
 	var projectId string
-	var documentId sql.NullString
+	var documentId, pageId sql.NullString
 	err := db.QueryRow(`
-			SELECT project_id, document_id FROM rdm.project_artifacts WHERE id = $1
-		`, artifactId).Scan(&projectId, &documentId)
+			SELECT project_id, document_id, page_id FROM rdm.project_artifacts WHERE id = $1
+		`, artifactId).Scan(&projectId, &documentId, &pageId)
 	if err == sql.ErrNoRows {
 		log.Printf("[handleUpdateArtifact] Artifact %s not found - returning 404", artifactId)
 		http.Error(w, "Artifact not found", http.StatusNotFound)
@@ -4390,8 +4462,8 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If it's a document-type artifact, preserve the extension if the new name lacks one
-	if updateData.Type == "document" && documentId.Valid {
+	// Handle file extensions for document and image types
+	if documentId.Valid && (updateData.Type == "document" || updateData.Type == "image") {
 		var docName string
 		err = db.QueryRow(`
 				SELECT name FROM rdm.documents WHERE id = $1
@@ -4408,7 +4480,7 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Start a transaction to update both tables atomically
+	// Start a transaction
 	tx, err := db.Begin()
 	if err != nil {
 		log.Printf("[handleUpdateArtifact] Failed to start transaction: %v", err)
@@ -4417,14 +4489,36 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback() // Rollback if not committed
 
+	// Get user ID for updates
+	var userId string
+	err = tx.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		log.Printf("[handleUpdateArtifact] Failed to get user ID: %v", err)
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse assignedTo UUID if provided
+	var assignedToUUID *string
+	if updateData.AssignedTo != nil && *updateData.AssignedTo != "" {
+		assignedToUUID = updateData.AssignedTo
+	}
+
 	// Update rdm.project_artifacts
 	_, err = tx.Exec(`
 			UPDATE rdm.project_artifacts
-			SET name = $1, type = $2, status = $3, description = $4, document_id = $5,
+			SET name = $1, 
+				status = $2, 
+				description = $3, 
+				document_id = $4,
+				page_id = $5,
+				assigned_to = $6,
 				updated_at = CURRENT_TIMESTAMP,
-				updated_by = (SELECT id FROM auth.users WHERE email = $6)
-			WHERE id = $7
-		`, updateData.Name, updateData.Type, updateData.Status, updateData.Description, updateData.DocumentId, claims.Username, artifactId)
+				updated_by = $7
+			WHERE id = $8
+		`, updateData.Name, updateData.Status, updateData.Description,
+		updateData.DocumentId, updateData.PageId, assignedToUUID,
+		userId, artifactId)
 	if err != nil {
 		log.Printf("[handleUpdateArtifact] Failed to update project_artifacts: %v", err)
 		http.Error(w, "Failed to update artifact", http.StatusInternalServerError)
@@ -4437,9 +4531,9 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 				UPDATE rdm.documents
 				SET name = $1,
 					updated_at = CURRENT_TIMESTAMP,
-					updated_by = (SELECT id FROM auth.users WHERE email = $2)
+					updated_by = $2
 				WHERE id = $3
-			`, updateData.Name, claims.Username, documentId.String)
+			`, updateData.Name, userId, documentId.String)
 		if err != nil {
 			log.Printf("[handleUpdateArtifact] Failed to update documents: %v", err)
 			http.Error(w, "Failed to update document", http.StatusInternalServerError)
@@ -4453,6 +4547,43 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// If there's a page_id, update pages.pages_content as well
+	if pageId.Valid {
+		result, err := tx.Exec(`
+				UPDATE pages.pages_content
+				SET name = $1,
+					updated_at = CURRENT_TIMESTAMP,
+					updated_by = $2
+				WHERE id = $3
+			`, updateData.Name, userId, pageId.String)
+		if err != nil {
+			log.Printf("[handleUpdateArtifact] Failed to update page: %v", err)
+			http.Error(w, "Failed to update page", http.StatusInternalServerError)
+			return
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil || rowsAffected == 0 {
+			log.Printf("[handleUpdateArtifact] No page rows affected or error: %v", err)
+		} else {
+			log.Printf("[handleUpdateArtifact] Updated page %s with name %s", pageId.String, updateData.Name)
+		}
+	}
+
+	// Add activity log entry
+	_, err = tx.Exec(`
+		INSERT INTO rdm.project_activity (
+			project_id, user_id, activity_type, entity_type, entity_id,
+			description, new_values
+		) VALUES ($1, $2, 'update', 'artifact', $3, $4, $5)
+	`, projectId, userId, artifactId,
+		"Updated artifact: "+updateData.Name,
+		json.RawMessage(fmt.Sprintf(`{"name":"%s","status":"%s"}`, updateData.Name, updateData.Status)))
+
+	if err != nil {
+		log.Printf("[handleUpdateArtifact] Failed to record activity: %v", err)
+		// Continue even if activity logging fails
+	}
+
 	// Commit the transaction
 	if err := tx.Commit(); err != nil {
 		log.Printf("[handleUpdateArtifact] Failed to commit transaction: %v", err)
@@ -4460,12 +4591,29 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Artifact updated successfully",
-		"name":    updateData.Name,
-	})
+	// Return updated artifact data
+	w.Header().Set("Content-Type", "application/json")
+	response := map[string]interface{}{
+		"id":          artifactId,
+		"name":        updateData.Name,
+		"status":      updateData.Status,
+		"description": updateData.Description,
+		"projectId":   projectId,
+		"success":     true,
+		"message":     "Artifact updated successfully",
+	}
+
+	if documentId.Valid {
+		response["documentId"] = documentId.String
+	}
+	if pageId.Valid {
+		response["pageId"] = pageId.String
+	}
+	if assignedToUUID != nil {
+		response["assignedTo"] = *assignedToUUID
+	}
+
+	json.NewEncoder(w).Encode(response)
 }
 
 func handleAssociatePageWithProject(w http.ResponseWriter, r *http.Request) {
@@ -6335,13 +6483,13 @@ func handleGetProjectArtifacts(w http.ResponseWriter, r *http.Request) {
 
 	var isMember bool
 	err := db.QueryRow(`
-			SELECT EXISTS (
-				SELECT 1 
-				FROM rdm.project_members pm
-				JOIN auth.users u ON pm.user_id = u.id
-				WHERE pm.project_id = $1 AND u.email = $2
-			)
-		`, projectId, claims.Username).Scan(&isMember)
+            SELECT EXISTS (
+                SELECT 1 
+                FROM rdm.project_members pm
+                JOIN auth.users u ON pm.user_id = u.id
+                WHERE pm.project_id = $1 AND u.email = $2
+            )
+        `, projectId, claims.Username).Scan(&isMember)
 	if err != nil {
 		log.Printf("Error checking project membership: %v", err)
 		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
@@ -6354,12 +6502,26 @@ func handleGetProjectArtifacts(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("User %s is a member of project %s", claims.Username, projectId)
 
+	// Enhanced query to include user emails instead of IDs
 	rows, err := db.Query(`
-			SELECT id, project_id, name, type, status, assigned_to, due_date,
-				document_id, page_id, created_by, updated_by, created_at, updated_at
-			FROM rdm.project_artifacts
-			WHERE project_id = $1
-		`, projectId)
+            SELECT 
+                a.id, a.project_id, a.name, a.type, a.status, 
+                a.assigned_to, 
+                CASE WHEN a.assigned_to IS NOT NULL THEN 
+                    (SELECT email FROM auth.users WHERE id = a.assigned_to) 
+                ELSE NULL END as assigned_to_email,
+                a.due_date, a.document_id, a.page_id, 
+                a.created_by, 
+                (SELECT email FROM auth.users WHERE id = a.created_by) as created_by_email,
+                a.updated_by, 
+                CASE WHEN a.updated_by IS NOT NULL THEN 
+                    (SELECT email FROM auth.users WHERE id = a.updated_by) 
+                ELSE NULL END as updated_by_email,
+                a.created_at, a.updated_at,
+                a.description
+            FROM rdm.project_artifacts a
+            WHERE a.project_id = $1
+        `, projectId)
 	if err != nil {
 		log.Printf("Error fetching artifacts: %v", err)
 		http.Error(w, "Failed to fetch artifacts", http.StatusInternalServerError)
@@ -6370,36 +6532,51 @@ func handleGetProjectArtifacts(w http.ResponseWriter, r *http.Request) {
 
 	var artifacts []map[string]interface{}
 	for rows.Next() {
-		var a struct {
-			ID, ProjectID                  uuid.UUID      // UUIDs
-			Name, Type, Status             string         // Strings
-			AssignedTo, DocumentID, PageID sql.NullString // Nullable UUIDs or strings
-			CreatedBy, UpdatedBy           uuid.UUID      // UUIDs
-			DueDate                        sql.NullTime   // Nullable timestamp
-			CreatedAt, UpdatedAt           time.Time      // Timestamps
-		}
-		err := rows.Scan(&a.ID, &a.ProjectID, &a.Name, &a.Type, &a.Status, &a.AssignedTo, &a.DueDate,
-			&a.DocumentID, &a.PageID, &a.CreatedBy, &a.UpdatedBy, &a.CreatedAt, &a.UpdatedAt)
+		var (
+			id, projectID, createdBy                        uuid.UUID
+			name, artifactType, status                      string
+			description                                     sql.NullString // Change to sql.NullString
+			assignedTo, updatedBy                           sql.NullString
+			assignedToEmail, createdByEmail, updatedByEmail sql.NullString
+			documentID, pageID                              sql.NullString
+			dueDate                                         sql.NullTime
+			createdAt, updatedAt                            time.Time
+		)
+
+		err := rows.Scan(
+			&id, &projectID, &name, &artifactType, &status,
+			&assignedTo, &assignedToEmail, &dueDate,
+			&documentID, &pageID, &createdBy, &createdByEmail,
+			&updatedBy, &updatedByEmail, &createdAt, &updatedAt,
+			&description, // Now can handle NULL
+		)
 		if err != nil {
 			log.Printf("Error scanning artifact row: %v", err)
 			http.Error(w, "Failed to scan artifact", http.StatusInternalServerError)
 			return
 		}
-		artifacts = append(artifacts, map[string]interface{}{
-			"id":         a.ID.String(),
-			"projectId":  a.ProjectID.String(),
-			"name":       a.Name,
-			"type":       a.Type,
-			"status":     a.Status,
-			"assignedTo": a.AssignedTo.String,
-			"dueDate":    a.DueDate.Time,
-			"documentId": a.DocumentID.String,
-			"pageId":     a.PageID.String,
-			"createdBy":  a.CreatedBy.String(),
-			"updatedBy":  a.UpdatedBy.String(),
-			"createdAt":  a.CreatedAt,
-			"updatedAt":  a.UpdatedAt,
-		})
+
+		artifact := map[string]interface{}{
+			"id":              id.String(),
+			"projectId":       projectID.String(),
+			"name":            name,
+			"type":            artifactType,
+			"status":          status,
+			"assignedTo":      nullStringValue(assignedTo),
+			"assignedToEmail": nullStringValue(assignedToEmail),
+			"dueDate":         formatTimeValue(dueDate),
+			"documentId":      nullStringValue(documentID),
+			"pageId":          nullStringValue(pageID),
+			"createdBy":       createdBy.String(),
+			"createdByEmail":  nullStringValue(createdByEmail),
+			"updatedBy":       nullStringValue(updatedBy),
+			"updatedByEmail":  nullStringValue(updatedByEmail),
+			"createdAt":       createdAt,
+			"updatedAt":       updatedAt,
+			"description":     nullStringValue(description), // Use the helper function
+		}
+
+		artifacts = append(artifacts, artifact)
 	}
 	log.Printf("Found %d artifacts for project %s", len(artifacts), projectId)
 
@@ -6410,6 +6587,14 @@ func handleGetProjectArtifacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("Successfully sent artifacts response for project %s", projectId)
+}
+
+// Helper function to format sql.NullTime values
+func formatTimeValue(t sql.NullTime) interface{} {
+	if t.Valid {
+		return t.Time.Format("2006-01-02")
+	}
+	return nil
 }
 
 // Add handlers
@@ -9402,6 +9587,7 @@ func main() {
 	r.HandleFunc("/projects/{projectId}/artifacts", authMiddleware(handleGetProjectArtifacts)).Methods("GET")
 	r.HandleFunc("/projects/{projectId}/artifacts", authMiddleware(handleCreateProjectArtifact)).Methods("POST")
 	r.HandleFunc("/projects/{projectId}/artifacts/{id}", authMiddleware(handleUpdateArtifact)).Methods("PUT")
+	r.HandleFunc("/projects/{projectId}/artifact-statuses", authMiddleware(handleGetArtifactStatuses)).Methods("GET")
 	r.HandleFunc("/projects/{projectId}/roadmap", authMiddleware(handleGetRoadmapItems)).Methods("GET")
 	r.HandleFunc("/projects/{projectId}/roadmap", authMiddleware(handleCreateRoadmapItem)).Methods("POST")
 	r.HandleFunc("/projects/{projectId}/roadmap/{id}", authMiddleware(handleUpdateRoadmapItem)).Methods("PUT")

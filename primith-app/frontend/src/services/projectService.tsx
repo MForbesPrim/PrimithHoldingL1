@@ -1,5 +1,5 @@
     import AuthService from '@/services/auth'
-    import { Project, ProjectArtifact, ProjectVariable, RoadmapItem, ArtifactReview, ProjectMember, ProjectActivity, ProjectTask, ProjectMilestone, MilestoneStatus} from '@/types/projects'
+    import { Project, ProjectArtifact, ProjectVariable, RoadmapItem, ArtifactReview, ArtifactStatus, ProjectMember, ProjectActivity, ProjectTask, ProjectMilestone, MilestoneStatus} from '@/types/projects'
 
     export class ProjectService {
     private baseUrl = import.meta.env.VITE_API_URL;
@@ -131,6 +131,16 @@
         });
         if (!response.ok) throw new Error('Failed to create artifact');
         return response.json();
+    }
+
+    async getArtifactStatuses(projectId: string): Promise<ArtifactStatus[]> {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/projects/${projectId}/artifact-statuses`, {
+        credentials: 'include',
+        headers
+      });
+      if (!response.ok) throw new Error('Failed to fetch artifact statuses');
+      return response.json();
     }
 
     async updateArtifactStatus(artifactId: string, status: string, comments?: string): Promise<ProjectArtifact> {
@@ -280,25 +290,25 @@
     }
 
     async updateArtifact(projectId: string, artifactId: string, data: Partial<ProjectArtifact>): Promise<ProjectArtifact> {
-        const headers = await this.getAuthHeader();
-        console.log('Updating artifact with ID:', artifactId, 'in project:', projectId);
-        console.log('Request data:', data);
-      
-        const response = await fetch(`${this.baseUrl}/projects/${projectId}/artifacts/${artifactId}`, {
-            method: 'PUT',
-            credentials: 'include',
-            headers,
-            body: JSON.stringify(data)
-        });
-      
-        console.log('Response status:', response.status);
-        console.log('Response headers:', response.headers);
-      
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Response error:', errorText);
-            throw new Error(`Failed to update artifact: ${response.status} - ${errorText || 'Unknown error'}`);
-        }
+      const headers = await this.getAuthHeader();
+      console.log('Updating artifact with ID:', artifactId, 'in project:', projectId);
+      console.log('Request data:', data);
+    
+      const response = await fetch(`${this.baseUrl}/projects/${projectId}/artifacts/${artifactId}`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers,
+          body: JSON.stringify(data)
+      });
+    
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers);
+    
+      if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Response error:', errorText);
+          throw new Error(`Failed to update artifact: ${response.status} - ${errorText || 'Unknown error'}`);
+      }
       
         try {
             return await response.json() as ProjectArtifact;

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ProjectService } from "@/services/projectService";
 import { DocumentService } from "@/services/documentService";
 import { PagesService } from "@/services/pagesService";
-import type { Project, ProjectArtifact, RoadmapItem, ProjectActivity } from "@/types/projects";
+import type { Project, ProjectArtifact, RoadmapItem, ProjectActivity, ArtifactStatus } from "@/types/projects";
 import type { DocumentMetadata } from "@/types/document";
 import type { PageNode } from "@/types/pages";
 import { Button } from "@/components/ui/button";
@@ -104,6 +104,8 @@ export function ProjectDetailPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortColumn, setSortColumn] = useState('createdAt');
   const [sortDirection, setSortDirection] = useState('desc');
+  const [artifactStatuses, setArtifactStatuses] = useState<ArtifactStatus[]>([]);
+
 
   const projectService = new ProjectService();
   const documentService = new DocumentService();
@@ -115,18 +117,22 @@ export function ProjectDetailPage() {
     { value: "image", label: "Image" },
   ];
 
-  const artifactStatuses = [
-    { value: "draft", label: "Draft" },
-    { value: "in_review", label: "In Review" },
-    { value: "approved", label: "Approved" },
-    { value: "rejected", label: "Rejected" },
-  ];
-
   useEffect(() => {
     if (projectId) {
       loadProjectData();
+      loadArtifactStatuses();
     }
   }, [projectId]);
+
+  const loadArtifactStatuses = async () => {
+    if (!projectId) return;
+    try {
+      const statuses = await projectService.getArtifactStatuses(projectId);
+      setArtifactStatuses(statuses);
+    } catch (error) {
+      console.error("Failed to load artifact statuses:", error);
+    }
+  };
 
   const loadProjectActivity = async (offset = 0, limit = 20) => {
     if (!projectId) return;
@@ -597,8 +603,14 @@ export function ProjectDetailPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {artifactStatuses.map((status) => (
-                    <SelectItem key={status.value} value={status.value} className="hover:bg-gray-100">
-                      {status.label}
+                    <SelectItem key={status.id} value={status.id}>
+                      <div className="flex items-center">
+                        <div 
+                          className="w-3 h-3 rounded-full mr-2" 
+                          style={{ backgroundColor: status.color }} 
+                        />
+                        <span>{status.name}</span>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -831,13 +843,33 @@ export function ProjectDetailPage() {
                 Add File
               </Button>
             </div>
-            <ArtifactsPage
-              artifacts={artifacts}
-              onStatusChange={async (artifactId: string, status: string) => {
-                await projectService.updateArtifactStatus(artifactId, status);
-                loadProjectData();
-              }}
-            />
+              <ArtifactsPage
+                artifacts={artifacts}
+                projectId={projectId || ""}
+                projectService={projectService}
+                artifactStatuses={artifactStatuses}
+                onStatusChange={async (artifactId: string, status: string) => {
+                  await projectService.updateArtifactStatus(artifactId, status);
+                  loadProjectData();
+                }}
+                onUpdateArtifact={async (artifactId: string, data: Partial<ProjectArtifact>) => {
+                  try {
+                    await projectService.updateArtifact(projectId || "", artifactId, data);
+                    toast({
+                      title: "Success",
+                      description: "Artifact updated successfully",
+                    });
+                    loadProjectData();
+                  } catch (error) {
+                    console.error('Error updating artifact:', error);
+                    toast({
+                      title: "Error",
+                      description: "Failed to update artifact",
+                      variant: "destructive",
+                    });
+                  }
+                }}
+              />
           </div>
         </TabsContent>
         <TabsContent value="documents">

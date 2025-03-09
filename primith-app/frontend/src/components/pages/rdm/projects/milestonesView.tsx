@@ -231,7 +231,7 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
         title: "Success",
         description: "Milestone created successfully",
       });
-      await loadMilestones(); // Refresh the list
+      await loadMilestones();
       setShowCreateDialog(false);
     } catch (error) {
       console.error('Error creating milestone:', error);
