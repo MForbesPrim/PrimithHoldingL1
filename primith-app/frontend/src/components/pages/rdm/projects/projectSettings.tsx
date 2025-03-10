@@ -27,20 +27,8 @@ import {
   Dialog,
   DialogContent,
   DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogTrigger
+  DialogTitle
 } from "@/components/ui/dialog";
-import { 
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { 
   Tag, 
   Users, 
@@ -58,6 +46,16 @@ import type {
   Project, 
   ProjectMember
 } from "@/types/projects";
+import { 
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // Types for project properties and tags
 interface ProjectProperty {
@@ -118,7 +116,8 @@ export function ProjectSettings({
   const [loadingUsers, setLoadingUsers] = useState(false);
   
   // Property management
-  const [showAddPropertyDialog, setShowAddPropertyDialog] = useState(false);
+  const [isAddingProperty, setIsAddingProperty] = useState(false);
+  const [isEditingProperty, setIsEditingProperty] = useState<ProjectProperty | null>(null);
   const [newProperty, setNewProperty] = useState({
     name: "",
     type: "text",
@@ -127,7 +126,8 @@ export function ProjectSettings({
   const [propertyToDelete, setPropertyToDelete] = useState<string | null>(null);
   
   // Tag management
-  const [showAddTagDialog, setShowAddTagDialog] = useState(false);
+  const [isAddingTag, setIsAddingTag] = useState(false);
+  const [isEditingTag, setIsEditingTag] = useState<ProjectTag | null>(null);
   const [newTag, setNewTag] = useState({
     name: "",
     color: "#3B82F6"
@@ -407,7 +407,7 @@ export function ProjectSettings({
       });
       
       setProperties([...properties, result]);
-      setShowAddPropertyDialog(false);
+      setIsAddingProperty(false);
       setNewProperty({ name: "", type: "text", value: "" });
       onUpdate();
     } catch (error) {
@@ -497,7 +497,7 @@ export function ProjectSettings({
       });
       
       setTags([...tags, result]);
-      setShowAddTagDialog(false);
+      setIsAddingTag(false);
       setNewTag({ name: "", color: "#3B82F6" });
       onUpdate();
     } catch (error) {
@@ -846,107 +846,22 @@ export function ProjectSettings({
                 </div>
               )}
               
-              {activeTab === "properties" && (
+              {activeTab === "properties" && !isAddingProperty && !isEditingProperty && (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
-                    <h3 className="text-lg font-medium">Custom Project Properties</h3>
-                    <Dialog open={showAddPropertyDialog} onOpenChange={setShowAddPropertyDialog}>
-                      <DialogTrigger asChild>
-                        <Button size="sm">
-                          <Plus className="h-4 w-4 mr-1" />
-                          Add Property
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Add Custom Property</DialogTitle>
-                        </DialogHeader>
-                        <div className="space-y-4 py-4">
-                          <div className="space-y-2">
-                            <Label htmlFor="property-name">Property Name</Label>
-                            <Input
-                              id="property-name"
-                              placeholder="Enter property name"
-                              value={newProperty.name}
-                              onChange={(e) => setNewProperty({...newProperty, name: e.target.value})}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="property-type">Property Type</Label>
-                            <Select 
-                              value={newProperty.type} 
-                              onValueChange={(value) => setNewProperty({...newProperty, type: value})}
-                            >
-                              <SelectTrigger id="property-type">
-                                <SelectValue placeholder="Select property type" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="text">Text</SelectItem>
-                                <SelectItem value="number">Number</SelectItem>
-                                <SelectItem value="date">Date</SelectItem>
-                                <SelectItem value="boolean">Yes/No</SelectItem>
-                                <SelectItem value="url">URL</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="property-value">Default Value (Optional)</Label>
-                            {newProperty.type === 'boolean' ? (
-                              <Select 
-                                value={newProperty.value} 
-                                onValueChange={(value) => setNewProperty({...newProperty, value})}
-                              >
-                                <SelectTrigger id="property-value">
-                                  <SelectValue placeholder="Select value" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="true">Yes</SelectItem>
-                                  <SelectItem value="false">No</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            ) : newProperty.type === 'date' ? (
-                              <Input
-                                id="property-value"
-                                type="date"
-                                value={newProperty.value}
-                                onChange={(e) => setNewProperty({...newProperty, value: e.target.value})}
-                              />
-                            ) : (
-                              <Input
-                                id="property-value"
-                                type={newProperty.type === 'number' ? 'number' : 'text'}
-                                placeholder={`Enter default ${newProperty.type} value`}
-                                value={newProperty.value}
-                                onChange={(e) => setNewProperty({...newProperty, value: e.target.value})}
-                              />
-                            )}
-                          </div>
-                        </div>
-                        <DialogFooter>
-                          <Button variant="outline" onClick={() => setShowAddPropertyDialog(false)}>
-                            Cancel
-                          </Button>
-                          <Button onClick={handleAddProperty} disabled={!newProperty.name || isSaving}>
-                            {isSaving ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Adding...
-                              </>
-                            ) : (
-                              'Add Property'
-                            )}
-                          </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
+                    <h3 className="text-lg font-medium">Project Properties</h3>
+                    <Button size="sm" onClick={() => setIsAddingProperty(true)}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add Property
+                    </Button>
                   </div>
-                  
+
                   <AlertDialog open={!!propertyToDelete} onOpenChange={() => setPropertyToDelete(null)}>
                     <AlertDialogContent>
                       <AlertDialogHeader>
-                        <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                        <AlertDialogTitle>Delete Property</AlertDialogTitle>
                         <AlertDialogDescription>
-                          This will permanently delete this property and its value from the project.
+                          Are you sure you want to delete this property? This action cannot be undone.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
@@ -966,7 +881,7 @@ export function ProjectSettings({
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Property Name</TableHead>
+                            <TableHead>Name</TableHead>
                             <TableHead>Type</TableHead>
                             <TableHead>Value</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
@@ -975,219 +890,548 @@ export function ProjectSettings({
                         <TableBody>
                           {properties.map((property) => (
                             <TableRow key={property.id}>
-                              <TableCell className="font-medium">
-                                {property.name}
-                              </TableCell>
-                              <TableCell className="capitalize">
-                                {property.type}
-                              </TableCell>
+                              <TableCell className="font-medium">{property.name}</TableCell>
+                              <TableCell className="capitalize">{property.type}</TableCell>
                               <TableCell>
                                 {property.type === 'boolean' ? (
                                   <Badge variant={property.value === 'true' ? 'secondary' : 'secondary'} className={property.value === 'true' ? 'bg-green-100 text-green-800' : ''}>
                                     {property.value === 'true' ? 'Yes' : 'No'}
                                   </Badge>
                                 ) : property.type === 'url' ? (
-                                    property.value ? (
-                                        <a 
-                                          href={property.value} 
-                                          target="_blank" 
-                                          rel="noopener noreferrer"
-                                          className="text-blue-500 hover:underline flex items-center"
-                                        >
-                                          {property.value.substring(0, 30)}
-                                          {property.value.length > 30 ? '...' : ''}
-                                          <List className="h-3 w-3 ml-1" />
-                                        </a>
-                                      ) : 'Not set'
-                                    ) : (
-                                      property.value || 'Not set'
-                                    )}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-  <div className="flex justify-end space-x-2">
-    <Button 
-      variant="ghost" 
-      size="sm"
-      onClick={() => {
-        const newValue = window.prompt(`Update value for ${property.name}:`, property.value);
-        if (newValue !== null) {
-          handleUpdateProperty(property.id, { value: newValue });
-        }
-      }}
-    >
-      <Edit className="h-4 w-4 text-gray-500" />
-    </Button>
-    <Button 
-      variant="ghost" 
-      size="sm"
-      onClick={() => setPropertyToDelete(property.id)}
-    >
-      <Trash2 className="h-4 w-4 text-red-500" />
-    </Button>
-  </div>
-</TableCell>
-</TableRow>
-))}
-</TableBody>
-</Table>
-</Card>
-) : (
-<Card>
-  <CardContent className="flex flex-col items-center justify-center p-6">
-    <List className="h-12 w-12 text-gray-400 mb-4" />
-    <p className="text-gray-500 mb-4">No custom properties defined yet</p>
-    <Button 
-      variant="outline"
-      onClick={() => setShowAddPropertyDialog(true)}
-    >
-      <Plus className="h-4 w-4 mr-1" />
-      Add Your First Property
-    </Button>
-  </CardContent>
-</Card>
-)}
-</div>
-)}
+                                  property.value ? (
+                                    <a 
+                                      href={property.value} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      className="text-blue-500 hover:underline flex items-center"
+                                    >
+                                      {property.value.substring(0, 30)}
+                                      {property.value.length > 30 ? '...' : ''}
+                                      <List className="h-3 w-3 ml-1" />
+                                    </a>
+                                  ) : 'Not set'
+                                ) : (
+                                  property.value || 'Not set'
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex justify-end space-x-2">
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm"
+                                    onClick={() => setIsEditingProperty(property)}
+                                  >
+                                    <Edit className="h-4 w-4 text-gray-500" />
+                                  </Button>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm"
+                                    onClick={() => setPropertyToDelete(property.id)}
+                                  >
+                                    <Trash2 className="h-4 w-4 text-red-500" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </Card>
+                  ) : (
+                    <Card>
+                      <CardContent className="flex flex-col items-center justify-center p-6">
+                        <List className="h-12 w-12 text-gray-400 mb-4" />
+                        <p className="text-gray-500 mb-4">No custom properties defined yet</p>
+                        <Button 
+                          variant="outline"
+                          onClick={() => setIsAddingProperty(true)}
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Add Your First Property
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              )}
 
-{activeTab === "tags" && (
-<div className="space-y-4">
-  <div className="flex justify-between items-center">
-    <h3 className="text-lg font-medium">Project Tags</h3>
-    <Dialog open={showAddTagDialog} onOpenChange={setShowAddTagDialog}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus className="h-4 w-4 mr-1" />
-          Add Tag
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add Project Tag</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 py-4">
-          <div className="space-y-2">
-            <Label htmlFor="tag-name">Tag Name</Label>
-            <Input
-              id="tag-name"
-              placeholder="Enter tag name"
-              value={newTag.name}
-              onChange={(e) => setNewTag({...newTag, name: e.target.value})}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="tag-color">Tag Color</Label>
-            <div className="flex items-center space-x-2">
-              <input
-                type="color"
-                id="tag-color"
-                value={newTag.color}
-                onChange={(e) => setNewTag({...newTag, color: e.target.value})}
-                className="h-8 w-8 border rounded cursor-pointer"
-              />
-              <div 
-                className="px-3 py-1 rounded-full text-sm text-white"
-                style={{ backgroundColor: newTag.color }}
-              >
-                {newTag.name || 'Tag Preview'}
-              </div>
+              {activeTab === "properties" && isEditingProperty && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center mb-6">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => {
+                        setIsEditingProperty(null);
+                      }}
+                    >
+                      ← Back to Properties
+                    </Button>
+                    <h3 className="text-lg font-medium">Edit Property</h3>
+                  </div>
+
+                  <Card>
+                    <CardContent className="p-6">
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="property-name">Property Name</Label>
+                          <Input
+                            id="property-name"
+                            placeholder="Enter property name"
+                            value={isEditingProperty.name}
+                            onChange={(e) => setIsEditingProperty({
+                              ...isEditingProperty,
+                              name: e.target.value
+                            })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="property-type">Property Type</Label>
+                          <Select 
+                            value={isEditingProperty.type} 
+                            onValueChange={(value) => setIsEditingProperty({
+                              ...isEditingProperty,
+                              type: value
+                            })}
+                          >
+                            <SelectTrigger id="property-type">
+                              <SelectValue placeholder="Select property type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="text">Text</SelectItem>
+                              <SelectItem value="number">Number</SelectItem>
+                              <SelectItem value="date">Date</SelectItem>
+                              <SelectItem value="boolean">Yes/No</SelectItem>
+                              <SelectItem value="url">URL</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="property-value">Value</Label>
+                          {isEditingProperty.type === 'boolean' ? (
+                            <Select 
+                              value={isEditingProperty.value} 
+                              onValueChange={(value) => setIsEditingProperty({
+                                ...isEditingProperty,
+                                value
+                              })}
+                            >
+                              <SelectTrigger id="property-value">
+                                <SelectValue placeholder="Select value" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="true">Yes</SelectItem>
+                                <SelectItem value="false">No</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : isEditingProperty.type === 'date' ? (
+                            <Input
+                              id="property-value"
+                              type="date"
+                              value={isEditingProperty.value}
+                              onChange={(e) => setIsEditingProperty({
+                                ...isEditingProperty,
+                                value: e.target.value
+                              })}
+                            />
+                          ) : (
+                            <Input
+                              id="property-value"
+                              type={isEditingProperty.type === 'number' ? 'number' : 'text'}
+                              placeholder={`Enter ${isEditingProperty.type} value`}
+                              value={isEditingProperty.value}
+                              onChange={(e) => setIsEditingProperty({
+                                ...isEditingProperty,
+                                value: e.target.value
+                              })}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <div className="flex justify-end space-x-2 mt-6">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        setIsEditingProperty(null);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      onClick={() => {
+                        handleUpdateProperty(isEditingProperty.id, {
+                          name: isEditingProperty.name,
+                          type: isEditingProperty.type,
+                          value: isEditingProperty.value
+                        });
+                        setIsEditingProperty(null);
+                      }} 
+                      disabled={!isEditingProperty.name || isSaving}
+                    >
+                      {isSaving ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        'Save Changes'
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "properties" && isAddingProperty && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center mb-6">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => {
+                        setIsAddingProperty(false);
+                        setNewProperty({ name: "", type: "text", value: "" });
+                      }}
+                    >
+                      ← Back to Properties
+                    </Button>
+                    <h3 className="text-lg font-medium">Add Property</h3>
+                  </div>
+
+                  <Card>
+                    <CardContent className="p-6">
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="property-name">Property Name</Label>
+                          <Input
+                            id="property-name"
+                            placeholder="Enter property name"
+                            value={newProperty.name}
+                            onChange={(e) => setNewProperty({...newProperty, name: e.target.value})}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="property-type">Property Type</Label>
+                          <Select 
+                            value={newProperty.type} 
+                            onValueChange={(value) => setNewProperty({...newProperty, type: value})}
+                          >
+                            <SelectTrigger id="property-type">
+                              <SelectValue placeholder="Select property type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="text">Text</SelectItem>
+                              <SelectItem value="number">Number</SelectItem>
+                              <SelectItem value="date">Date</SelectItem>
+                              <SelectItem value="boolean">Yes/No</SelectItem>
+                              <SelectItem value="url">URL</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="property-value">Default Value (Optional)</Label>
+                          {newProperty.type === 'boolean' ? (
+                            <Select 
+                              value={newProperty.value} 
+                              onValueChange={(value) => setNewProperty({...newProperty, value})}
+                            >
+                              <SelectTrigger id="property-value">
+                                <SelectValue placeholder="Select value" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="true">Yes</SelectItem>
+                                <SelectItem value="false">No</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : newProperty.type === 'date' ? (
+                            <Input
+                              id="property-value"
+                              type="date"
+                              value={newProperty.value}
+                              onChange={(e) => setNewProperty({...newProperty, value: e.target.value})}
+                            />
+                          ) : (
+                            <Input
+                              id="property-value"
+                              type={newProperty.type === 'number' ? 'number' : 'text'}
+                              placeholder={`Enter default ${newProperty.type} value`}
+                              value={newProperty.value}
+                              onChange={(e) => setNewProperty({...newProperty, value: e.target.value})}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <div className="flex justify-end space-x-2 mt-6">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        setIsAddingProperty(false);
+                        setNewProperty({ name: "", type: "text", value: "" });
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button onClick={handleAddProperty} disabled={!newProperty.name || isSaving}>
+                      {isSaving ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Adding...
+                        </>
+                      ) : (
+                        'Add Property'
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "tags" && !isAddingTag && !isEditingTag && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-lg font-medium">Project Tags</h3>
+                    <Button size="sm" onClick={() => setIsAddingTag(true)}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add Tag
+                    </Button>
+                  </div>
+
+                  <AlertDialog open={!!tagToDelete} onOpenChange={() => setTagToDelete(null)}>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Tag</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Are you sure you want to delete this tag? This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-red-600 hover:bg-red-700"
+                          onClick={() => tagToDelete && handleDeleteTag(tagToDelete)}
+                        >
+                          Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                  
+                  {tags.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {tags.map((tag) => (
+                        <Card key={tag.id} className="flex items-center p-3">
+                          <div 
+                            className="w-3 h-3 rounded-full mr-3"
+                            style={{ backgroundColor: tag.color }}
+                          />
+                          <div className="flex-1">
+                            <p className="font-medium">{tag.name}</p>
+                          </div>
+                          <div className="flex space-x-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setIsEditingTag(tag)}
+                            >
+                              <Edit className="h-4 w-4 text-gray-500" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setTagToDelete(tag.id)}
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  ) : (
+                    <Card>
+                      <CardContent className="flex flex-col items-center justify-center p-6">
+                        <Tag className="h-12 w-12 text-gray-400 mb-4" />
+                        <p className="text-gray-500 mb-4">No tags defined yet</p>
+                        <Button 
+                          variant="outline"
+                          onClick={() => setIsAddingTag(true)}
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Add Your First Tag
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              )}
+
+              {activeTab === "tags" && isEditingTag && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center mb-6">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => {
+                        setIsEditingTag(null);
+                      }}
+                    >
+                      ← Back to Tags
+                    </Button>
+                    <h3 className="text-lg font-medium">Edit Tag</h3>
+                  </div>
+
+                  <Card>
+                    <CardContent className="p-6">
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="tag-name">Tag Name</Label>
+                          <Input
+                            id="tag-name"
+                            placeholder="Enter tag name"
+                            value={isEditingTag.name}
+                            onChange={(e) => setIsEditingTag({
+                              ...isEditingTag,
+                              name: e.target.value
+                            })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="tag-color">Tag Color</Label>
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="color"
+                              id="tag-color"
+                              value={isEditingTag.color}
+                              onChange={(e) => setIsEditingTag({
+                                ...isEditingTag,
+                                color: e.target.value
+                              })}
+                              className="h-8 w-8 border rounded cursor-pointer"
+                            />
+                            <div 
+                              className="px-3 py-1 rounded-full text-sm text-white"
+                              style={{ backgroundColor: isEditingTag.color }}
+                            >
+                              {isEditingTag.name || 'Tag Preview'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <div className="flex justify-end space-x-2 mt-6">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        setIsEditingTag(null);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      onClick={() => {
+                        handleUpdateTag(isEditingTag.id, {
+                          name: isEditingTag.name,
+                          color: isEditingTag.color
+                        });
+                        setIsEditingTag(null);
+                      }} 
+                      disabled={!isEditingTag.name || isSaving}
+                    >
+                      {isSaving ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        'Save Changes'
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "tags" && isAddingTag && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center mb-6">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => {
+                        setIsAddingTag(false);
+                        setNewTag({ name: "", color: "#3B82F6" });
+                      }}
+                    >
+                      ← Back to Tags
+                    </Button>
+                    <h3 className="text-lg font-medium">Add Tag</h3>
+                  </div>
+
+                  <Card>
+                    <CardContent className="p-6">
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="tag-name">Tag Name</Label>
+                          <Input
+                            id="tag-name"
+                            placeholder="Enter tag name"
+                            value={newTag.name}
+                            onChange={(e) => setNewTag({...newTag, name: e.target.value})}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="tag-color">Tag Color</Label>
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="color"
+                              id="tag-color"
+                              value={newTag.color}
+                              onChange={(e) => setNewTag({...newTag, color: e.target.value})}
+                              className="h-8 w-8 border rounded cursor-pointer"
+                            />
+                            <div 
+                              className="px-3 py-1 rounded-full text-sm text-white"
+                              style={{ backgroundColor: newTag.color }}
+                            >
+                              {newTag.name || 'Tag Preview'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <div className="flex justify-end space-x-2 mt-6">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        setIsAddingTag(false);
+                        setNewTag({ name: "", color: "#3B82F6" });
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button onClick={handleAddTag} disabled={!newTag.name || isSaving}>
+                      {isSaving ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Adding...
+                        </>
+                      ) : (
+                        'Add Tag'
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setShowAddTagDialog(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleAddTag} disabled={!newTag.name || isSaving}>
-            {isSaving ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Adding...
-              </>
-            ) : (
-              'Add Tag'
-            )}
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
-  </div>
-  
-  <AlertDialog open={!!tagToDelete} onOpenChange={() => setTagToDelete(null)}>
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-        <AlertDialogDescription>
-          This will permanently delete this tag from the project.
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel>Cancel</AlertDialogCancel>
-        <AlertDialogAction
-          className="bg-red-600 hover:bg-red-700"
-          onClick={() => tagToDelete && handleDeleteTag(tagToDelete)}
-        >
-          Delete
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
-  
-  {tags.length > 0 ? (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {tags.map((tag) => (
-        <Card key={tag.id} className="flex items-center p-3">
-          <div 
-            className="w-3 h-3 rounded-full mr-3"
-            style={{ backgroundColor: tag.color }}
-          />
-          <div className="flex-1">
-            <p className="font-medium">{tag.name}</p>
-          </div>
-          <div className="flex space-x-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                const newName = window.prompt(`Update name for tag ${tag.name}:`, tag.name);
-                if (newName !== null) {
-                  handleUpdateTag(tag.id, { name: newName });
-                }
-              }}
-            >
-              <Edit className="h-4 w-4 text-gray-500" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setTagToDelete(tag.id)}
-            >
-              <Trash2 className="h-4 w-4 text-red-500" />
-            </Button>
-          </div>
-        </Card>
-      ))}
-    </div>
-  ) : (
-    <Card>
-      <CardContent className="flex flex-col items-center justify-center p-6">
-        <Tag className="h-12 w-12 text-gray-400 mb-4" />
-        <p className="text-gray-500 mb-4">No tags defined yet</p>
-        <Button 
-          variant="outline"
-          onClick={() => setShowAddTagDialog(true)}
-        >
-          <Plus className="h-4 w-4 mr-1" />
-          Add Your First Tag
-        </Button>
-      </CardContent>
-    </Card>
-  )}
-</div>
-)}
-</div>
-)}
-</div>
-</DialogContent>
-</Dialog>
-);
+  );
 }
