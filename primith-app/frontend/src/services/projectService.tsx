@@ -258,12 +258,25 @@
     async addProjectMember(projectId: string, userId: string, role: string): Promise<ProjectMember> {
         const headers = await this.getAuthHeader();
         const response = await fetch(`${this.baseUrl}/projects/${projectId}/members`, {
-        method: 'POST',
-        credentials: 'include',
-        headers,
-        body: JSON.stringify({ userId, role })
+            method: 'POST',
+            credentials: 'include',
+            headers,
+            body: JSON.stringify({ userId, role })
         });
-        if (!response.ok) throw new Error('Failed to add project member');
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            if (response.status === 409) {
+                throw new Error("This user is already a member of the project");
+            } else if (response.status === 403) {
+                throw new Error("You don't have permission to add members to this project");
+            } else if (response.status === 400) {
+                throw new Error(errorText || "Invalid request. Please check the user ID and role");
+            } else {
+                throw new Error(`Failed to add project member: ${errorText || response.statusText}`);
+            }
+        }
+
         return response.json();
     }
     
@@ -708,5 +721,32 @@ async getProjectTasks(projectId: string, filters?: {
     
     if (!response.ok) throw new Error('Failed to update member status');
     return response.json();
+  }
+
+  // Organization users
+  async getOrganizationUsers(organizationId: string): Promise<any[]> {
+    const headers = await this.getAuthHeader();
+    try {
+      const response = await fetch(`${this.baseUrl}/organizations/${organizationId}/users`, {
+        credentials: 'include',
+        headers
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Failed to fetch organization users:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText
+        });
+        throw new Error(`Failed to fetch organization users: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      return data.users || [];
+    } catch (error) {
+      console.error('Error in getOrganizationUsers:', error);
+      throw error;
+    }
   }
   }

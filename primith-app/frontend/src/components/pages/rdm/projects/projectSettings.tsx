@@ -49,7 +49,8 @@ import {
   Edit,
   Loader2,
   CheckCircle,
-  XCircle
+  XCircle,
+  List
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ProjectService } from "@/services/projectService";
@@ -78,6 +79,12 @@ interface ProjectTag {
   updatedAt: string;
 }
 
+interface OrganizationUser {
+  id: string;
+  name: string;
+  email: string;
+}
+
 interface ProjectSettingsProps {
   open: boolean;
   onClose: () => void;
@@ -101,12 +108,14 @@ export function ProjectSettings({
   const [loading, setLoading] = useState(false);
   
   // Member management
-  const [showAddMemberDialog, setShowAddMemberDialog] = useState(false);
+  const [isAddingMembers, setIsAddingMembers] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [organizationUsers, setOrganizationUsers] = useState<OrganizationUser[]>([]);
+  const [filteredUsers, setFilteredUsers] = useState<OrganizationUser[]>([]);
   const [selectedRole, setSelectedRole] = useState<'owner' | 'admin' | 'member'>('member');
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(false);
   
   // Property management
   const [showAddPropertyDialog, setShowAddPropertyDialog] = useState(false);
@@ -137,17 +146,23 @@ export function ProjectSettings({
     
     setLoading(true);
     try {
-      // Load members
-      const membersData = await projectService.getProjectMembers(project.id);
-      setMembers(Array.isArray(membersData) ? membersData : []);
+      // Load members only if we're on the team tab
+      if (activeTab === "team") {
+        const membersData = await projectService.getProjectMembers(project.id);
+        setMembers(Array.isArray(membersData) ? membersData : []);
+      }
       
-      // Load properties
-      const propertiesData = await projectService.getProjectProperties(project.id);
-      setProperties(Array.isArray(propertiesData) ? propertiesData : []);
+      // Load properties only if we're on the properties tab
+      if (activeTab === "properties") {
+        const propertiesData = await projectService.getProjectProperties(project.id);
+        setProperties(Array.isArray(propertiesData) ? propertiesData : []);
+      }
       
-      // Load tags
-      const tagsData = await projectService.getProjectTags(project.id);
-      setTags(Array.isArray(tagsData) ? tagsData : []);
+      // Load tags only if we're on the tags tab
+      if (activeTab === "tags") {
+        const tagsData = await projectService.getProjectTags(project.id);
+        setTags(Array.isArray(tagsData) ? tagsData : []);
+      }
     } catch (error) {
       console.error("Failed to load project settings data:", error);
       toast({
@@ -160,29 +175,56 @@ export function ProjectSettings({
       setLoading(false);
     }
   };
+
+  // Add effect to load data when tab changes
+  useEffect(() => {
+    if (open && project?.id) {
+      loadData();
+    }
+  }, [activeTab]);
   
-  // Team members section
-  const searchUsers = async (term: string) => {
-    if (!term || term.length < 2) {
-      setSearchResults([]);
+  // Load organization users when entering add members view
+  useEffect(() => {
+    if (isAddingMembers && project?.organizationId) {
+      loadOrganizationUsers();
+    }
+  }, [isAddingMembers, project?.organizationId]);
+
+  // Filter users when search term changes
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setFilteredUsers(organizationUsers);
       return;
     }
-    
+
+    const searchTermLower = searchTerm.toLowerCase();
+    const filtered = organizationUsers.filter(user => 
+      user.name.toLowerCase().includes(searchTermLower) ||
+      user.email.toLowerCase().includes(searchTermLower)
+    );
+    setFilteredUsers(filtered);
+  }, [searchTerm, organizationUsers]);
+
+  const loadOrganizationUsers = async () => {
+    setLoadingUsers(true);
     try {
-      const results = await projectService.searchUsers(term, project.organizationId);
+      const users = await projectService.getOrganizationUsers(project.organizationId);
       // Filter out users who are already members
-      const filteredResults = results.filter(user => 
+      const availableUsers = users.filter(user => 
         !members.some(member => member.userId === user.id)
       );
-      setSearchResults(filteredResults);
+      setOrganizationUsers(availableUsers);
+      setFilteredUsers(availableUsers);
     } catch (error) {
-      console.error("Failed to search users:", error);
+      console.error("Failed to load organization users:", error);
       toast({
         title: "Error",
-        description: "Failed to search for users",
+        description: "Failed to load organization users",
         className: "text-red-600",
         duration: 5000
       });
+    } finally {
+      setLoadingUsers(false);
     }
   };
   
@@ -196,48 +238,50 @@ export function ProjectSettings({
   
   const handleAddMembers = async () => {
     if (!selectedUsers.length) {
-      toast({
-        title: "Missing information",
-        description: "Please select users to add",
-        className: "text-red-600",
-        duration: 5000
-      });
-      return;
+        toast({
+            title: "Missing information",
+            description: "Please select users to add",
+            className: "text-red-600",
+            duration: 5000
+        });
+        return;
     }
     
     setIsSaving(true);
     try {
-      await Promise.all(
-        selectedUsers.map(userId => 
-          projectService.addProjectMember(project.id, userId, selectedRole)
-        )
-      );
-      
-      toast({
-        title: "Success",
-        description: `Added ${selectedUsers.length} member(s) to the project`,
-        duration: 5000
-      });
-      
-      setShowAddMemberDialog(false);
-      setSelectedUsers([]);
-      setSelectedRole('member');
-      setSearchTerm("");
-      setSearchResults([]);
-      
-      // Reload members
-      loadData();
-      onUpdate();
+        const newMembers = await Promise.all(
+            selectedUsers.map(userId => 
+                projectService.addProjectMember(project.id, userId, selectedRole)
+            )
+        );
+        
+        toast({
+            title: "Success",
+            description: `Added ${selectedUsers.length} member(s) to the project`,
+            duration: 2000
+        });
+        
+        // Update local state with new members
+        setMembers(prevMembers => [...prevMembers, ...newMembers]);
+        
+        setIsAddingMembers(false);
+        setSelectedUsers([]);
+        setSelectedRole('member');
+        setSearchTerm("");
+        setFilteredUsers([]);
+        
+        // Only call onUpdate if needed for other components
+        if (onUpdate) onUpdate();
     } catch (error) {
-      console.error("Failed to add members:", error);
-      toast({
-        title: "Error",
-        description: "Failed to add members to the project",
-        className: "text-red-600",
-        duration: 5000
-      });
+        console.error("Failed to add members:", error);
+        toast({
+            title: "Error",
+            description: error instanceof Error ? error.message : "Failed to add members to the project",
+            className: "text-red-600",
+            duration: 5000
+        });
     } finally {
-      setIsSaving(false);
+        setIsSaving(false);
     }
   };
   
@@ -248,12 +292,14 @@ export function ProjectSettings({
       toast({
         title: "Success",
         description: "Member removed from project",
-        duration: 5000
+        duration: 2000
       });
       
       // Update local state
-      setMembers(members.filter(member => member.id !== memberId));
-      onUpdate();
+      setMembers(prevMembers => prevMembers.filter(member => member.id !== memberId));
+      
+      // Only call onUpdate if needed for other components
+      if (onUpdate) onUpdate();
     } catch (error) {
       console.error("Failed to remove member:", error);
       toast({
@@ -272,7 +318,7 @@ export function ProjectSettings({
       toast({
         title: "Success",
         description: "Member role updated",
-        duration: 5000
+        duration: 2000
       });
       
       // Update local state
@@ -281,6 +327,9 @@ export function ProjectSettings({
           member.id === memberId ? { ...member, role } : member
         )
       );
+      
+      // Only call onUpdate if needed for other components
+      if (onUpdate) onUpdate();
     } catch (error) {
       console.error("Failed to update member role:", error);
       
@@ -306,7 +355,7 @@ export function ProjectSettings({
       toast({
         title: "Success",
         description: `Member ${isActive ? 'activated' : 'deactivated'}`,
-        duration: 5000
+        duration: 2000
       });
       
       // Update the local state immediately
@@ -315,6 +364,9 @@ export function ProjectSettings({
           member.id === memberId ? { ...member, isActive } : member
         )
       );
+      
+      // Only call onUpdate if needed for other components
+      if (onUpdate) onUpdate();
     } catch (error) {
       console.error("Failed to update member status:", error);
       
@@ -351,7 +403,7 @@ export function ProjectSettings({
       toast({
         title: "Success",
         description: "Property added successfully",
-        duration: 5000
+        duration: 2000
       });
       
       setProperties([...properties, result]);
@@ -378,7 +430,7 @@ export function ProjectSettings({
       toast({
         title: "Success",
         description: "Property updated successfully",
-        duration: 5000
+        duration: 2000
       });
       
       // Update local state
@@ -404,7 +456,7 @@ export function ProjectSettings({
       toast({
         title: "Success",
         description: "Property deleted successfully",
-        duration: 5000
+        duration: 2000
       });
       
       // Update local state
@@ -441,7 +493,7 @@ export function ProjectSettings({
       toast({
         title: "Success",
         description: "Tag added successfully",
-        duration: 5000
+        duration: 2000
       });
       
       setTags([...tags, result]);
@@ -468,7 +520,7 @@ export function ProjectSettings({
       toast({
         title: "Success",
         description: "Tag updated successfully",
-        duration: 5000
+        duration: 2000
       });
       
       // Update local state
@@ -494,7 +546,7 @@ export function ProjectSettings({
       toast({
         title: "Success",
         description: "Tag deleted successfully",
-        duration: 5000
+        duration: 2000
       });
       
       // Update local state
@@ -514,7 +566,7 @@ export function ProjectSettings({
 
   const tabs = [
     { id: "team", label: "Team Members", icon: <Users className="h-4 w-4 mr-2" /> },
-    { id: "properties", label: "Properties", icon: <Tag className="h-4 w-4 mr-2" /> },
+    { id: "properties", label: "Properties", icon: <List className="h-4 w-4 mr-2" /> },
     { id: "tags", label: "Tags", icon: <Tag className="h-4 w-4 mr-2" /> }
   ];
 
@@ -551,104 +603,14 @@ export function ProjectSettings({
             </div>
           ) : (
             <div className="p-6">
-              {activeTab === "team" && (
+              {activeTab === "team" && !isAddingMembers && (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <h3 className="text-lg font-medium">Project Team Members</h3>
-                    <Dialog open={showAddMemberDialog} onOpenChange={setShowAddMemberDialog}>
-                      <DialogTrigger asChild>
-                        <Button size="sm">
-                          <Plus className="h-4 w-4 mr-1" />
-                          Add Members
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Add Team Members</DialogTitle>
-                        </DialogHeader>
-                        <div className="space-y-4 py-4">
-                          <div className="space-y-2">
-                            <Label htmlFor="search-users">Search Users</Label>
-                            <Input
-                              id="search-users"
-                              placeholder="Search by name or email"
-                              value={searchTerm}
-                              onChange={(e) => {
-                                setSearchTerm(e.target.value);
-                                searchUsers(e.target.value);
-                              }}
-                            />
-                          </div>
-                          
-                          {searchResults.length > 0 && (
-                            <div className="border rounded-md max-h-[200px] overflow-y-auto">
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead className="w-[30px]"></TableHead>
-                                    <TableHead>Name</TableHead>
-                                    <TableHead>Email</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {searchResults.map((user) => (
-                                    <TableRow 
-                                      key={user.id} 
-                                      className={selectedUsers.includes(user.id) ? "bg-blue-50" : ""}
-                                    >
-                                      <TableCell>
-                                        <input
-                                          type="checkbox"
-                                          checked={selectedUsers.includes(user.id)}
-                                          onChange={() => handleUserSelect(user.id)}
-                                          className="rounded"
-                                        />
-                                      </TableCell>
-                                      <TableCell>{user.name}</TableCell>
-                                      <TableCell>{user.email}</TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          )}
-                          
-                          {selectedUsers.length > 0 && (
-                            <div className="space-y-2">
-                              <Label htmlFor="role-select">Assign Role</Label>
-                              <Select 
-                                value={selectedRole} 
-                                onValueChange={(value) => setSelectedRole(value as 'owner' | 'admin' | 'member')}
-                              >
-                                <SelectTrigger id="role-select">
-                                  <SelectValue placeholder="Select a role" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="owner">Owner</SelectItem>
-                                  <SelectItem value="admin">Admin</SelectItem>
-                                  <SelectItem value="member">Member</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          )}
-                        </div>
-                        <DialogFooter>
-                          <Button variant="outline" onClick={() => setShowAddMemberDialog(false)}>
-                            Cancel
-                          </Button>
-                          <Button onClick={handleAddMembers} disabled={!selectedUsers.length || isSaving}>
-                            {isSaving ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Adding...
-                              </>
-                            ) : (
-                              'Add Selected Members'
-                            )}
-                          </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
+                    <Button size="sm" onClick={() => setIsAddingMembers(true)}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add Members
+                    </Button>
                   </div>
                   
                   {members.length > 0 ? (
@@ -750,7 +712,7 @@ export function ProjectSettings({
                         <p className="text-gray-500 mb-4">No team members added yet</p>
                         <Button 
                           variant="outline"
-                          onClick={() => setShowAddMemberDialog(true)}
+                          onClick={() => setIsAddingMembers(true)}
                         >
                           <Plus className="h-4 w-4 mr-1" />
                           Add Your First Team Member
@@ -758,6 +720,129 @@ export function ProjectSettings({
                       </CardContent>
                     </Card>
                   )}
+                </div>
+              )}
+              
+              {activeTab === "team" && isAddingMembers && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center mb-6">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => {
+                        setIsAddingMembers(false);
+                        setSearchTerm("");
+                        setSelectedUsers([]);
+                        setSelectedRole('member');
+                      }}
+                    >
+                      ← Back to Members
+                    </Button>
+                    <h3 className="text-lg font-medium">Add Team Members</h3>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="search-users">Search Users</Label>
+                      <Input
+                        id="search-users"
+                        placeholder="Search by name or email"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                      />
+                    </div>
+                    
+                    {loadingUsers ? (
+                      <div className="flex justify-center p-8">
+                        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                      </div>
+                    ) : filteredUsers.length > 0 ? (
+                      <Card>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-[30px]"></TableHead>
+                              <TableHead>Name</TableHead>
+                              <TableHead>Email</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredUsers.map((user) => (
+                              <TableRow 
+                                key={user.id} 
+                                className={selectedUsers.includes(user.id) ? "bg-blue-50" : ""}
+                              >
+                                <TableCell>
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedUsers.includes(user.id)}
+                                    onChange={() => handleUserSelect(user.id)}
+                                    className="rounded"
+                                  />
+                                </TableCell>
+                                <TableCell>{user.name}</TableCell>
+                                <TableCell>{user.email}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </Card>
+                    ) : (
+                      <Card>
+                        <CardContent className="flex flex-col items-center justify-center p-6">
+                          <Users className="h-12 w-12 text-gray-400 mb-4" />
+                          <p className="text-gray-500 mb-4">
+                            {searchTerm ? "No users found matching your search" : "No available users found in the organization"}
+                          </p>
+                        </CardContent>
+                      </Card>
+                    )}
+                    
+                    {selectedUsers.length > 0 && (
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="role-select">Assign Role</Label>
+                          <Select 
+                            value={selectedRole} 
+                            onValueChange={(value) => setSelectedRole(value as 'owner' | 'admin' | 'member')}
+                          >
+                            <SelectTrigger id="role-select">
+                              <SelectValue placeholder="Select a role" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="owner">Owner</SelectItem>
+                              <SelectItem value="admin">Admin</SelectItem>
+                              <SelectItem value="member">Member</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="flex justify-end space-x-2">
+                          <Button 
+                            variant="outline" 
+                            onClick={() => {
+                              setIsAddingMembers(false);
+                              setSearchTerm("");
+                              setSelectedUsers([]);
+                              setSelectedRole('member');
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                          <Button onClick={handleAddMembers} disabled={!selectedUsers.length || isSaving}>
+                            {isSaving ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Adding...
+                              </>
+                            ) : (
+                              'Add Selected Members'
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
               
@@ -911,7 +996,7 @@ export function ProjectSettings({
                                         >
                                           {property.value.substring(0, 30)}
                                           {property.value.length > 30 ? '...' : ''}
-                                          <Tag className="h-3 w-3 ml-1" />
+                                          <List className="h-3 w-3 ml-1" />
                                         </a>
                                       ) : 'Not set'
                                     ) : (
@@ -949,7 +1034,7 @@ export function ProjectSettings({
 ) : (
 <Card>
   <CardContent className="flex flex-col items-center justify-center p-6">
-    <Tag className="h-12 w-12 text-gray-400 mb-4" />
+    <List className="h-12 w-12 text-gray-400 mb-4" />
     <p className="text-gray-500 mb-4">No custom properties defined yet</p>
     <Button 
       variant="outline"

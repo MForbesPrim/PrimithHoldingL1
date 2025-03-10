@@ -604,7 +604,19 @@ export function ProjectDetailPage() {
           onClose={() => setShowSettings(false)}
           project={project}
           projectService={projectService}
-          onUpdate={loadProjectData}
+          onUpdate={() => {
+            // Only reload project data if project details have changed
+            // Member changes don't require full project reload
+            if (project) {
+              projectService.getProjectById(project.id)
+                .then(updatedProject => {
+                  setProject(updatedProject);
+                })
+                .catch(error => {
+                  console.error("Failed to refresh project:", error);
+                });
+            }
+          }}
         />
       <PageViewer 
         pageId={selectedPageId} 

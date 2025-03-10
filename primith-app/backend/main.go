@@ -7053,32 +7053,151 @@ func handleAddProjectMember(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectId := vars["id"]
 
+	if !isValidUUID(projectId) {
+		http.Error(w, "Invalid project ID", http.StatusBadRequest)
+		return
+	}
+
 	var req struct {
 		UserID string `json:"userId"`
 		Role   string `json:"role"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if !isValidUUID(req.UserID) {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	// Validate role
+	validRoles := map[string]bool{"owner": true, "admin": true, "member": true}
+	if !validRoles[req.Role] {
+		http.Error(w, "Invalid role. Must be 'owner', 'admin', or 'member'", http.StatusBadRequest)
+		return
+	}
 
 	claims := r.Context().Value(claimsKey).(*Claims)
+	if claims == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
+	// Get the creator's ID
 	var creatorId string
 	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&creatorId)
 	if err != nil {
+		log.Printf("Error getting creator ID: %v", err)
 		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
 		return
 	}
 
-	_, err = db.Exec(`
-			INSERT INTO rdm.project_members (project_id, user_id, role, created_by)
-			VALUES ($1, $2, $3, $4)
-		`, projectId, req.UserID, req.Role, creatorId)
+	// Check if the project exists and the user has permission to add members
+	var projectExists bool
+	var organizationId string
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM rdm.projects p
+            JOIN rdm.project_members pm ON p.id = pm.project_id
+            WHERE p.id = $1 AND pm.user_id = $2 AND pm.role IN ('owner', 'admin')
+        ), p.organization_id
+        FROM rdm.projects p
+        WHERE p.id = $1
+    `, projectId, creatorId).Scan(&projectExists, &organizationId)
 
 	if err != nil {
+		log.Printf("Error checking project access: %v", err)
+		http.Error(w, "Failed to verify project access", http.StatusInternalServerError)
+		return
+	}
+
+	if !projectExists {
+		http.Error(w, "Project not found or insufficient permissions", http.StatusForbidden)
+		return
+	}
+
+	// Check if the user being added exists and is part of the organization
+	var userExists bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM auth.users u
+            JOIN auth.organization_members om ON u.id = om.user_id
+            WHERE u.id = $1 AND om.organization_id = $2 AND u.is_active = true
+        )
+    `, req.UserID, organizationId).Scan(&userExists)
+
+	if err != nil {
+		log.Printf("Error checking user existence: %v", err)
+		http.Error(w, "Failed to verify user", http.StatusInternalServerError)
+		return
+	}
+
+	if !userExists {
+		http.Error(w, "User not found or not part of the organization", http.StatusBadRequest)
+		return
+	}
+
+	// Check if the user is already a member
+	var isMember bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM rdm.project_members
+            WHERE project_id = $1 AND user_id = $2
+        )
+    `, projectId, req.UserID).Scan(&isMember)
+
+	if err != nil {
+		log.Printf("Error checking existing membership: %v", err)
+		http.Error(w, "Failed to check existing membership", http.StatusInternalServerError)
+		return
+	}
+
+	if isMember {
+		http.Error(w, "User is already a member of this project", http.StatusConflict)
+		return
+	}
+
+	// Add the member
+	_, err = db.Exec(`
+        INSERT INTO rdm.project_members (project_id, user_id, role, created_by)
+        VALUES ($1, $2, $3, $4)
+    `, projectId, req.UserID, req.Role, creatorId)
+
+	if err != nil {
+		log.Printf("Error adding project member: %v", err)
 		http.Error(w, "Failed to add member", http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
+	// Return the new member details
+	var member struct {
+		ID        string    `json:"id"`
+		UserID    string    `json:"userId"`
+		UserName  string    `json:"userName"`
+		Email     string    `json:"email"`
+		Role      string    `json:"role"`
+		IsActive  bool      `json:"isActive"`
+		CreatedAt time.Time `json:"createdAt"`
+	}
+
+	err = db.QueryRow(`
+        SELECT pm.id, pm.user_id, CONCAT(u.first_name, ' ', u.last_name), u.email, pm.role, true, pm.created_at
+        FROM rdm.project_members pm
+        JOIN auth.users u ON pm.user_id = u.id
+        WHERE pm.project_id = $1 AND pm.user_id = $2
+    `, projectId, req.UserID).Scan(&member.ID, &member.UserID, &member.UserName, &member.Email, &member.Role, &member.IsActive, &member.CreatedAt)
+
+	if err != nil {
+		log.Printf("Error fetching new member details: %v", err)
+		http.Error(w, "Member added but failed to fetch details", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(member)
 }
 
 func handleUpdateMemberRole(w http.ResponseWriter, r *http.Request) {
@@ -7367,7 +7486,7 @@ func handleRemoveProjectMember(w http.ResponseWriter, r *http.Request) {
 		log.Printf("No member found with ID %s, trying as user ID", memberId)
 		result, err = db.Exec(`
             DELETE FROM rdm.project_members
-            WHERE user_id = $2 AND project_id = $3
+            WHERE user_id = $1 AND project_id = $2
         `, memberId, projectId)
 
 		if err != nil {
@@ -10031,6 +10150,87 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func handleGetOrganizationUsers(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+
+	if !isValidUUID(organizationId) {
+		http.Error(w, "Invalid organization ID", http.StatusBadRequest)
+		return
+	}
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+	if claims == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// First verify the user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil {
+		log.Printf("Error checking organization access: %v", err)
+		http.Error(w, "Error checking access", http.StatusInternalServerError)
+		return
+	}
+
+	if !authorized {
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	query := `
+        SELECT DISTINCT u.id, u.first_name, u.last_name, u.email
+        FROM auth.users u
+        JOIN auth.organization_members om ON u.id = om.user_id
+        WHERE om.organization_id = $1 AND u.is_active = true
+        ORDER BY u.first_name, u.last_name
+    `
+
+	rows, err := db.Query(query, organizationId)
+	if err != nil {
+		log.Printf("Error fetching organization users: %v", err)
+		http.Error(w, "Failed to fetch organization users", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var users []map[string]interface{}
+	for rows.Next() {
+		var user struct {
+			ID        string
+			FirstName string
+			LastName  string
+			Email     string
+		}
+
+		err := rows.Scan(&user.ID, &user.FirstName, &user.LastName, &user.Email)
+		if err != nil {
+			log.Printf("Error scanning user row: %v", err)
+			continue
+		}
+
+		users = append(users, map[string]interface{}{
+			"id":    user.ID,
+			"name":  user.FirstName + " " + user.LastName,
+			"email": user.Email,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"users": users,
+	})
+}
+
 func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	log.Printf("handleUpdateTask: Starting task update for taskId: %s", mux.Vars(r)["id"])
 	vars := mux.Vars(r)
@@ -10613,7 +10813,7 @@ func main() {
 	r.HandleFunc("/projects/{id}", authMiddleware(handleDeleteProject)).Methods("DELETE")
 	r.HandleFunc("/projects/{id}/members", authMiddleware(handleGetProjectMembers)).Methods("GET")
 	r.HandleFunc("/projects/{id}/members", authMiddleware(handleAddProjectMember)).Methods("POST")
-	r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleRemoveProjectMember)).Methods("DELETE")
+	r.HandleFunc("/projects/{id}/members/{memberId}", authMiddleware(handleRemoveProjectMember)).Methods("DELETE")
 	r.HandleFunc("/projects/{projectId}/artifacts", authMiddleware(handleGetProjectArtifacts)).Methods("GET")
 	r.HandleFunc("/projects/{projectId}/artifacts", authMiddleware(handleCreateProjectArtifact)).Methods("POST")
 	r.HandleFunc("/projects/{projectId}/artifacts/{id}", authMiddleware(handleUpdateArtifact)).Methods("PUT")
@@ -10652,7 +10852,7 @@ func main() {
 	r.HandleFunc("/projects/{projectId}/tags", authMiddleware(handleAddProjectTag)).Methods("POST")
 	r.HandleFunc("/projects/{projectId}/tags/{tagId}", authMiddleware(handleUpdateProjectTag)).Methods("PUT")
 	r.HandleFunc("/projects/{projectId}/tags/{tagId}", authMiddleware(handleDeleteProjectTag)).Methods("DELETE")
-
+	r.HandleFunc("/organizations/{organizationId}/users", authMiddleware(handleGetOrganizationUsers)).Methods("GET")
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
 
