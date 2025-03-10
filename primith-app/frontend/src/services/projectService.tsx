@@ -1,5 +1,5 @@
     import AuthService from '@/services/auth'
-    import { Project, ProjectArtifact, ProjectVariable, RoadmapItem, ArtifactReview, ArtifactStatus, ProjectMember, ProjectActivity, ProjectTask, ProjectMilestone, MilestoneStatus} from '@/types/projects'
+    import { Project, ProjectArtifact, ProjectVariable, RoadmapItem, ProjectRole, ArtifactReview, ArtifactStatus, ProjectMember, ProjectActivity, ProjectTask, ProjectMilestone, MilestoneStatus} from '@/types/projects'
 
     export class ProjectService {
     private baseUrl = import.meta.env.VITE_API_URL;
@@ -568,5 +568,145 @@ async getProjectTasks(projectId: string, filters?: {
         console.error("Error in updateMilestone:", error);
         throw error;
     }
+  }
+
+  async searchUsers(term: string, organizationId: string): Promise<any[]> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/organizations/${organizationId}/users/search?term=${encodeURIComponent(term)}`, {
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error('Failed to search users');
+    return response.json();
+  }
+
+  // Implement updateProjectMember for role changes and activation/deactivation
+  async updateProjectMember(projectId: string, memberId: string, data: Partial<ProjectMember>): Promise<ProjectMember> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/members/${memberId}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to update project member');
+    return response.json();
+  }
+
+  // Get project roles
+  async getProjectRoles(projectId: string): Promise<ProjectRole[]> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/roles`, {
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error('Failed to fetch project roles');
+    return response.json();
+  }
+
+  // Properties methods
+  async getProjectProperties(projectId: string): Promise<any[]> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/properties`, {
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error('Failed to fetch project properties');
+    return response.json();
+  }
+
+  async addProjectProperty(projectId: string, data: { name: string; type: string; value: string }): Promise<any> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/properties`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to add project property');
+    return response.json();
+  }
+
+  async updateProjectProperty(projectId: string, propertyId: string, data: Partial<any>): Promise<any> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/properties/${propertyId}`, {
+      method: 'PUT', 
+      credentials: 'include',
+      headers,
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to update project property');
+    return response.json();
+  }
+
+  async deleteProjectProperty(projectId: string, propertyId: string): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/properties/${propertyId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error('Failed to delete project property');
+  }
+
+  // Tags methods
+  async getProjectTags(projectId: string): Promise<any[]> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/tags`, {
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error('Failed to fetch project tags');
+    return response.json();
+  }
+
+  async addProjectTag(projectId: string, data: { name: string; color: string }): Promise<any> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/tags`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to add project tag');
+    return response.json();
+  }
+
+  async updateProjectTag(projectId: string, tagId: string, data: Partial<any>): Promise<any> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/tags/${tagId}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to update project tag');
+    return response.json();
+  }
+
+  async deleteProjectTag(projectId: string, tagId: string): Promise<void> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/tags/${tagId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+      headers
+    });
+    if (!response.ok) throw new Error('Failed to delete project tag');
+  }
+
+  async toggleMemberStatus(projectId: string, memberId: string, isActive: boolean): Promise<any> {
+    const headers = await this.getAuthHeader();
+    const response = await fetch(`${this.baseUrl}/projects/${projectId}/members/${memberId}/toggle-status`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ isActive })
+    });
+    
+    if (!response.ok) throw new Error('Failed to update member status');
+    return response.json();
   }
   }

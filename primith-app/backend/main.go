@@ -6824,10 +6824,10 @@ func handleCreateProject(w http.ResponseWriter, r *http.Request) {
 
 	// Add creator as project owner
 	_, err = tx.Exec(`
-			INSERT INTO rdm.project_members 
-			(project_id, user_id, role, created_by)
-			VALUES ($1, $2, 'owner', $2)
-		`, project.ID, userId)
+    INSERT INTO rdm.project_members 
+    (project_id, user_id, role, is_active, created_by)
+    VALUES ($1, $2, 'owner', true, $2)
+	`, project.ID, userId)
 
 	if err != nil {
 		http.Error(w, "Failed to add project owner", http.StatusInternalServerError)
@@ -6850,7 +6850,7 @@ func handleGetProjectMembers(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(`
 			SELECT pm.id, pm.project_id, pm.user_id, u.email,
 				CONCAT(u.first_name, ' ', u.last_name) as user_name,
-				pm.role, pm.created_at
+				pm.role, COALESCE(pm.is_active, true) as is_active, pm.created_at
 			FROM rdm.project_members pm
 			JOIN auth.users u ON pm.user_id = u.id
 			WHERE pm.project_id = $1
@@ -6871,13 +6871,14 @@ func handleGetProjectMembers(w http.ResponseWriter, r *http.Request) {
 			Email     string
 			UserName  string
 			Role      string
+			IsActive  bool // Added this field
 			CreatedAt time.Time
 		}
 
 		err := rows.Scan(
 			&member.ID, &member.ProjectID, &member.UserID,
 			&member.Email, &member.UserName, &member.Role,
-			&member.CreatedAt,
+			&member.IsActive, &member.CreatedAt,
 		)
 		if err != nil {
 			continue
@@ -6890,6 +6891,7 @@ func handleGetProjectMembers(w http.ResponseWriter, r *http.Request) {
 			"email":     member.Email,
 			"userName":  member.UserName,
 			"role":      member.Role,
+			"isActive":  member.IsActive, // Added this field
 			"createdAt": member.CreatedAt,
 		})
 	}
@@ -7082,53 +7084,329 @@ func handleAddProjectMember(w http.ResponseWriter, r *http.Request) {
 func handleUpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectId := vars["id"]
-	userId := vars["userId"]
+	memberId := vars["memberId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	log.Printf("Updating member role for project %s, member %s by user %s", projectId, memberId, claims.Username)
 
 	var req struct {
 		Role string `json:"role"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
-
-	result, err := db.Exec(`
-			UPDATE rdm.project_members 
-			SET role = $1
-			WHERE project_id = $2 AND user_id = $3
-		`, req.Role, projectId, userId)
-
-	if err != nil {
-		http.Error(w, "Failed to update role", http.StatusInternalServerError)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	if rows, _ := result.RowsAffected(); rows == 0 {
+	// Validate role
+	if req.Role != "owner" && req.Role != "admin" && req.Role != "member" {
+		http.Error(w, "Invalid role. Must be 'owner', 'admin', or 'member'", http.StatusBadRequest)
+		return
+	}
+
+	// If changing from owner to something else, check if there will still be at least one owner
+	if req.Role != "owner" {
+		// First check if this member is currently an owner
+		var isCurrentlyOwner bool
+		err := db.QueryRow(`
+            SELECT EXISTS (
+                SELECT 1 
+                FROM rdm.project_members
+                WHERE (id = $1 OR user_id = $1) AND project_id = $2 AND role = 'owner'
+            )
+        `, memberId, projectId).Scan(&isCurrentlyOwner)
+
+		if err != nil {
+			log.Printf("Error checking if member is owner: %v", err)
+			http.Error(w, "Failed to check current role", http.StatusInternalServerError)
+			return
+		}
+
+		// If they are currently an owner, check if there would be other owners left
+		if isCurrentlyOwner {
+			var ownerCount int
+			err := db.QueryRow(`
+                SELECT COUNT(*)
+                FROM rdm.project_members
+                WHERE project_id = $1 AND role = 'owner'
+            `, projectId).Scan(&ownerCount)
+
+			if err != nil {
+				log.Printf("Error counting owners: %v", err)
+				http.Error(w, "Failed to count project owners", http.StatusInternalServerError)
+				return
+			}
+
+			if ownerCount <= 1 {
+				log.Printf("Cannot change role: This is the last owner of the project")
+				http.Error(w, "Cannot update role: Project must have at least one owner", http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	// Verify the user has permission to update members (must be owner or admin)
+	var hasPermission bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+            AND pm.role IN ('owner', 'admin')
+        )
+    `, projectId, claims.Username).Scan(&hasPermission)
+
+	if err != nil {
+		log.Printf("Error checking permission: %v", err)
+		http.Error(w, "Failed to check permission", http.StatusInternalServerError)
+		return
+	}
+
+	if !hasPermission {
+		http.Error(w, "You must be an owner or admin to update member roles", http.StatusForbidden)
+		return
+	}
+
+	// Try to update the member using member ID first
+	result, err := db.Exec(`
+        UPDATE rdm.project_members 
+        SET role = $1
+        WHERE id = $2 AND project_id = $3
+    `, req.Role, memberId, projectId)
+
+	if err != nil {
+		log.Printf("Error updating member role by ID: %v", err)
+		http.Error(w, "Failed to update member role", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Error getting rows affected: %v", err)
+		http.Error(w, "Failed to get rows affected", http.StatusInternalServerError)
+		return
+	}
+
+	// If no rows affected, try using the member ID as user ID
+	if rowsAffected == 0 {
+		log.Printf("No member found with ID %s, trying as user ID", memberId)
+		result, err = db.Exec(`
+            UPDATE rdm.project_members 
+            SET role = $1
+            WHERE user_id = $2 AND project_id = $3
+        `, req.Role, memberId, projectId)
+
+		if err != nil {
+			log.Printf("Error updating member role by user ID: %v", err)
+			http.Error(w, "Failed to update member role", http.StatusInternalServerError)
+			return
+		}
+
+		rowsAffected, err = result.RowsAffected()
+		if err != nil {
+			log.Printf("Error getting rows affected: %v", err)
+			http.Error(w, "Failed to get rows affected", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if rowsAffected == 0 {
 		http.Error(w, "Member not found", http.StatusNotFound)
 		return
 	}
 
+	// Fetch the updated member details to return
+	var member ProjectMember
+	err = db.QueryRow(`
+        SELECT id, project_id, user_id, role, created_at, created_by
+        FROM rdm.project_members
+        WHERE (id = $1 OR user_id = $1) AND project_id = $2
+        LIMIT 1
+    `, memberId, projectId).Scan(
+		&member.ID, &member.ProjectID, &member.UserID,
+		&member.Role, &member.CreatedAt, &member.CreatedBy,
+	)
+
+	if err != nil {
+		log.Printf("Error fetching updated member: %v", err)
+		// Still return success since the update happened
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(member)
 }
 
 func handleRemoveProjectMember(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectId := vars["id"]
-	userId := vars["userId"]
+	memberId := vars["memberId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
 
-	result, err := db.Exec(`
-			DELETE FROM rdm.project_members
-			WHERE project_id = $1 AND user_id = $2
-		`, projectId, userId)
+	log.Printf("Removing member from project %s, member %s by user %s", projectId, memberId, claims.Username)
+
+	// Verify the user has permission to remove members (must be owner or admin)
+	var hasPermission bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+            AND pm.role IN ('owner', 'admin')
+        )
+    `, projectId, claims.Username).Scan(&hasPermission)
 
 	if err != nil {
+		log.Printf("Error checking permission: %v", err)
+		http.Error(w, "Failed to check permission", http.StatusInternalServerError)
+		return
+	}
+
+	if !hasPermission {
+		http.Error(w, "You must be an owner or admin to remove members", http.StatusForbidden)
+		return
+	}
+
+	// Check if the member being removed is an owner
+	var isOwner bool
+	err = db.QueryRow(`
+        SELECT role = 'owner'
+        FROM rdm.project_members
+        WHERE (id = $1 OR user_id = $1) AND project_id = $2
+    `, memberId, projectId).Scan(&isOwner)
+
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("Error checking if member is owner: %v", err)
+		http.Error(w, "Failed to check member role", http.StatusInternalServerError)
+		return
+	}
+
+	// If they are an owner, check if they're the last owner
+	if isOwner {
+		var ownerCount int
+		err := db.QueryRow(`
+            SELECT COUNT(*)
+            FROM rdm.project_members
+            WHERE project_id = $1 AND role = 'owner'
+        `, projectId).Scan(&ownerCount)
+
+		if err != nil {
+			log.Printf("Error counting owners: %v", err)
+			http.Error(w, "Failed to count project owners", http.StatusInternalServerError)
+			return
+		}
+
+		if ownerCount <= 1 {
+			log.Printf("Cannot remove: This is the last owner of the project")
+			http.Error(w, "Cannot remove: Project must have at least one owner", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Check if the member being removed is active
+	var isActive bool
+	err = db.QueryRow(`
+        SELECT COALESCE(is_active, true)
+        FROM rdm.project_members
+        WHERE (id = $1 OR user_id = $1) AND project_id = $2
+    `, memberId, projectId).Scan(&isActive)
+
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("Error checking if member is active: %v", err)
+		http.Error(w, "Failed to check member status", http.StatusInternalServerError)
+		return
+	}
+
+	// If they are active, check if they're the last active member
+	if isActive {
+		var activeCount int
+		err := db.QueryRow(`
+            SELECT COUNT(*)
+            FROM rdm.project_members
+            WHERE project_id = $1 AND COALESCE(is_active, true) = true
+        `, projectId).Scan(&activeCount)
+
+		if err != nil {
+			log.Printf("Error counting active members: %v", err)
+			http.Error(w, "Failed to count active project members", http.StatusInternalServerError)
+			return
+		}
+
+		if activeCount <= 1 {
+			log.Printf("Cannot remove: This is the last active member of the project")
+			http.Error(w, "Cannot remove: Project must have at least one active member", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Try to remove the member using member ID first
+	result, err := db.Exec(`
+        DELETE FROM rdm.project_members
+        WHERE id = $1 AND project_id = $2
+    `, memberId, projectId)
+
+	if err != nil {
+		log.Printf("Error removing member by ID: %v", err)
 		http.Error(w, "Failed to remove member", http.StatusInternalServerError)
 		return
 	}
 
-	if rows, _ := result.RowsAffected(); rows == 0 {
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Error getting rows affected: %v", err)
+		http.Error(w, "Failed to get rows affected", http.StatusInternalServerError)
+		return
+	}
+
+	// If no rows affected, try using the member ID as user ID
+	if rowsAffected == 0 {
+		log.Printf("No member found with ID %s, trying as user ID", memberId)
+		result, err = db.Exec(`
+            DELETE FROM rdm.project_members
+            WHERE user_id = $2 AND project_id = $3
+        `, memberId, projectId)
+
+		if err != nil {
+			log.Printf("Error removing member by user ID: %v", err)
+			http.Error(w, "Failed to remove member", http.StatusInternalServerError)
+			return
+		}
+
+		rowsAffected, err = result.RowsAffected()
+		if err != nil {
+			log.Printf("Error getting rows affected: %v", err)
+			http.Error(w, "Failed to get rows affected", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if rowsAffected == 0 {
 		http.Error(w, "Member not found", http.StatusNotFound)
 		return
 	}
 
+	// Add activity log
+	userId, err := getUserIdFromEmail(claims.Username)
+	if err == nil {
+		_, err = db.Exec(`
+            INSERT INTO rdm.project_activity (
+                project_id, user_id, activity_type, entity_type, entity_id,
+                description
+            ) VALUES ($1, $2, 'delete', 'member', $3, $4)
+        `, projectId, userId, memberId, "Removed member from project")
+
+		if err != nil {
+			log.Printf("Failed to log activity: %v", err)
+			// Continue anyway since this is not critical
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
 // handleCreateProjectArtifact handles creating a new project artifact
@@ -8535,6 +8813,759 @@ func handleDeleteMilestone(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
+// Project Properties handlers
+func handleGetProjectProperties(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the project
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil {
+		log.Printf("Error checking project membership: %v", err)
+		http.Error(w, "Failed to verify project access", http.StatusInternalServerError)
+		return
+	}
+
+	if !isMember {
+		http.Error(w, "Access denied to project properties", http.StatusForbidden)
+		return
+	}
+
+	// Fetch properties for the project
+	rows, err := db.Query(`
+        SELECT 
+            id, project_id, name, type, value, 
+            created_at, updated_at
+        FROM rdm.project_properties
+        WHERE project_id = $1
+        ORDER BY name ASC
+    `, projectId)
+
+	if err != nil {
+		log.Printf("Error fetching project properties: %v", err)
+		http.Error(w, "Failed to fetch properties", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var properties []map[string]interface{}
+	for rows.Next() {
+		var prop struct {
+			ID        string
+			ProjectID string
+			Name      string
+			Type      string
+			Value     string
+			CreatedAt time.Time
+			UpdatedAt time.Time
+		}
+
+		err := rows.Scan(&prop.ID, &prop.ProjectID, &prop.Name, &prop.Type, &prop.Value, &prop.CreatedAt, &prop.UpdatedAt)
+		if err != nil {
+			log.Printf("Error scanning property row: %v", err)
+			continue
+		}
+
+		properties = append(properties, map[string]interface{}{
+			"id":        prop.ID,
+			"projectId": prop.ProjectID,
+			"name":      prop.Name,
+			"type":      prop.Type,
+			"value":     prop.Value,
+			"createdAt": prop.CreatedAt,
+			"updatedAt": prop.UpdatedAt,
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating property rows: %v", err)
+		http.Error(w, "Error processing properties", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(properties)
+}
+
+func handleAddProjectProperty(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Parse request body
+	var req struct {
+		Name  string `json:"name"`
+		Type  string `json:"type"`
+		Value string `json:"value"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate that required fields are provided
+	if req.Name == "" || req.Type == "" {
+		http.Error(w, "Name and type are required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user has access to the project
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil || !isMember {
+		http.Error(w, "Access denied to project properties", http.StatusForbidden)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Insert the property
+	var propertyId string
+	err = db.QueryRow(`
+        INSERT INTO rdm.project_properties (
+            project_id, name, type, value, created_by, updated_by
+        ) VALUES ($1, $2, $3, $4, $5, $5)
+        RETURNING id
+    `, projectId, req.Name, req.Type, req.Value, userId).Scan(&propertyId)
+
+	if err != nil {
+		log.Printf("Error creating property: %v", err)
+		http.Error(w, "Failed to create property", http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch the created property
+	var property struct {
+		ID        string    `json:"id"`
+		ProjectID string    `json:"projectId"`
+		Name      string    `json:"name"`
+		Type      string    `json:"type"`
+		Value     string    `json:"value"`
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+
+	err = db.QueryRow(`
+        SELECT id, project_id, name, type, value, created_at, updated_at
+        FROM rdm.project_properties
+        WHERE id = $1
+    `, propertyId).Scan(
+		&property.ID,
+		&property.ProjectID,
+		&property.Name,
+		&property.Type,
+		&property.Value,
+		&property.CreatedAt,
+		&property.UpdatedAt,
+	)
+
+	if err != nil {
+		log.Printf("Error fetching created property: %v", err)
+		http.Error(w, "Property created but failed to fetch details", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(property)
+}
+
+func handleUpdateProjectProperty(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	propertyId := vars["propertyId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Parse request body
+	var req struct {
+		Value string `json:"value"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user has access to the project
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil || !isMember {
+		http.Error(w, "Access denied to project properties", http.StatusForbidden)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Update the property
+	result, err := db.Exec(`
+        UPDATE rdm.project_properties
+        SET value = $1, 
+            updated_by = $2,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3 AND project_id = $4
+    `, req.Value, userId, propertyId, projectId)
+
+	if err != nil {
+		log.Printf("Error updating property: %v", err)
+		http.Error(w, "Failed to update property", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Property not found or not authorized", http.StatusNotFound)
+		return
+	}
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func handleDeleteProjectProperty(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	propertyId := vars["propertyId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the project
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil || !isMember {
+		http.Error(w, "Access denied to project properties", http.StatusForbidden)
+		return
+	}
+
+	// Delete the property
+	result, err := db.Exec(`
+        DELETE FROM rdm.project_properties
+        WHERE id = $1 AND project_id = $2
+    `, propertyId, projectId)
+
+	if err != nil {
+		log.Printf("Error deleting property: %v", err)
+		http.Error(w, "Failed to delete property", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Property not found or not authorized", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// Project Tags handlers
+func handleGetProjectTags(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the project
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil {
+		log.Printf("Error checking project membership: %v", err)
+		http.Error(w, "Failed to verify project access", http.StatusInternalServerError)
+		return
+	}
+
+	if !isMember {
+		http.Error(w, "Access denied to project tags", http.StatusForbidden)
+		return
+	}
+
+	// Fetch tags for the project
+	rows, err := db.Query(`
+        SELECT 
+            id, project_id, name, color, created_at, updated_at
+        FROM rdm.project_tags
+        WHERE project_id = $1
+        ORDER BY name ASC
+    `, projectId)
+
+	if err != nil {
+		log.Printf("Error fetching project tags: %v", err)
+		http.Error(w, "Failed to fetch tags", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var tags []map[string]interface{}
+	for rows.Next() {
+		var tag struct {
+			ID        string
+			ProjectID string
+			Name      string
+			Color     string
+			CreatedAt time.Time
+			UpdatedAt time.Time
+		}
+
+		err := rows.Scan(&tag.ID, &tag.ProjectID, &tag.Name, &tag.Color, &tag.CreatedAt, &tag.UpdatedAt)
+		if err != nil {
+			log.Printf("Error scanning tag row: %v", err)
+			continue
+		}
+
+		tags = append(tags, map[string]interface{}{
+			"id":        tag.ID,
+			"projectId": tag.ProjectID,
+			"name":      tag.Name,
+			"color":     tag.Color,
+			"createdAt": tag.CreatedAt,
+			"updatedAt": tag.UpdatedAt,
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating tag rows: %v", err)
+		http.Error(w, "Error processing tags", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(tags)
+}
+
+func handleAddProjectTag(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Parse request body
+	var req struct {
+		Name  string `json:"name"`
+		Color string `json:"color"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate that required fields are provided
+	if req.Name == "" {
+		http.Error(w, "Tag name is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user has access to the project
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil || !isMember {
+		http.Error(w, "Access denied to project tags", http.StatusForbidden)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Set default color if not provided
+	color := req.Color
+	if color == "" {
+		color = "#3B82F6" // Default blue color
+	}
+
+	// Insert the tag
+	var tagId string
+	err = db.QueryRow(`
+        INSERT INTO rdm.project_tags (
+            project_id, name, color, created_by, updated_by
+        ) VALUES ($1, $2, $3, $4, $4)
+        RETURNING id
+    `, projectId, req.Name, color, userId).Scan(&tagId)
+
+	if err != nil {
+		log.Printf("Error creating tag: %v", err)
+		http.Error(w, "Failed to create tag", http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch the created tag
+	var tag struct {
+		ID        string    `json:"id"`
+		ProjectID string    `json:"projectId"`
+		Name      string    `json:"name"`
+		Color     string    `json:"color"`
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+
+	err = db.QueryRow(`
+        SELECT id, project_id, name, color, created_at, updated_at
+        FROM rdm.project_tags
+        WHERE id = $1
+    `, tagId).Scan(
+		&tag.ID,
+		&tag.ProjectID,
+		&tag.Name,
+		&tag.Color,
+		&tag.CreatedAt,
+		&tag.UpdatedAt,
+	)
+
+	if err != nil {
+		log.Printf("Error fetching created tag: %v", err)
+		http.Error(w, "Tag created but failed to fetch details", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(tag)
+}
+
+func handleToggleMemberStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["id"]
+	memberId := vars["memberId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	log.Printf("Toggling member status for project %s, member %s by user %s", projectId, memberId, claims.Username)
+
+	var req struct {
+		IsActive bool `json:"isActive"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// If deactivating a member, check if there will still be at least one active member
+	if !req.IsActive {
+		// Check if this member is currently active
+		var isCurrentlyActive bool
+		err := db.QueryRow(`
+            SELECT EXISTS (
+                SELECT 1 
+                FROM rdm.project_members
+                WHERE (id = $1 OR user_id = $1) AND project_id = $2 AND is_active = true
+            )
+        `, memberId, projectId).Scan(&isCurrentlyActive)
+
+		if err != nil {
+			log.Printf("Error checking if member is active: %v", err)
+			http.Error(w, "Failed to check current status", http.StatusInternalServerError)
+			return
+		}
+
+		// If they are currently active, check if there would be other active members left
+		if isCurrentlyActive {
+			var activeCount int
+			err := db.QueryRow(`
+                SELECT COUNT(*)
+                FROM rdm.project_members
+                WHERE project_id = $1 AND is_active = true
+            `, projectId).Scan(&activeCount)
+
+			if err != nil {
+				log.Printf("Error counting active members: %v", err)
+				http.Error(w, "Failed to count active project members", http.StatusInternalServerError)
+				return
+			}
+
+			if activeCount <= 1 {
+				log.Printf("Cannot deactivate: This is the last active member of the project")
+				http.Error(w, "Cannot deactivate: Project must have at least one active member", http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	// Verify the user has permission to update members (must be owner or admin)
+	var hasPermission bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+            AND pm.role IN ('owner', 'admin')
+        )
+    `, projectId, claims.Username).Scan(&hasPermission)
+
+	if err != nil {
+		log.Printf("Error checking permission: %v", err)
+		http.Error(w, "Failed to check permission", http.StatusInternalServerError)
+		return
+	}
+
+	if !hasPermission {
+		http.Error(w, "You must be an owner or admin to update member status", http.StatusForbidden)
+		return
+	}
+
+	// Check if the column exists
+	var columnExists bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'rdm'
+            AND table_name = 'project_members'
+            AND column_name = 'is_active'
+        )
+    `).Scan(&columnExists)
+
+	if err != nil {
+		log.Printf("Error checking if is_active column exists: %v", err)
+		http.Error(w, "Failed to check schema", http.StatusInternalServerError)
+		return
+	}
+
+	if !columnExists {
+		// If the column doesn't exist, create it
+		_, err = db.Exec(`
+            ALTER TABLE rdm.project_members 
+            ADD COLUMN is_active BOOLEAN DEFAULT true
+        `)
+		if err != nil {
+			log.Printf("Error adding is_active column: %v", err)
+			http.Error(w, "Failed to update database schema", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Added is_active column to project_members table")
+	}
+
+	// Try to update the member using member ID first
+	result, err := db.Exec(`
+        UPDATE rdm.project_members 
+        SET is_active = $1
+        WHERE id = $2 AND project_id = $3
+    `, req.IsActive, memberId, projectId)
+
+	if err != nil {
+		log.Printf("Error updating member status by ID: %v", err)
+		http.Error(w, "Failed to update member status", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Error getting rows affected: %v", err)
+		http.Error(w, "Failed to get rows affected", http.StatusInternalServerError)
+		return
+	}
+
+	// If no rows affected, try using the member ID as user ID
+	if rowsAffected == 0 {
+		log.Printf("No member found with ID %s, trying as user ID", memberId)
+		result, err = db.Exec(`
+            UPDATE rdm.project_members 
+            SET is_active = $1
+            WHERE user_id = $2 AND project_id = $3
+        `, req.IsActive, memberId, projectId)
+
+		if err != nil {
+			log.Printf("Error updating member status by user ID: %v", err)
+			http.Error(w, "Failed to update member status", http.StatusInternalServerError)
+			return
+		}
+
+		rowsAffected, err = result.RowsAffected()
+		if err != nil {
+			log.Printf("Error getting rows affected: %v", err)
+			http.Error(w, "Failed to get rows affected", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if rowsAffected == 0 {
+		http.Error(w, "Member not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func handleUpdateProjectTag(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	tagId := vars["tagId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Parse request body
+	var req struct {
+		Name  string `json:"name"`
+		Color string `json:"color"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user has access to the project
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil || !isMember {
+		http.Error(w, "Access denied to project tags", http.StatusForbidden)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Update the tag
+	result, err := db.Exec(`
+        UPDATE rdm.project_tags
+        SET name = $1, 
+            color = $2,
+            updated_by = $3,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $4 AND project_id = $5
+    `, req.Name, req.Color, userId, tagId, projectId)
+
+	if err != nil {
+		log.Printf("Error updating tag: %v", err)
+		http.Error(w, "Failed to update tag", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Tag not found or not authorized", http.StatusNotFound)
+		return
+	}
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func handleDeleteProjectTag(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	tagId := vars["tagId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the project
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&isMember)
+
+	if err != nil || !isMember {
+		http.Error(w, "Access denied to project tags", http.StatusForbidden)
+		return
+	}
+
+	// Delete the tag
+	result, err := db.Exec(`
+        DELETE FROM rdm.project_tags
+        WHERE id = $1 AND project_id = $2
+    `, tagId, projectId)
+
+	if err != nil {
+		log.Printf("Error deleting tag: %v", err)
+		http.Error(w, "Failed to delete tag", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Tag not found or not authorized", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
 func handleUpdateMilestone(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	milestoneId := vars["id"]
@@ -9582,7 +10613,6 @@ func main() {
 	r.HandleFunc("/projects/{id}", authMiddleware(handleDeleteProject)).Methods("DELETE")
 	r.HandleFunc("/projects/{id}/members", authMiddleware(handleGetProjectMembers)).Methods("GET")
 	r.HandleFunc("/projects/{id}/members", authMiddleware(handleAddProjectMember)).Methods("POST")
-	r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleUpdateMemberRole)).Methods("PUT")
 	r.HandleFunc("/projects/{id}/members/{userId}", authMiddleware(handleRemoveProjectMember)).Methods("DELETE")
 	r.HandleFunc("/projects/{projectId}/artifacts", authMiddleware(handleGetProjectArtifacts)).Methods("GET")
 	r.HandleFunc("/projects/{projectId}/artifacts", authMiddleware(handleCreateProjectArtifact)).Methods("POST")
@@ -9609,6 +10639,19 @@ func main() {
 	r.HandleFunc("/projects/{projectId}/milestones", authMiddleware(handleGetProjectMilestones)).Methods("GET")
 	r.HandleFunc("/milestones/{id}", authMiddleware(handleDeleteMilestone)).Methods("DELETE")
 	r.HandleFunc("/milestones/{id}", authMiddleware(handleUpdateMilestone)).Methods("PUT")
+	r.HandleFunc("/projects/{projectId}/properties", authMiddleware(handleGetProjectProperties)).Methods("GET")
+	r.HandleFunc("/projects/{projectId}/properties", authMiddleware(handleAddProjectProperty)).Methods("POST")
+	r.HandleFunc("/projects/{projectId}/properties/{propertyId}", authMiddleware(handleUpdateProjectProperty)).Methods("PUT")
+	r.HandleFunc("/projects/{projectId}/properties/{propertyId}", authMiddleware(handleDeleteProjectProperty)).Methods("DELETE")
+	r.HandleFunc("/projects/{id}/members/{memberId}", authMiddleware(handleUpdateMemberRole)).Methods("PUT")
+	r.HandleFunc("/projects/{id}/members/{memberId}", authMiddleware(handleRemoveProjectMember)).Methods("DELETE")
+	r.HandleFunc("/projects/{id}/members/{memberId}/toggle-status", authMiddleware(handleToggleMemberStatus)).Methods("PUT")
+
+	// Add similar routes for project tags
+	r.HandleFunc("/projects/{projectId}/tags", authMiddleware(handleGetProjectTags)).Methods("GET")
+	r.HandleFunc("/projects/{projectId}/tags", authMiddleware(handleAddProjectTag)).Methods("POST")
+	r.HandleFunc("/projects/{projectId}/tags/{tagId}", authMiddleware(handleUpdateProjectTag)).Methods("PUT")
+	r.HandleFunc("/projects/{projectId}/tags/{tagId}", authMiddleware(handleDeleteProjectTag)).Methods("DELETE")
 
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")

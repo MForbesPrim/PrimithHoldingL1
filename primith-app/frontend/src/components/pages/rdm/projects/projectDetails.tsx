@@ -7,6 +7,7 @@ import type { Project, ProjectArtifact, RoadmapItem, ProjectActivity, ArtifactSt
 import type { DocumentMetadata } from "@/types/document";
 import type { PageNode } from "@/types/pages";
 import { Button } from "@/components/ui/button";
+import { ProjectSettings } from "@/components/pages/rdm/projects/projectSettings";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -150,6 +151,7 @@ export function ProjectDetailPage() {
   const [editingProject, setEditingProject] = useState(false);
   const [showAddArtifactDialog, setShowAddArtifactDialog] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [newArtifact, setNewArtifact] = useState({
     name: "",
     type: "document" as "document" | "image" | "video" | "audio" | "file" | "other",
@@ -597,6 +599,13 @@ export function ProjectDetailPage() {
 
   return (
     <div className="h-full overflow-y-auto pt-4 pl-4 pr-6">
+      <ProjectSettings
+          open={showSettings}
+          onClose={() => setShowSettings(false)}
+          project={project}
+          projectService={projectService}
+          onUpdate={loadProjectData}
+        />
       <PageViewer 
         pageId={selectedPageId} 
         onClose={() => setSelectedPageId(null)} 
@@ -741,7 +750,7 @@ export function ProjectDetailPage() {
               <Edit className="h-4 w-4 mr-1" />
               Edit
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>
               <Settings className="h-4 w-4 mr-1" />
               Settings
             </Button>
@@ -937,6 +946,7 @@ export function ProjectDetailPage() {
                     toast({
                       title: "Success",
                       description: "Artifact updated successfully",
+                      duration: 5000
                     });
                     loadProjectData();
                   } catch (error) {
@@ -945,6 +955,7 @@ export function ProjectDetailPage() {
                       title: "Error",
                       description: "Failed to update artifact",
                       variant: "destructive",
+                      duration: 5000
                     });
                   }
                 }}
@@ -1051,6 +1062,7 @@ export function ProjectDetailPage() {
                     toast({
                     title: "Success",
                     description: "Roadmap item created successfully",
+                    duration: 5000
                     });
                 } catch (error) {
                     console.error("Failed to create roadmap item:", error);
@@ -1058,6 +1070,7 @@ export function ProjectDetailPage() {
                     title: "Error",
                     description: "Failed to create roadmap item",
                     variant: "destructive",
+                    duration: 5000
                     });
                 }
                 }}
@@ -1068,6 +1081,7 @@ export function ProjectDetailPage() {
                     toast({
                     title: "Success",
                     description: "Roadmap item updated successfully",
+                    duration: 5000
                     });
                 } catch (error) {
                     console.error("Failed to update roadmap item:", error);
@@ -1075,6 +1089,7 @@ export function ProjectDetailPage() {
                     title: "Error",
                     description: "Failed to update roadmap item",
                     variant: "destructive",
+                    duration: 5000
                     });
                 }
                 }}
@@ -1085,6 +1100,7 @@ export function ProjectDetailPage() {
                     toast({
                     title: "Success",
                     description: "Roadmap item deleted successfully",
+                    duration: 5000
                     });
                 } catch (error) {
                     console.error("Failed to delete roadmap item:", error);
@@ -1092,6 +1108,7 @@ export function ProjectDetailPage() {
                     title: "Error",
                     description: "Failed to delete roadmap item",
                     variant: "destructive",
+                    duration: 5000
                     });
                 }
                 }}
