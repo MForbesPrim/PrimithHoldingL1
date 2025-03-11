@@ -7047,7 +7047,10 @@ func handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		`, projectId, claims.Username)
 
 	if err != nil {
-		http.Error(w, "Failed to delete project", http.StatusInternalServerError)
+		// Log the specific error
+		log.Printf("Error deleting project %s: %v", projectId, err)
+		// Return the actual error message to the client for debugging
+		http.Error(w, fmt.Sprintf("Failed to delete project: %v", err), http.StatusInternalServerError)
 		return
 	}
 

@@ -56,6 +56,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useNavigate } from "react-router-dom";
 
 // Types for project properties and tags
 interface ProjectProperty {
@@ -104,6 +105,8 @@ export function ProjectSettings({
   const [properties, setProperties] = useState<ProjectProperty[]>([]);
   const [tags, setTags] = useState<ProjectTag[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const navigate = useNavigate();
   
   // Member management
   const [isAddingMembers, setIsAddingMembers] = useState(false);
@@ -564,10 +567,32 @@ export function ProjectSettings({
     }
   };
 
+  const handleDeleteProject = async () => {
+    try {
+      await projectService.deleteProject(project.id);
+      toast({
+        title: "Success",
+        description: "Project deleted successfully",
+        duration: 2000
+      });
+      onClose();
+      navigate("/rdm/projects");
+    } catch (error) {
+      console.error("Failed to delete project:", error);
+      toast({
+        title: "Error",
+        description: "Failed to delete project",
+        className: "text-red-600",
+        duration: 5000
+      });
+    }
+  };
+
   const tabs = [
     { id: "team", label: "Team Members", icon: <Users className="h-4 w-4 mr-2" /> },
     { id: "properties", label: "Properties", icon: <List className="h-4 w-4 mr-2" /> },
-    { id: "tags", label: "Tags", icon: <Tag className="h-4 w-4 mr-2" /> }
+    { id: "tags", label: "Tags", icon: <Tag className="h-4 w-4 mr-2" /> },
+    { id: "danger", label: "Danger Zone", icon: <Trash2 className="h-4 w-4 mr-2 text-red-500" /> }
   ];
 
   return (
@@ -1426,6 +1451,52 @@ export function ProjectSettings({
                       )}
                     </Button>
                   </div>
+                </div>
+              )}
+
+              {activeTab === "danger" && (
+                <div className="space-y-6">
+                  <div className="border border-gray-200 rounded-lg p-6">
+                    <h3 className="text-lg font-medium mb-4">Danger Zone</h3>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between p-4 border border-gray-300 rounded-lg bg-white">
+                        <div>
+                          <h4 className="font-medium text-red-600">Delete Project</h4>
+                          <p className="text-sm text-gray-500">
+                            Once you delete a project, there is no going back. Please be certain.
+                          </p>
+                        </div>
+                        <Button 
+                          variant="destructive"
+                          onClick={() => setShowDeleteConfirm(true)}
+                        >
+                          Delete Project
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This action cannot be undone. This will permanently delete the project
+                          "{project.name}" and all associated data including artifacts, documents,
+                          roadmap items, and team assignments.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-red-600 hover:bg-red-700"
+                          onClick={handleDeleteProject}
+                        >
+                          Delete Project
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               )}
             </div>

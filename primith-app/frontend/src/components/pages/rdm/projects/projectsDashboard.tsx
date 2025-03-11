@@ -19,6 +19,9 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { useNavigate, useLocation } from "react-router-dom";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDistanceToNow } from "date-fns";
+import { useProject } from '@/components/pages/rdm/context/projectContext';
+
+const PROJECT_UPDATED_EVENT = 'project-list-updated';
 
 export function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -32,6 +35,7 @@ export function ProjectsPage() {
   const [currentView, setCurrentView] = useState<"card" | "list">("card");
   
   const { selectedOrgId } = useOrganization();
+  const { selectedProjectId } = useProject();
   const projectService = new ProjectService();
   const navigate = useNavigate();
   const location = useLocation();
@@ -88,6 +92,10 @@ export function ProjectsPage() {
         organizationId: selectedOrgId
       });
       setProjects((prev) => Array.isArray(prev) ? [...prev, createdProject] : [createdProject]);
+      
+      // Dispatch custom event to notify other components
+      window.dispatchEvent(new CustomEvent(PROJECT_UPDATED_EVENT));
+      
       setShowNewProjectDialog(false);
       setNewProject({
         name: "",
@@ -102,6 +110,10 @@ export function ProjectsPage() {
   function handleProjectClick(projectId: string) {
     navigate(`/rdm/projects/${projectId}`);
   }
+
+  const filteredProjects = selectedProjectId 
+    ? projects.filter(project => project.id === selectedProjectId)
+    : projects;
 
   return (
     <div className="h-full overflow-y-auto px-6 py-8">
@@ -139,7 +151,7 @@ export function ProjectsPage() {
         </div>
       ) : currentView === "card" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {projects?.map((project) => (
+          {filteredProjects?.map((project) => (
             <Card 
               key={project.id} 
               className="cursor-pointer hover:shadow-md transition-shadow"
@@ -163,7 +175,7 @@ export function ProjectsPage() {
               </CardFooter>
             </Card>
           ))}
-          {(projects ?? []).length === 0 && (
+          {(filteredProjects ?? []).length === 0 && (
             <div className="col-span-full flex flex-col items-center justify-center p-8 text-center">
               <FileText className="h-16 w-16 text-gray-300 mb-4" />
               <h3 className="text-lg font-medium mb-2">No projects yet</h3>
@@ -189,7 +201,7 @@ export function ProjectsPage() {
               </tr>
             </thead>
             <tbody>
-              {projects?.map((project) => (
+              {filteredProjects?.map((project) => (
                 <tr 
                   key={project.id} 
                   className="border-b hover:bg-gray-50 cursor-pointer"
@@ -209,7 +221,7 @@ export function ProjectsPage() {
                   </td>
                 </tr>
               ))}
-              {(projects ?? []).length === 0 && (
+              {(filteredProjects ?? []).length === 0 && (
                 <tr>
                   <td colSpan={4} className="px-4 py-8 text-center">
                     <p className="text-gray-500">No projects found</p>

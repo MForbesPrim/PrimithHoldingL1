@@ -103,11 +103,23 @@
     async deleteProject(projectId: string): Promise<void> {
         const headers = await this.getAuthHeader();
         const response = await fetch(`${this.baseUrl}/projects/${projectId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-        headers
+            method: 'DELETE',
+            credentials: 'include',
+            headers
         });
-        if (!response.ok) throw new Error('Failed to delete project');
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Delete project error:', {
+                status: response.status,
+                statusText: response.statusText,
+                error: errorText
+            });
+            throw new Error(`Failed to delete project: ${response.status} - ${errorText || response.statusText}`);
+        }
+
+        // Dispatch event to notify components that project list needs to be updated
+        window.dispatchEvent(new CustomEvent('project-list-updated'));
     }
 
     // Artifacts CRUD

@@ -136,10 +136,23 @@ function ProjectCombobox({
  onProjectChange: (projectId: string | null) => void
 }) {
  const [open, setOpen] = useState(false)
+ const [displayCount, setDisplayCount] = useState(5)
+ const [inputValue, setInputValue] = useState("")
 
  const selectedProjectName =
    selectedProjectId && projects.find((project) => project.id === selectedProjectId)?.name ||
    "Select Project"
+
+ const filteredProjects = projects.filter(project => 
+   project.name.toLowerCase().includes(inputValue.toLowerCase())
+ )
+
+ const displayedProjects = filteredProjects.slice(0, displayCount)
+ const remainingCount = filteredProjects.length - displayCount
+
+ const handleShowMore = () => {
+   setDisplayCount(prev => prev + 5)
+ }
 
  return (
    <Popover open={open} onOpenChange={setOpen}>
@@ -156,8 +169,12 @@ function ProjectCombobox({
      </PopoverTrigger>
      <PopoverContent className="w-[200px] p-0">
        <Command>
-         <CommandInput placeholder="Search project..." className="h-9" />
-         <CommandList>
+         <CommandInput 
+           placeholder="Search project..." 
+           value={inputValue}
+           onValueChange={setInputValue}
+         />
+         <CommandList className="max-h-[400px] overflow-auto">
            <CommandEmpty>No project found.</CommandEmpty>
            <CommandGroup>
              {/* Only show Clear Selection if a project is selected */}
@@ -167,6 +184,8 @@ function ProjectCombobox({
                  onSelect={() => {
                    onProjectChange(null)
                    setOpen(false)
+                   setDisplayCount(5)
+                   setInputValue("")
                  }}
                  className="text-sm text-muted-foreground hover:bg-gray-100 dark:hover:bg-gray-800"
                >
@@ -174,13 +193,15 @@ function ProjectCombobox({
                  Clear selection
                </CommandItem>
              )}
-             {projects.map((project) => (
+             {displayedProjects.map((project) => (
                <CommandItem
                  key={project.id}
-                 value={project.id}
+                 value={project.name}
                  onSelect={() => {
                    onProjectChange(project.id)
                    setOpen(false)
+                   setDisplayCount(5)
+                   setInputValue("")
                  }}
                  className="text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
                >
@@ -194,6 +215,14 @@ function ProjectCombobox({
                  />
                </CommandItem>
              ))}
+             {remainingCount > 0 && !inputValue && (
+               <CommandItem
+                 onSelect={handleShowMore}
+                 className="text-sm text-blue-600 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer justify-center"
+               >
+                 Show More ({Math.min(remainingCount, 5)} more)
+               </CommandItem>
+             )}
            </CommandGroup>
          </CommandList>
        </Command>
@@ -201,6 +230,8 @@ function ProjectCombobox({
    </Popover>
  )
 }
+
+const PROJECT_UPDATED_EVENT = 'project-list-updated';
 
 export function RdmHeader() {
  const { 
@@ -237,6 +268,20 @@ export function RdmHeader() {
      loadProjects()
    }
  }, [selectedOrgId]) // Load projects when organization changes
+
+ // Add new effect for project update events
+ useEffect(() => {
+   const handleProjectUpdate = () => {
+     if (selectedOrgId) {
+       loadProjects();
+     }
+   };
+
+   window.addEventListener(PROJECT_UPDATED_EVENT, handleProjectUpdate);
+   return () => {
+     window.removeEventListener(PROJECT_UPDATED_EVENT, handleProjectUpdate);
+   };
+ }, [selectedOrgId]);
 
  async function loadOrganizations() {
    try {
