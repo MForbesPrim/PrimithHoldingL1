@@ -236,6 +236,16 @@ type CreateFolderRequest struct {
 	ParentID  *string `json:"parentId"`
 }
 
+type ProjectVariable struct {
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"projectId"`
+	Key         string    `json:"key"`
+	Value       string    `json:"value"`
+	Description string    `json:"description,omitempty"`
+	CreatedBy   string    `json:"createdBy"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
 // JWT related constants
 const JWT_EXPIRY = 24 * time.Hour
 
@@ -9572,6 +9582,294 @@ func handleToggleMemberStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
+func handleSetProjectVariable(w http.ResponseWriter, r *http.Request) {
+	log.Printf("handleSetProjectVariable called")
+
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Parse request body
+	var req struct {
+		Key         string `json:"key"`
+		Value       string `json:"value"`
+		Description string `json:"description"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Request data: key=%s, value=%s", req.Key, req.Value)
+
+	// Verify user has access to the project
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&authorized)
+
+	if err != nil {
+		log.Printf("Error checking authorization: %v", err)
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return
+	}
+
+	if !authorized {
+		http.Error(w, "Access denied to project", http.StatusForbidden)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		log.Printf("Error getting user ID: %v", err)
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if the variable already exists
+	var variableExists bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM rdm.project_variables
+            WHERE project_id = $1 AND key = $2
+        )
+    `, projectId, req.Key).Scan(&variableExists)
+
+	if err != nil {
+		log.Printf("Error checking if variable exists: %v", err)
+		http.Error(w, "Failed to check for existing variable", http.StatusInternalServerError)
+		return
+	}
+
+	var variableId string
+	if variableExists {
+		// Only try to get the ID if the variable exists
+		err = db.QueryRow(`
+            SELECT id FROM rdm.project_variables
+            WHERE project_id = $1 AND key = $2
+        `, projectId, req.Key).Scan(&variableId)
+
+		if err != nil {
+			log.Printf("Error getting variable ID: %v", err)
+			http.Error(w, "Failed to get variable ID", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	log.Printf("Variable exists: %v, ID: %s", variableExists, variableId)
+
+	// Create result struct
+	var result struct {
+		ID          string    `json:"id"`
+		ProjectID   string    `json:"projectId"`
+		Key         string    `json:"key"`
+		Value       string    `json:"value"`
+		Description string    `json:"description,omitempty"`
+		CreatedBy   string    `json:"createdBy"`
+		UpdatedBy   string    `json:"updatedBy"`
+		UpdatedAt   time.Time `json:"updatedAt"`
+	}
+
+	if variableExists && variableId != "" {
+		// Update existing variable
+		err = db.QueryRow(`
+            UPDATE rdm.project_variables
+            SET value = $1, description = $2, updated_by = $3, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $4
+            RETURNING id, project_id, key, value, description, created_by, updated_by, updated_at
+        `, req.Value, req.Description, userId, variableId).Scan(
+			&result.ID, &result.ProjectID, &result.Key, &result.Value,
+			&result.Description, &result.CreatedBy, &result.UpdatedBy, &result.UpdatedAt,
+		)
+		if err != nil {
+			log.Printf("Error updating variable: %v", err)
+			http.Error(w, "Failed to update variable", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Insert new variable
+		err = db.QueryRow(`
+            INSERT INTO rdm.project_variables
+            (project_id, key, value, description, created_by, updated_by)
+            VALUES ($1, $2, $3, $4, $5, $5)
+            RETURNING id, project_id, key, value, description, created_by, updated_by, updated_at
+        `, projectId, req.Key, req.Value, req.Description, userId).Scan(
+			&result.ID, &result.ProjectID, &result.Key, &result.Value,
+			&result.Description, &result.CreatedBy, &result.UpdatedBy, &result.UpdatedAt,
+		)
+		if err != nil {
+			log.Printf("Error inserting variable: %v", err)
+			http.Error(w, "Failed to insert variable", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Add activity log entry
+	var activityType string
+	var activityDescription string
+
+	if variableExists {
+		activityType = "update"
+		activityDescription = "Updated variable: " + req.Key
+	} else {
+		activityType = "create"
+		activityDescription = "Created variable: " + req.Key
+	}
+
+	_, err = db.Exec(`
+        INSERT INTO rdm.project_activity (
+            project_id, user_id, activity_type, entity_type, entity_id,
+            description, new_values
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, projectId, userId,
+		activityType,
+		"variable", result.ID,
+		activityDescription,
+		fmt.Sprintf(`{"key":"%s","value":"%s"}`, req.Key, req.Value))
+
+	if err != nil {
+		// Log error but continue
+		log.Printf("Failed to record variable activity: %v", err)
+	}
+
+	log.Printf("Successfully processed variable: %s", result.ID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// Add a handler to get project variables
+func handleGetProjectVariables(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the project
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied to project variables", http.StatusForbidden)
+		return
+	}
+
+	// Fetch the variables
+	rows, err := db.Query(`
+        SELECT 
+            id, project_id, key, value, description, created_by, updated_at
+        FROM rdm.project_variables
+        WHERE project_id = $1
+        ORDER BY key
+    `, projectId)
+
+	if err != nil {
+		http.Error(w, "Failed to fetch project variables", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var variables []ProjectVariable
+	for rows.Next() {
+		var variable ProjectVariable
+		if err := rows.Scan(
+			&variable.ID, &variable.ProjectID, &variable.Key,
+			&variable.Value, &variable.Description, &variable.CreatedBy,
+			&variable.UpdatedAt,
+		); err != nil {
+			continue
+		}
+		variables = append(variables, variable)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(variables)
+}
+
+// Also add a handler to delete a project variable
+func handleDeleteProjectVariable(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectId := vars["projectId"]
+	variableId := vars["variableId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the project
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = $1 AND u.email = $2
+        )
+    `, projectId, claims.Username).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied to project variables", http.StatusForbidden)
+		return
+	}
+
+	// Get user ID for activity log
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Get variable details for activity log before deleting
+	var variableKey string
+	err = db.QueryRow("SELECT key FROM rdm.project_variables WHERE id = $1", variableId).Scan(&variableKey)
+	if err != nil && err != sql.ErrNoRows {
+		http.Error(w, "Failed to get variable details", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete the variable
+	result, err := db.Exec("DELETE FROM rdm.project_variables WHERE id = $1 AND project_id = $2",
+		variableId, projectId)
+	if err != nil {
+		http.Error(w, "Failed to delete variable", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Variable not found or not authorized", http.StatusNotFound)
+		return
+	}
+
+	// Add activity log entry
+	_, err = db.Exec(`
+        INSERT INTO rdm.project_activity (
+            project_id, user_id, activity_type, entity_type, entity_id,
+            description
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+    `, projectId, userId, "delete", "variable", variableId,
+		"Deleted variable: "+variableKey)
+
+	if err != nil {
+		// Log error but continue
+		log.Printf("Failed to record variable deletion activity: %v", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
 func handleUpdateProjectTag(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	vars := mux.Vars(r)
@@ -10846,7 +11144,9 @@ func main() {
 	r.HandleFunc("/projects/{id}/members/{memberId}", authMiddleware(handleUpdateMemberRole)).Methods("PUT")
 	r.HandleFunc("/projects/{id}/members/{memberId}", authMiddleware(handleRemoveProjectMember)).Methods("DELETE")
 	r.HandleFunc("/projects/{id}/members/{memberId}/toggle-status", authMiddleware(handleToggleMemberStatus)).Methods("PUT")
-
+	r.HandleFunc("/projects/{projectId}/variables", authMiddleware(handleGetProjectVariables)).Methods("GET")
+	r.HandleFunc("/projects/{projectId}/variables", authMiddleware(handleSetProjectVariable)).Methods("POST")
+	r.HandleFunc("/projects/{projectId}/variables/{variableId}", authMiddleware(handleDeleteProjectVariable)).Methods("DELETE")
 	// Add similar routes for project tags
 	r.HandleFunc("/projects/{projectId}/tags", authMiddleware(handleGetProjectTags)).Methods("GET")
 	r.HandleFunc("/projects/{projectId}/tags", authMiddleware(handleAddProjectTag)).Methods("POST")

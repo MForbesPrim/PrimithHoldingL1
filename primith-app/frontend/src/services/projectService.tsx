@@ -157,25 +157,35 @@
 
     // Variables
     async getProjectVariables(projectId: string): Promise<ProjectVariable[]> {
-        const headers = await this.getAuthHeader();
-        const response = await fetch(`${this.baseUrl}/projects/${projectId}/variables`, {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/projects/${projectId}/variables`, {
         credentials: 'include',
         headers
-        });
-        if (!response.ok) throw new Error('Failed to fetch project variables');
-        return response.json();
+      });
+      if (!response.ok) throw new Error('Failed to fetch project variables');
+      return response.json();
     }
-
+    
     async setProjectVariable(projectId: string, key: string, value: string, description?: string): Promise<ProjectVariable> {
-        const headers = await this.getAuthHeader();
-        const response = await fetch(`${this.baseUrl}/projects/${projectId}/variables`, {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/projects/${projectId}/variables`, {
         method: 'POST',
         credentials: 'include',
         headers,
         body: JSON.stringify({ key, value, description })
-        });
-        if (!response.ok) throw new Error('Failed to set project variable');
-        return response.json();
+      });
+      if (!response.ok) throw new Error('Failed to set project variable');
+      return response.json();
+    }
+    
+    async deleteProjectVariable(projectId: string, variableId: string): Promise<void> {
+      const headers = await this.getAuthHeader();
+      const response = await fetch(`${this.baseUrl}/projects/${projectId}/variables/${variableId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers
+      });
+      if (!response.ok) throw new Error('Failed to delete project variable');
     }
 
     // Roadmap
