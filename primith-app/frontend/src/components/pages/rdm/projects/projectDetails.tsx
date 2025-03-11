@@ -32,7 +32,6 @@ import {
   List,
   SquareGanttChartIcon as SquareChartGantt,
   Settings,
-  Package,
   Plus,
   Activity,
   Variable,
@@ -793,10 +792,6 @@ export function ProjectDetailPage() {
           <TabsTrigger value="milestones" className="rounded-t-lg">
             <Flag className="h-4 w-4 mr-2" />
             Milestones
-          </TabsTrigger>
-          <TabsTrigger value="deliverables" className="rounded-t-lg">
-            <Package className="h-4 w-4 mr-2" />
-            Deliverables
           </TabsTrigger>
           <TabsTrigger value="variables" className="rounded-t-lg">
             <Variable className="h-4 w-4 mr-2" />

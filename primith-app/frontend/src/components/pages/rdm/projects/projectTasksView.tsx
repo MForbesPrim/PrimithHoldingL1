@@ -3,12 +3,6 @@ import { ProjectService } from "@/services/projectService";
 import type { ProjectTask } from "@/types/projects";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   Table,
   TableBody,
   TableCell,
@@ -570,15 +564,10 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
           </Button>
         </div>
       ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle>Tasks</CardTitle>
-          </CardHeader>
-          <CardContent>
+          <div className="rounded-md border mb-4">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead></TableHead>
                   <TableHead className="cursor-pointer" onClick={() => handleSort('name')}>
                     <div className="flex items-center">
                       Task
@@ -657,30 +646,31 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                   <React.Fragment key={task.id}>
                     <TableRow>
                       <TableCell>
-                        {task.children && task.children.length > 0 ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => toggleTaskExpand(task.id)}
-                          >
-                            {expandedTasks[task.id] ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
-                          </Button>
-                        ) : (
-                          <span className="w-4 inline-block"></span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <p className="font-medium">{task.name}</p>
-                          {task.description && (
-                            <p className="text-sm text-gray-500 line-clamp-1">
-                              {task.description}
-                            </p>
+                        <div className="flex items-center">
+                          {task.children && task.children.length > 0 ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => toggleTaskExpand(task.id)}
+                              className="p-0 h-6 w-6"
+                            >
+                              {expandedTasks[task.id] ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                            </Button>
+                          ) : (
+                            <span></span>
                           )}
+                          <div>
+                            <p className="font-medium">{task.name}</p>
+                            {task.description && (
+                              <p className="text-sm text-gray-500 line-clamp-1">
+                                {task.description}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -823,8 +813,7 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
+        </div>
       )}
 
       {/* Add Task Dialog */}
