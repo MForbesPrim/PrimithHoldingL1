@@ -28,7 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatDistanceToNow, format } from "date-fns";
 import { useProject } from '@/components/pages/rdm/context/projectContext';
 import { Progress } from "@/components/ui/progress";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Table,
   TableBody,
@@ -134,17 +134,35 @@ export function ProjectsPage() {
 
       // Combine all activities from different projects
       const allActivities = activitiesResults.flatMap(result => result.activities || []);
-      setRecentActivities(allActivities.sort((a, b) => 
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      ));
+      setRecentActivities(allActivities
+        .map(activity => ({
+          ...activity,
+          formattedTime: new Date(activity.createdAt).toLocaleTimeString([], { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: true 
+          }),
+          formattedDate: new Date(activity.createdAt).toLocaleDateString([], {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric'
+          })
+        }))
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      );
 
       // Combine all milestones from different projects
-      const allMilestones = milestonesResults.flat();
-      setUpcomingMilestones(allMilestones.filter(m => m.dueDate && new Date(m.dueDate) > new Date())
-        .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime()));
+      const allMilestones = milestonesResults.flat().filter(m => m !== null && m !== undefined);
+      setUpcomingMilestones(allMilestones
+        .filter(m => m.dueDate && new Date(m.dueDate) > new Date())
+        .sort((a, b) => {
+          const dateA = a.dueDate ? new Date(a.dueDate).getTime() : 0;
+          const dateB = b.dueDate ? new Date(b.dueDate).getTime() : 0;
+          return dateA - dateB;
+        }));
 
       // Combine all tasks from different projects
-      const allTasks = tasksResults.flat();
+      const allTasks = tasksResults.flat().filter(t => t !== null && t !== undefined);
       setTasks(allTasks);
 
       // Combine all members from different projects (removing duplicates)
@@ -221,9 +239,9 @@ export function ProjectsPage() {
 
   const renderProjectProgress = () => {
     const statusData = [
-      { name: 'Active', value: metrics.activeProjects, color: '#10B981' },
-      { name: 'Completed', value: metrics.completedProjects, color: '#3B82F6' },
-      { name: 'Archived', value: metrics.archivedProjects, color: '#6B7280' }
+      { name: 'Active', value: metrics.activeProjects, colorClass: 'bg-emerald-500' },
+      { name: 'Completed', value: metrics.completedProjects, colorClass: 'bg-blue-500' },
+      { name: 'Archived', value: metrics.archivedProjects, colorClass: 'bg-gray-500' }
     ];
 
     const total = statusData.reduce((sum, item) => sum + item.value, 0);
@@ -239,11 +257,11 @@ export function ProjectsPage() {
               <div key={index} className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="font-medium">{status.name}</span>
-                  <span className="text-gray-500">{status.value} ({total > 0 ? Math.round((status.value / total) * 100) : 0}%)</span>
+                  <span className="text-muted-foreground">{status.value} ({total > 0 ? Math.round((status.value / total) * 100) : 0}%)</span>
                 </div>
                 <Progress 
                   value={(status.value / total) * 100} 
-                  className={`h-2 [&>[role=progressbar]]:bg-[${status.color}]`} 
+                  className={`h-2 [&>[role=progressbar]]:${status.colorClass}`}
                 />
               </div>
             ))}
@@ -256,31 +274,33 @@ export function ProjectsPage() {
   const renderRecentActivity = () => (
     <Card className="col-span-2">
       <CardHeader>
-        <CardTitle className="text-lg">Recent Activity</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg">Recent Activity</CardTitle>
+          <Activity className="h-4 w-4 text-muted-foreground" />
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
+        <div className="space-y-6">
           {recentActivities.length > 0 ? (
             recentActivities.slice(0, 5).map((activity) => (
               <div key={activity.id} className="flex items-start space-x-4">
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={`https://avatar.vercel.sh/${activity.userEmail}`} />
-                  <AvatarFallback>{activity.userName.substring(0, 2)}</AvatarFallback>
+                <Avatar className="h-8 w-8 bg-primary/10">
+                  <AvatarFallback className="bg-primary/10">{activity.userName.substring(0, 2).toUpperCase()}</AvatarFallback>
                 </Avatar>
                 <div className="flex-1 space-y-1">
-                  <p className="text-sm font-medium">{activity.description}</p>
-                  <div className="flex items-center text-xs text-gray-500">
-                    <span>{activity.formattedDate}</span>
-                    <span className="mx-1">•</span>
-                    <span>{activity.formattedTime}</span>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium leading-none">{activity.userName}</p>
+                    <span className="text-xs text-muted-foreground">{activity.formattedTime}</span>
                   </div>
+                  <p className="text-sm text-muted-foreground">{activity.description}</p>
+                  <p className="text-xs text-muted-foreground">{activity.formattedDate}</p>
                 </div>
               </div>
             ))
           ) : (
             <div className="text-center py-6">
-              <Activity className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-sm text-gray-500">No recent activity</p>
+              <Activity className="h-12 w-12 text-muted-foreground/20 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">No recent activity</p>
             </div>
           )}
         </div>
@@ -314,7 +334,7 @@ export function ProjectsPage() {
                       milestone.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
                       'bg-gray-100 text-gray-800'
                     }`}>
-                      {milestone.status}
+                      {formatStatus(milestone.status)}
                     </span>
                   </TableCell>
                 </TableRow>
@@ -331,13 +351,23 @@ export function ProjectsPage() {
     </Card>
   );
 
+  const formatStatus = (status: string) => {
+    return status
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
   const renderTaskProgress = () => {
     const taskStatusData = [
-      { name: 'To Do', value: tasks.filter(t => t.status === 'todo').length, color: '#FDA4AF' },
-      { name: 'In Progress', value: tasks.filter(t => t.status === 'in_progress').length, color: '#60A5FA' },
-      { name: 'In Review', value: tasks.filter(t => t.status === 'in_review').length, color: '#C084FC' },
-      { name: 'Done', value: tasks.filter(t => t.status === 'done').length, color: '#10B981' }
-    ];
+      { name: 'To Do', value: tasks.filter(t => t?.status === 'todo').length, color: '#FDA4AF', status: 'todo' },
+      { name: 'In Progress', value: tasks.filter(t => t?.status === 'in_progress').length, color: '#60A5FA', status: 'in_progress' },
+      { name: 'In Review', value: tasks.filter(t => t?.status === 'in_review').length, color: '#C084FC', status: 'in_review' },
+      { name: 'Done', value: tasks.filter(t => t?.status === 'done').length, color: '#10B981', status: 'done' }
+    ].map(item => ({
+      ...item,
+      name: formatStatus(item.status)
+    }));
 
     const total = taskStatusData.reduce((sum, item) => sum + item.value, 0);
 

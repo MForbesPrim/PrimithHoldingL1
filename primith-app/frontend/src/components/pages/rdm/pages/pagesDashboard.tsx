@@ -72,7 +72,7 @@ export function PagesDashboard() {
       loadPages();
       loadFolders();
     }
-  }, [selectedOrgId]);
+  }, [selectedOrgId, selectedProjectId]);
 
   const handleBackClick = () => {
     if (folderHistory.length > 0) {
@@ -236,8 +236,10 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
     if (!selectedOrgId) return;
     try {
       setLoading(true);
+      // Always fetch all pages without project filtering
       const fetchedPages = await pagesService.getPages(selectedOrgId);
-      console.log('Fetched pages in Dashboard:', fetchedPages); // Debug log
+      console.log('Fetched pages in Dashboard:', fetchedPages); 
+      
       setPages(fetchedPages);
     } catch (error) {
       console.error('Failed to load pages:', error);
@@ -451,6 +453,21 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
     }
   };
 
+  useEffect(() => {
+    console.log('RDM Project Context - selectedProjectId:', selectedProjectId);
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (selectedPageId) {
+      const selectedPage = pages.find(p => p.id === selectedPageId);
+      console.log('=== PageEditor Debug Info ===');
+      console.log('selectedProjectId:', selectedProjectId);
+      console.log('selectedPageId:', selectedPageId);
+      console.log('selectedPage?.projectId:', selectedPage?.projectId);
+      console.log('selectedPage:', selectedPage);
+    }
+  }, [selectedPageId, selectedProjectId, pages]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -522,6 +539,7 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
               onSave={handleSavePage}
               onRename={handleRenamePage}
               autoSave={autoSaveEnabled}
+              projectId={selectedProjectId}
             />
           </div>
                ) : showTemplates ? (

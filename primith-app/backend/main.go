@@ -3991,6 +3991,7 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 				pc.name,
 				COALESCE(pc.content, '') as content,
 				pc.status,
+				pc.project_id,
 				cb.email as created_by,
 				ub.email as updated_by,
 				db.email as deleted_by,
@@ -4003,6 +4004,7 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 			LEFT JOIN auth.users db ON pc.deleted_by = db.id
 			WHERE pc.organization_id = $1
 			AND pc.deleted_at IS NULL
+			AND pc.type = 'page'
 		`
 	args := []interface{}{organizationId}
 	paramCount := 1
@@ -4032,8 +4034,9 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 			ID        string
 			ParentID  sql.NullString
 			Name      string
-			Content   string // Changed from sql.NullString since we use COALESCE
+			Content   string
 			Status    string
+			ProjectID sql.NullString
 			CreatedBy string
 			UpdatedBy string
 			DeletedBy sql.NullString
@@ -4048,6 +4051,7 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 			&page.Name,
 			&page.Content,
 			&page.Status,
+			&page.ProjectID,
 			&page.CreatedBy,
 			&page.UpdatedBy,
 			&page.DeletedBy,
@@ -4065,6 +4069,7 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 			"name":      page.Name,
 			"content":   page.Content,
 			"status":    page.Status,
+			"projectId": page.ProjectID.String,
 			"createdBy": page.CreatedBy,
 			"updatedBy": page.UpdatedBy,
 			"deletedBy": page.DeletedBy.String,

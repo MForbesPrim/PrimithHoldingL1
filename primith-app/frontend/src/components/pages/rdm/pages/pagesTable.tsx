@@ -49,6 +49,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
 interface PagesTableProps {
   pages: PageNode[];
@@ -187,6 +189,49 @@ function sortNodes(nodes: CombinedNode[], sortColumn: string, sortDesc: boolean)
     return result;
   }
 
+// Helper function to find containers (folders or pages) that have project pages
+function findContainersWithProjectPages(tree: CombinedNode[], projectId: string): Set<string> {
+    const containerIds = new Set<string>();
+    
+    function traverse(node: CombinedNode): boolean {
+        let hasProjectPage = false;
+        
+        // Check if this node is a project page
+        if (node.type !== 'folder' && node.projectId === projectId) {
+            hasProjectPage = true;
+            
+            // Add all parent containers (both folders and pages)
+            let current = node;
+            while (current.parentId) {
+                containerIds.add(current.parentId);
+                const parent = findNodeById(tree, current.parentId);
+                if (!parent) break;
+                current = parent;
+            }
+        }
+        
+        // Recursively check children
+        for (const child of node.children) {
+            const childHasProjectPage: boolean = traverse(child);
+            hasProjectPage = hasProjectPage || childHasProjectPage;
+        }
+        
+        // If any child has a project page, add this container
+        if (hasProjectPage) {
+            containerIds.add(node.id);
+        }
+        
+        return hasProjectPage;
+    }
+    
+    // Start traversal from each root node
+    for (const node of tree) {
+        traverse(node);
+    }
+    
+    return containerIds;
+}
+
 export function PagesTable({
     pages,
     folders,
@@ -203,6 +248,7 @@ export function PagesTable({
     onAssociateWithProject,
     onUnassignFromProject,
   }: PagesTableProps) {
+    console.log('PagesTable props:', { pages, folders, currentProjectId });
     const [sorting, setSorting] = useState<SortingState>([
         { id: "updatedAt", desc: true },
       ]);
@@ -218,29 +264,50 @@ export function PagesTable({
     const [searchQuery, setSearchQuery] = useState(''); 
     const [showUnassignDialog, setShowUnassignDialog] = useState(false);
     const [pageToUnassign, setPageToUnassign] = useState<string | null>(null);
+    const [showOnlyProjectPages, setShowOnlyProjectPages] = useState(false);
     const tree = useMemo(() => buildCombinedTree(pages, folders), [pages, folders]);
     
     const currentNodes = useMemo(() => {
         if (!currentFolderId) {
-        return tree; // Show root nodes when no folder is selected
+            return tree; // Show root nodes when no folder is selected
         }
         const currentFolder = findNodeById(tree, currentFolderId);
         return currentFolder ? currentFolder.children : [];
     }, [tree, currentFolderId]);
 
-    const sortColumn = sorting[0]?.id || "updatedAt"; // Default to updatedAt
-    const sortDesc = sorting[0]?.desc || false; // Default to ascending
+    const sortColumn = sorting[0]?.id || "updatedAt";
+    const sortDesc = sorting[0]?.desc || false;
+    
     const flatData = useMemo(() => {
-    const result = flattenTree(currentNodes, expandedRows, 0, sortColumn, sortDesc);
-    console.log("flatData sample:", result.slice(0, 2)); // Optional: for debugging
-    return result;
-    }, [currentNodes, expandedRows, sorting]);
+        // Just flatten and sort, no filtering here
+        return flattenTree(currentNodes, expandedRows, 0, sortColumn, sortDesc);
+    }, [currentNodes, expandedRows, sorting, sortColumn, sortDesc]);
 
     const filteredData = useMemo(() => {
-        if (!searchQuery.trim()) return flatData; // Return all if no query
-        const lowercaseQuery = searchQuery.toLowerCase();
-        return flatData.filter((node) => node.name.toLowerCase().includes(lowercaseQuery));
-        }, [flatData, searchQuery]);
+        // Start with the flat data
+        let filtered = flatData;
+
+        // Apply search filter if exists
+        if (searchQuery.trim()) {
+            const lowercaseQuery = searchQuery.toLowerCase();
+            filtered = filtered.filter((node) => 
+                node.name.toLowerCase().includes(lowercaseQuery)
+            );
+        }
+
+        // Only apply project filter if toggle is explicitly enabled
+        if (showOnlyProjectPages && currentProjectId) {
+            const containersWithProjectPages = findContainersWithProjectPages(tree, currentProjectId);
+            filtered = filtered.filter((node) => {
+                if (containersWithProjectPages.has(node.id)) {
+                    return true;
+                }
+                return node.type !== 'folder' && node.projectId === currentProjectId;
+            });
+        }
+
+        return filtered;
+    }, [flatData, searchQuery, currentProjectId, tree, showOnlyProjectPages]);
     
     const TableRowWithContext = ({ row, children }: { row: any; children: React.ReactNode }) => {
         const node = row.original;
@@ -380,7 +447,7 @@ export function PagesTable({
                         >
                           {node.name}
                         </div>
-                        {node.type !== 'folder' && node.projectId === currentProjectId && (
+                        {node.type !== 'folder' && currentProjectId && node.projectId && node.projectId === currentProjectId && (
                           <span className="ml-2 px-1.5 py-0.5 bg-primary/10 text-primary text-xs rounded-sm">
                             Project
                           </span>
@@ -698,17 +765,27 @@ export function PagesTable({
 
   return (
     <>
-        {/* Search Filter */}
-        <div className="mb-4 flex items-center">
-        <div className="relative w-full max-w-md">
-            <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-            placeholder="Search pages and folders..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8" // Padding to accommodate the icon
-            />
-        </div>
+        {/* Search and Filter Controls */}
+        <div className="mb-4 flex items-center justify-between">
+            <div className="relative w-full max-w-md">
+                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                    placeholder="Search pages and folders..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-8"
+                />
+            </div>
+            {currentProjectId && (
+                <div className="flex items-center space-x-2 ml-4">
+                    <Switch
+                        id="project-filter"
+                        checked={showOnlyProjectPages}
+                        onCheckedChange={setShowOnlyProjectPages}
+                    />
+                    <Label htmlFor="project-filter">Show only project pages</Label>
+                </div>
+            )}
         </div>
       <div className="rounded-md border">
         <Table>

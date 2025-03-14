@@ -18,13 +18,14 @@ import TextAlign from '@tiptap/extension-text-align';
 import { useToast } from "@/hooks/use-toast";
 import Placeholder from '@tiptap/extension-placeholder';
 import { Divider } from './TipTapExtensionsExtra/Divider';
+import { Variable } from './TipTapExtensionsExtra/Variable';
 import { InfoPanel } from './TipTapExtensionsExtra/InfoPanel';
 import { DateNode } from './TipTapExtensionsExtra/DateNode';
 import { Expand } from './TipTapExtensionsExtra/Expand';
 import { EditorView } from 'prosemirror-view';
 import { Plugin } from 'prosemirror-state';
 import { MouseEvent } from 'react';
-import { MoreHorizontal, Minus, Info, Calendar, ChevronRight, Plus, Check, ChevronsUpDown, X, Edit } from 'lucide-react';
+import { MoreHorizontal, Minus, Info, Calendar, ChevronRight, Plus, Check, ChevronsUpDown, X, Edit, Code } from 'lucide-react';
 import {
   Undo2,
   Redo2,
@@ -76,6 +77,8 @@ import { BackColor } from "@/components/pages/rdm/pages/TipTapExtensionsExtra/Ba
 import { TableCellAttributes } from '@/components/pages/rdm/pages/TipTapExtensionsExtra/TableCellAttributes';
 import { PagesService } from '@/services/pagesService';
 import { useOrganization } from "@/components/pages/rdm/context/organizationContext";
+import { ProjectService } from "@/services/projectService";
+import { ProjectVariable } from "@/types/projects";
 
 import {
   Dialog,
@@ -88,6 +91,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+
+declare global {
+  interface Window {
+    PROJECT_VARIABLES?: any[];
+  }
+}
 
 interface PageEditorProps {
   page: PageNode;
@@ -104,6 +113,7 @@ interface PageEditorProps {
   autoSave?: boolean;
   templateMode?: boolean;
   editMode?: boolean;
+  projectId?: string | null;
   onUpdateTemplateDetails?: (id: string, details: {
     title: string;
     description: string;
@@ -366,13 +376,79 @@ const TableOptions: React.FC<TableOptionsProps> = ({ editor }) => {
   );
 };
 
+const VariablesMenu = ({ editor, projectId }: { editor: Editor, projectId?: string | null }) => {
+  const [variables, setVariables] = useState<ProjectVariable[]>([]);
+  const [loading, setLoading] = useState(false);
+  const projectService = new ProjectService();
+
+  useEffect(() => {
+    const loadVariables = async () => {
+      if (!projectId) return;
+      setLoading(true);
+      try {
+        const projectVariables = await projectService.getProjectVariables(projectId);
+        setVariables(projectVariables);
+      } catch (error) {
+        console.error('Failed to load project variables:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadVariables();
+  }, [projectId]);
+
+  if (!projectId) {
+    return (
+      <div className="absolute top-full left-0 bg-white border border-gray-200 rounded-lg shadow-lg p-2 min-w-[250px] z-50">
+        <p className="px-3 py-2 text-sm text-gray-500">
+          This page is not associated with a project. Variables are only available for project pages.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="absolute top-full left-0 bg-white border border-gray-200 rounded-lg shadow-lg p-2 min-w-[250px] z-50">
+      <div className="px-3 py-2 text-sm font-medium border-b mb-1">Project Variables</div>
+      {loading ? (
+        <div className="px-3 py-2 text-sm text-gray-500">Loading variables...</div>
+      ) : variables.length === 0 ? (
+        <div className="px-3 py-2 text-sm text-gray-500">No variables found for this project</div>
+      ) : (
+        <ul className="space-y-1 max-h-[300px] overflow-y-auto">
+          {variables.map((variable) => (
+            <li
+              key={variable.id}
+              className="flex justify-between items-center px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+              onClick={() => {
+                // Use the new insertVariable command
+                editor.chain().focus().insertVariable(variable.key).run();
+              }}
+            >
+              <div className="flex flex-col">
+                <span className="font-medium">{variable.key}</span>
+                <span className="text-xs text-gray-500 truncate max-w-[180px]">{variable.value}</span>
+              </div>
+              <span className="inline-flex items-center rounded-md bg-blue-50 px-2 text-xs font-medium text-blue-700">
+                {`{{${variable.key}}}`}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
+
 const PageEditor = ({
   page,
   onSave,
   onRename,
   autoSave = false,
   templateMode = false,
-  editMode = false
+  editMode = false,
+  projectId
 }: PageEditorProps) => {
   const { toast } = useToast();
   const pagesService = new PagesService();
@@ -395,6 +471,27 @@ const PageEditor = ({
   const [contentWidth, setContentWidth] = useState('auto');
   const [currentTitle, setCurrentTitle] = useState(page.name);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  
+  // Console log projectId when component loads
+  useEffect(() => {
+    console.log('PageEditor loaded with projectId (prop):', projectId);
+    console.log('PageEditor loaded with page.projectId:', page.projectId);
+    
+    // Debug potential projects from the URL
+    const url = new URL(window.location.href);
+    const urlProjectId = url.searchParams.get('projectId');
+    console.log('URL projectId parameter:', urlProjectId);
+    
+    // For testing, we could allow a URL parameter to override
+    const effectiveProjectId = projectId || page.projectId || urlProjectId;
+    console.log('Using projectId:', effectiveProjectId);
+    
+    // If we have a URL parameter but no project ID, we could potentially use this for debugging
+    // This would allow testing variables without changing the page's actual project association
+    if (urlProjectId && !projectId && !page.projectId) {
+      console.log('NOTE: Using URL projectId parameter for debugging. In production, this should come from the page or project context.');
+    }
+  }, [projectId, page.projectId]);
 
   useEffect(() => {
     if (isDropdownOpen && triggerRef.current) {
@@ -576,6 +673,7 @@ const PageEditor = ({
       Divider,
       InfoPanel,
       DateNode,
+      Variable,
       Expand,
       GapCursorExtension,
     ],
@@ -583,7 +681,9 @@ const PageEditor = ({
     onUpdate: ({ editor }) => {
       // Only save automatically if autoSave is true
       if (autoSave) {
-        onSave(page.id, editor.getHTML())
+        // Get HTML which preserves the variable structure
+        const content = editor.getHTML();
+        onSave(page.id, content);
       }
     },
     editorProps: {
@@ -633,7 +733,6 @@ const PageEditor = ({
                 type: 'infoPanel',
                 attrs: { text: 'Add information here' }
               }).run()
-            
             }}
           >
             <Info className="w-4 h-4 mr-2" />
@@ -672,16 +771,25 @@ const PageEditor = ({
           >
             <ChevronRight className="w-4 h-4 mr-2" />
             <span>Expand</span>
-            </li>
-            <li
-              className="flex items-center px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
-              onClick={() => {
-                editor.chain().focus().toggleTaskList().run()
-              }}
-            >
-              <CheckSquare className="w-4 h-4 mr-2" />
-              <span>Task List</span>
-            </li>
+          </li>
+          <li
+            className="flex items-center px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+            onClick={() => {
+              editor.chain().focus().toggleTaskList().run()
+            }}
+          >
+            <CheckSquare className="w-4 h-4 mr-2" />
+            <span>Task List</span>
+          </li>
+          <li
+            className="flex items-center px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+            onClick={() => {
+              editor.chain().focus().setPageBreak().run()
+            }}
+          >
+            <SeparatorHorizontal className="w-4 h-4 mr-2" />
+            <span>Page Break</span>
+          </li>
         </ul>
       </div>
     );
@@ -693,6 +801,36 @@ const PageEditor = ({
       editor.commands.setContent(page.content || '');
     }
   }, [page.id, editor]);
+
+  useEffect(() => {
+    if (editor && page) {
+      const applyContent = async () => {
+        // Calculate effective projectId
+        const effectiveProjectId = projectId || page.projectId;
+        
+        // Add debugging for the effective projectId
+        console.log('PageEditor applyContent - effectiveProjectId:', effectiveProjectId);
+        
+        if (effectiveProjectId && !templateMode) {
+          // Only process variables when viewing a page, not editing
+          try {
+            console.log('Processing variables with projectId:', effectiveProjectId);
+            const processedContent = await processVariables(page.content || '', effectiveProjectId);
+            editor.commands.setContent(processedContent);
+          } catch (error) {
+            console.error('Error processing variables:', error);
+            // Fallback to raw content if variable processing fails
+            editor.commands.setContent(page.content || '');
+          }
+        } else {
+          console.log('No projectId available or in template mode, skipping variable processing');
+          editor.commands.setContent(page.content || '');
+        }
+      };
+      
+      applyContent();
+    }
+  }, [page.id, editor, page.projectId, projectId]);
 
   useEffect(() => {
     if (editor && page) {
@@ -867,6 +1005,183 @@ const PageEditor = ({
         setIsEditing(false);
       }
     }, 0);
+  };
+
+  const handleSave = (id: string, content: string) => {
+    if (!editor) return;
+    
+    // When saving, we're saving the raw editor content which preserves variable structure
+    console.log('Saving content with variables:', content);
+    
+    // Save the content with variables intact
+    onSave(id, content);
+    
+    toast({
+      title: 'Changes Saved',
+      description: 'Your edits have been saved successfully.',
+      duration: 5000,
+    });
+  };
+
+  // Add this function to your PageEditor component
+const displayVariableValues = async (projectId: string | null) => {
+  if (!projectId || !editor) return;
+  
+  try {
+    // Fetch variables
+    const projectService = new ProjectService();
+    const variables = await projectService.getProjectVariables(projectId);
+    
+    // Get all variable nodes in the editor DOM
+    const editorDOM = editor.view.dom;
+    const variableNodes = editorDOM.querySelectorAll('span[data-variable]');
+    
+    // Replace their display (not their structure) with values
+    variableNodes.forEach(node => {
+      const varName = node.getAttribute('data-variable');
+      if (varName) {
+        const variable = variables.find(v => v.key === varName);
+        if (variable && variable.value) {
+          // Create a copy of the node to preserve the original
+          const displayNode = document.createElement('span');
+          displayNode.classList.add('variable-value-display');
+          displayNode.classList.add('inline-flex', 'items-center', 'rounded-md', 'bg-blue-50', 'text-xs', 'font-medium', 'text-blue-700','whitespace-nowrap');
+          displayNode.textContent = variable.value;
+          
+          // Check if we've already replaced this node
+          if (!node.querySelector('.variable-value-display')) {
+            // Hide the original content but keep it in the DOM
+            Array.from(node.childNodes).forEach(child => {
+              if (child.nodeType === Node.TEXT_NODE) {
+                child.textContent = '';
+              } else {
+                (child as HTMLElement).style.display = 'none';
+              }
+            });
+            
+            // Add the display node
+            node.appendChild(displayNode);
+          }
+        }
+      }
+      const parentNode = node.parentNode;
+      if (parentNode && !node.nextSibling) {
+        const space = document.createTextNode(' ');
+        parentNode.insertBefore(space, node.nextSibling);
+      }
+    });
+  } catch (error) {
+    console.error('Error displaying variable values:', error);
+  }
+};
+
+useEffect(() => {
+  if (editor && projectId) {
+    // If we're not in edit mode, display variable values
+    if (!editMode) {
+      // Wait a tick for the editor to render
+      setTimeout(() => {
+        displayVariableValues(projectId);
+      }, 100);
+    } else {
+      // In edit mode, remove any variable value displays
+      const editorDOM = editor.view.dom;
+      const displayNodes = editorDOM.querySelectorAll('.variable-value-display');
+      displayNodes.forEach(node => node.remove());
+    }
+  }
+}, [editor, projectId, editMode]);
+
+  const processVariables = async (content: string, projectId?: string | null) => {
+    if (!projectId) {
+      console.log('No projectId provided, returning original content');
+      return content;
+    }
+    
+    if (!content) {
+      console.log('No content provided, returning empty string');
+      return content;
+    }
+    
+    try {
+      const projectService = new ProjectService();
+      console.log(`Fetching variables for project: ${projectId}`);
+      const variables = await projectService.getProjectVariables(projectId);
+      console.log(`Retrieved ${variables.length} variables:`, variables);
+      
+      // Store the variables in a global object for the editor to use
+      window.PROJECT_VARIABLES = variables;
+      
+      // Check if we need to process plain text variables (legacy support)
+      const tempEl = document.createElement('div');
+      tempEl.innerHTML = content;
+      
+      // Process any {{variableName}} format in regular text nodes
+      // This is for supporting old content or pasted content
+      const allTextNodes = [];
+      const walker = document.createTreeWalker(tempEl, NodeFilter.SHOW_TEXT);
+      
+      let node;
+      while (node = walker.nextNode()) {
+        if (!node.parentElement?.matches('span[data-variable], span.variable-node, span.variable-badge-inline')) {
+          allTextNodes.push(node);
+        }
+      }
+      
+      console.log(`Found ${allTextNodes.length} text nodes to check for variables`);
+      
+      // Find and convert {{variableName}} patterns to variable nodes
+      allTextNodes.forEach(textNode => {
+        if (!textNode.textContent?.trim() || 
+            ['SCRIPT', 'STYLE'].includes(textNode.parentElement?.tagName || '')) {
+          return;
+        }
+        
+        const content = textNode.textContent || '';
+        const regex = /{{(\w+)}}/g;
+        let match;
+        let lastIndex = 0;
+        let fragments = [];
+        
+        while ((match = regex.exec(content)) !== null) {
+          const variableName = match[1];
+          
+          // Add text before the variable
+          if (match.index > lastIndex) {
+            fragments.push(document.createTextNode(content.substring(lastIndex, match.index)));
+          }
+          
+          // Create a variable node
+          const variableSpan = document.createElement('span');
+          variableSpan.className = 'variable-node';
+          variableSpan.setAttribute('data-variable', variableName);
+          variableSpan.setAttribute('data-type', 'variable');
+          variableSpan.textContent = match[0]; // {{variableName}}
+          fragments.push(variableSpan);
+          
+          lastIndex = regex.lastIndex;
+        }
+        
+        // Add remaining text
+        if (lastIndex < content.length) {
+          fragments.push(document.createTextNode(content.substring(lastIndex)));
+        }
+        
+        // Replace the text node with fragments if we found variables
+        if (fragments.length > 0) {
+          const parent = textNode.parentNode;
+          fragments.forEach(fragment => {
+            parent?.insertBefore(fragment, textNode);
+          });
+          parent?.removeChild(textNode);
+        }
+      });
+      
+      return tempEl.innerHTML;
+    } catch (error) {
+      console.error('Failed to process variables:', error);
+      return content;
+    }
   };
 
   const triggerImageUpload = () => {
@@ -1329,14 +1644,6 @@ const PageEditor = ({
               <Outdent className="w-4 h-4 text-gray-600" />
             </TooltipButton>
 
-            {/* Page Break */}
-            <TooltipButton
-              title="Page Break"
-              onClick={() => editor.chain().focus().setPageBreak().run()}
-            >
-              <SeparatorHorizontal className="w-4 h-4 text-gray-600" />
-            </TooltipButton>
-
             {/* Image Upload */}
             <TooltipButton title="Upload Image" onClick={triggerImageUpload}>
               <ImageIcon className="w-4 h-4 text-gray-600" />
@@ -1392,6 +1699,25 @@ const PageEditor = ({
                 <TableIcon className="w-4 h-4 text-gray-600" />
               </TooltipButton>
             )}
+
+            {/* Insert Variable */} 
+            <div className="relative">
+              <TooltipButton
+                title="Insert Variable"
+                onClick={(event?: React.MouseEvent) => {
+                  if (!event) return;
+                  event.stopPropagation();
+                  setOpenMenu(openMenu === 'variables' ? null : 'variables');
+                }}
+                className={openMenu === 'variables' ? 'bg-gray-200' : ''}
+              >
+                <div className="flex items-center gap-1">
+                  <Code className="w-4 h-4 text-gray-600" />
+                  <ChevronDown className="w-3 h-3 text-gray-600" />
+                </div>
+              </TooltipButton>
+              {openMenu === 'variables' && <VariablesMenu editor={editor} projectId={projectId || page.projectId} />}
+            </div>
 
             {/* Search & Replace */}
             <div className="relative inline-block">
@@ -1476,21 +1802,23 @@ const PageEditor = ({
           </div>
         ) : (
           <>
-            {!autoSave && (
-              <TooltipButton
-                title="Save"
-                onClick={() => {
-                  onSave(page.id, editor.getHTML());
-                  toast({
-                    title: 'Changes Saved',
-                    description: 'Your edits have been saved successfully.',
-                    duration: 5000,
-                  });
-                }}
-              >
-                <Save className="w-4 h-4 text-gray-600" />
-              </TooltipButton>
-            )}
+          {!autoSave && (
+            <TooltipButton
+              title="Save"
+              onClick={() => {
+                // Get HTML directly from the editor which preserves variable nodes
+                const content = editor.getHTML();
+                handleSave(page.id, content);
+                toast({
+                  title: 'Changes Saved',
+                  description: 'Your edits have been saved successfully.',
+                  duration: 5000,
+                });
+              }}
+            >
+              <Save className="w-4 h-4 text-gray-600" />
+            </TooltipButton>
+          )}
 
             {/* Actions Dropdown */}
             <div className="relative cursor-pointer">

@@ -24,7 +24,7 @@ export class PagesService {
     };
   }
 
-  async getPages(organizationId: string, projectId: string | null = null): Promise<PageNode[]> {
+  async getPages(organizationId: string): Promise<PageNode[]> {
     try {
       if (!organizationId) {
         console.error('No organization ID provided');
@@ -34,7 +34,6 @@ export class PagesService {
       const headers = await this.getAuthHeader();
       const url = new URL(`${this.baseUrl}/pages`);
       url.searchParams.append('organizationId', organizationId);
-      if (projectId) url.searchParams.append('projectId', projectId);
       
       const response = await fetch(url.toString(), {
         credentials: 'include',
@@ -48,6 +47,39 @@ export class PagesService {
       return await response.json();
     } catch (error) {
       console.error('Error in getPages:', error);
+      throw error;
+    }
+  }
+
+  async getProjectPages(organizationId: string, projectId: string): Promise<PageNode[]> {
+    try {
+      if (!organizationId) {
+        console.error('No organization ID provided');
+        throw new Error('Organization ID is required');
+      }
+
+      if (!projectId) {
+        console.error('No project ID provided');
+        throw new Error('Project ID is required');
+      }
+
+      const headers = await this.getAuthHeader();
+      const url = new URL(`${this.baseUrl}/pages`);
+      url.searchParams.append('organizationId', organizationId);
+      url.searchParams.append('projectId', projectId);
+      
+      const response = await fetch(url.toString(), {
+        credentials: 'include',
+        headers
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch project pages: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error('Error in getProjectPages:', error);
       throw error;
     }
   }
