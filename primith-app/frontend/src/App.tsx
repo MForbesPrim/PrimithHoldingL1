@@ -29,6 +29,12 @@ import { EditTemplate } from "@/components/pages/rdm/pages/pagesEditTemplate";
 import { DocumentManagementPage } from "@/components/pages/rdm/documentManagement/dmDashboard";
 import { ProtectedRdmLayout } from "@/components/pages/rdm/layouts/protected-rdm-layout";
 import { HelpPage } from "@/components/pages/helpCenterPage";
+import { ServicesPage as MainServicesPage } from "@/components/pages/servicesPage"
+import { AboutUsPage } from "@/components/pages/aboutUsPage"
+import { ReportingPage } from "@/components/pages/reportingPage"
+import { FinancialServicesPage } from "@/components/pages/financialServicesPage"
+import { ConsultingPage } from "@/components/pages/consultingPage"
+import { ProServicesPage } from "@/components/pages/proServicesPage"
 
 function App() {
   useTokenRefresh();
@@ -82,6 +88,12 @@ function App() {
                   <Route path="/terms-of-service" element={<TermsPage />} />
                   <Route path="/auth-redirect" element={<AuthRedirect />} />
                   <Route path="/protected" element={<ProtectedPage />} />
+                  <Route path="/services" element={<MainServicesPage />} />
+                  <Route path="/about-us" element={<AboutUsPage />} />
+                  <Route path="/reporting" element={<ReportingPage />} />
+                  <Route path="/financial-services" element={<FinancialServicesPage />} />
+                  <Route path="/consulting" element={<ConsultingPage />} />
+                  <Route path="/pro" element={<ProServicesPage />} />
                   <Route element={<ProtectedLayout />}>
                     <Route path="/portal" element={
                       <ProtectedRoute>

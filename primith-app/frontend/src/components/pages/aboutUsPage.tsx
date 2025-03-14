@@ -1,23 +1,19 @@
-import { Link } from "react-router-dom"
-import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Sparkle } from "lucide-react"
+import { Link } from "react-router-dom"
+import { Sparkle, Users, Target, Lightbulb, Shield } from "lucide-react"
 import { ModeToggle } from "@/components/mode-toggle"
 
-export function HomePage() {
-  // A simple boolean check to see if there's a token stored
+export function AboutUsPage() {
   const isAuthenticated = Boolean(localStorage.getItem("token"))
   const loginPath = `${import.meta.env.VITE_PORTAL_URL}/login`
-  console.log('Login path:', loginPath) 
-  // Example logout function: removes the token and redirects
+
   function handleLogout() {
     localStorage.removeItem("token")
-    window.location.href = "/" // or use React Router's navigate
+    window.location.href = "/"
   }
 
   return (
     <div className="min-h-screen dark:bg-black text-white">
-
       {/* HEADER */}
       <header className="border-b border-white/10 backdrop-blur-sm top-0 w-full z-50">
         <div className="container mx-auto px-4 py-4">
@@ -33,7 +29,6 @@ export function HomePage() {
             </Link>
 
             <div className="flex items-center gap-6">
-              {/* Show Sign In if not logged in */}
               {!isAuthenticated && (
                 <button
                   onClick={() => window.location.href = loginPath}
@@ -43,7 +38,6 @@ export function HomePage() {
                 </button>
               )}
 
-              {/* Show Logout if logged in */}
               {isAuthenticated && (
                 <button
                   onClick={handleLogout}
@@ -60,92 +54,89 @@ export function HomePage() {
                 Contact Us
               </Link>
 
-              {/* Dark/Light Mode toggle (unchanged) */}
               <ModeToggle />
             </div>
           </nav>
         </div>
       </header>
 
-      {/* HERO SECTION */}
+      {/* ABOUT US HERO */}
       <section className="pt-32 pb-20 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-gray-200/10 to-gray-500/10" />
         <div className="container mx-auto px-4 relative">
           <Badge className="mb-4 text-gray-500" variant="outline">
-            Innovation Solutions
+            About Us
           </Badge>
           <h1 className="text-5xl md:text-7xl font-bold tracking-tighter mb-4 bg-gradient-to-r from-gray-400 to-gray-900 text-transparent bg-clip-text leading-tight pb-2">
-            Empowering Businesses
+            Driving Innovation
             <br />
-            With Technology
+            Through Technology
           </h1>
           <p className="text-xl text-gray-400 max-w-2xl mb-8">
-            Discover innovative technology solutions designed to optimize workflows, enhance productivity, and drive business growth.
+            At Primith, we're dedicated to empowering businesses with cutting-edge technology solutions that drive growth and success.
           </p>
-          <div className="flex gap-4">
-            <Button size="lg" className="hover:bg-gray-400 hover:text-white" asChild>
-              <Link to="/services">Services</Link>
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="border-gray-400 text-gray-500 dark:text-white bg-transparent hover:bg-gray-400 hover:text-white"
-              asChild
-            >
-              <Link to="/about-us">About Us</Link>
-            </Button>
+        </div>
+      </section>
+
+      {/* OUR STORY SECTION */}
+      <section className="py-20 bg-gradient-to-b from-gray-200/10 to-gray-500/10">
+        <div className="container mx-auto px-4">
+          <div className="max-w-3xl mx-auto text-center mb-16">
+            <h2 className="text-4xl font-bold tracking-tight mb-6 text-gray-800 dark:text-gray-100">
+              Our Story
+            </h2>
+            <p className="text-lg text-gray-600 dark:text-gray-400">
+              Founded with a vision to transform how businesses leverage technology, Primith has grown into a trusted partner for organizations seeking innovative solutions. Our journey is marked by continuous innovation, unwavering commitment to excellence, and a deep understanding of our clients' needs.
+            </p>
           </div>
         </div>
       </section>
 
-      {/* FEATURED PRODUCTS SECTION */}
-      <section className="py-20 inset-0 bg-gradient-to-b from-gray-200/10 to-gray-500/10">
+      {/* VALUES SECTION */}
+      <section className="py-20">
         <div className="container mx-auto px-4">
           <h2 className="text-4xl font-bold tracking-tight text-center mb-12 text-gray-800 dark:text-gray-100">
-            Featured Products
+            Our Values
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {/* Reporting */}
-            <div className="p-6 bg-white dark:bg-transparent border rounded-lg shadow-md hover:shadow-lg transition-shadow">
-              <h3 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-4">
-                Reporting
-              </h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                Gain insights with advanced reporting tools tailored to your business needs. Simplify data analysis and decision-making.
-              </p>
-              <div className="mt-4">
-                <Button asChild className="hover:bg-gray-400 hover:text-white">
-                  <Link to="/reporting">Learn More</Link>
-                </Button>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                <Users className="w-6 h-6 text-gray-600 dark:text-gray-300" />
               </div>
+              <h3 className="text-xl font-semibold mb-2 text-gray-800 dark:text-gray-100">Client Focus</h3>
+              <p className="text-gray-600 dark:text-gray-400">
+                We put our clients first, understanding their unique needs and delivering tailored solutions.
+              </p>
             </div>
-            {/* Financial Services */}
-            <div className="p-6 bg-white dark:bg-transparent border rounded-lg shadow-md hover:shadow-lg transition-shadow">
-              <h3 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-4">
-                Financial Services
-              </h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                Access innovative financial solutions to optimize your operations, improve cash flow, and drive business growth.
-              </p>
-              <div className="mt-4">
-                <Button asChild className="hover:bg-gray-400 hover:text-white">
-                  <Link to="/financial-services">Learn More</Link>
-                </Button>
+
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                <Target className="w-6 h-6 text-gray-600 dark:text-gray-300" />
               </div>
+              <h3 className="text-xl font-semibold mb-2 text-gray-800 dark:text-gray-100">Excellence</h3>
+              <p className="text-gray-600 dark:text-gray-400">
+                We strive for excellence in everything we do, setting high standards and exceeding expectations.
+              </p>
             </div>
-            {/* Consulting */}
-            <div className="p-6 bg-white dark:bg-transparent border rounded-lg shadow-md hover:shadow-lg transition-shadow">
-              <h3 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-4">
-                Professional Services
-              </h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                Partner with experts to identify opportunities, overcome challenges, and implement solutions tailored to your goals.
-              </p>
-              <div className="mt-4">
-                <Button asChild className="hover:bg-gray-400 hover:text-white">
-                  <Link to="/consulting">Learn More</Link>
-                </Button>
+
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                <Lightbulb className="w-6 h-6 text-gray-600 dark:text-gray-300" />
               </div>
+              <h3 className="text-xl font-semibold mb-2 text-gray-800 dark:text-gray-100">Innovation</h3>
+              <p className="text-gray-600 dark:text-gray-400">
+                We embrace innovation and continuously explore new technologies to solve complex challenges.
+              </p>
+            </div>
+
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                <Shield className="w-6 h-6 text-gray-600 dark:text-gray-300" />
+              </div>
+              <h3 className="text-xl font-semibold mb-2 text-gray-800 dark:text-gray-100">Integrity</h3>
+              <p className="text-gray-600 dark:text-gray-400">
+                We operate with the highest level of integrity, building trust through transparency and accountability.
+              </p>
             </div>
           </div>
         </div>
@@ -160,7 +151,7 @@ export function HomePage() {
               <span className="font-bold text-gray-500">Primith</span>
             </div>
             <div className="flex items-center text-sm text-gray-400">
-            <Link
+              <Link
                 to="/terms-of-service"
                 className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors text-xs mr-4"
               >
@@ -177,7 +168,6 @@ export function HomePage() {
           </div>
         </div>
       </footer>
-
     </div>
   )
-}
+} 

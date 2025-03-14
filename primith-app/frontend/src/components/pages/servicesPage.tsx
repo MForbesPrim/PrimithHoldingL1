@@ -1,23 +1,20 @@
-import { Link } from "react-router-dom"
-import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Link } from "react-router-dom"
 import { Sparkle } from "lucide-react"
 import { ModeToggle } from "@/components/mode-toggle"
 
-export function HomePage() {
-  // A simple boolean check to see if there's a token stored
+export function ServicesPage() {
   const isAuthenticated = Boolean(localStorage.getItem("token"))
   const loginPath = `${import.meta.env.VITE_PORTAL_URL}/login`
-  console.log('Login path:', loginPath) 
-  // Example logout function: removes the token and redirects
+
   function handleLogout() {
     localStorage.removeItem("token")
-    window.location.href = "/" // or use React Router's navigate
+    window.location.href = "/"
   }
 
   return (
     <div className="min-h-screen dark:bg-black text-white">
-
       {/* HEADER */}
       <header className="border-b border-white/10 backdrop-blur-sm top-0 w-full z-50">
         <div className="container mx-auto px-4 py-4">
@@ -33,7 +30,6 @@ export function HomePage() {
             </Link>
 
             <div className="flex items-center gap-6">
-              {/* Show Sign In if not logged in */}
               {!isAuthenticated && (
                 <button
                   onClick={() => window.location.href = loginPath}
@@ -43,7 +39,6 @@ export function HomePage() {
                 </button>
               )}
 
-              {/* Show Logout if logged in */}
               {isAuthenticated && (
                 <button
                   onClick={handleLogout}
@@ -60,92 +55,102 @@ export function HomePage() {
                 Contact Us
               </Link>
 
-              {/* Dark/Light Mode toggle (unchanged) */}
               <ModeToggle />
             </div>
           </nav>
         </div>
       </header>
 
-      {/* HERO SECTION */}
-      <section className="pt-32 pb-20 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-gray-200/10 to-gray-500/10" />
-        <div className="container mx-auto px-4 relative">
-          <Badge className="mb-4 text-gray-500" variant="outline">
-            Innovation Solutions
-          </Badge>
-          <h1 className="text-5xl md:text-7xl font-bold tracking-tighter mb-4 bg-gradient-to-r from-gray-400 to-gray-900 text-transparent bg-clip-text leading-tight pb-2">
-            Empowering Businesses
-            <br />
-            With Technology
-          </h1>
-          <p className="text-xl text-gray-400 max-w-2xl mb-8">
-            Discover innovative technology solutions designed to optimize workflows, enhance productivity, and drive business growth.
-          </p>
-          <div className="flex gap-4">
-            <Button size="lg" className="hover:bg-gray-400 hover:text-white" asChild>
-              <Link to="/services">Services</Link>
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="border-gray-400 text-gray-500 dark:text-white bg-transparent hover:bg-gray-400 hover:text-white"
-              asChild
-            >
-              <Link to="/about-us">About Us</Link>
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      {/* FEATURED PRODUCTS SECTION */}
-      <section className="py-20 inset-0 bg-gradient-to-b from-gray-200/10 to-gray-500/10">
+      {/* SERVICES SECTION WITH INTEGRATED HERO */}
+      <section className="py-12 bg-gradient-to-b from-gray-200/10 to-gray-500/10">
         <div className="container mx-auto px-4">
-          <h2 className="text-4xl font-bold tracking-tight text-center mb-12 text-gray-800 dark:text-gray-100">
-            Featured Products
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {/* Reporting */}
+          <div className="text-center mb-12">
+            <Badge className="mb-4 text-gray-500" variant="outline">
+              Our Services
+            </Badge>
+            <h1 className="text-4xl md:text-5xl font-bold tracking-tighter mb-4 bg-gradient-to-r from-gray-400 to-gray-900 text-transparent bg-clip-text">
+              Comprehensive Solutions For Your Business
+            </h1>
+            <p className="text-lg text-gray-400 max-w-2xl mx-auto mb-12">
+              Explore our range of services designed to help your business thrive in the digital age.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Reporting Service */}
             <div className="p-6 bg-white dark:bg-transparent border rounded-lg shadow-md hover:shadow-lg transition-shadow">
               <h3 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-4">
                 Reporting
               </h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                Gain insights with advanced reporting tools tailored to your business needs. Simplify data analysis and decision-making.
+              <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
+                Generate deep insights into your business data, enabling informed decision-making.
               </p>
-              <div className="mt-4">
-                <Button asChild className="hover:bg-gray-400 hover:text-white">
-                  <Link to="/reporting">Learn More</Link>
-                </Button>
-              </div>
+              <ul className="text-gray-600 dark:text-gray-400 text-sm mb-6 list-disc list-inside space-y-2">
+                <li>Custom report generation</li>
+                <li>Real-time data analytics</li>
+                <li>Interactive dashboards</li>
+                <li>Automated reporting</li>
+              </ul>
+              <Button asChild className="w-full hover:bg-gray-400 hover:text-white">
+                <Link to="/reporting">Learn More</Link>
+              </Button>
             </div>
+
             {/* Financial Services */}
             <div className="p-6 bg-white dark:bg-transparent border rounded-lg shadow-md hover:shadow-lg transition-shadow">
               <h3 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-4">
                 Financial Services
               </h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                Access innovative financial solutions to optimize your operations, improve cash flow, and drive business growth.
+              <p className="text-gray-600 dark:text-gray-400 text-sm mb-6">
+                Optimize your operations with our comprehensive suite of financial services and solutions.
               </p>
-              <div className="mt-4">
-                <Button asChild className="hover:bg-gray-400 hover:text-white">
-                  <Link to="/financial-services">Learn More</Link>
-                </Button>
-              </div>
+              <ul className="text-gray-600 dark:text-gray-400 text-sm mb-6 list-disc list-inside space-y-2">
+                <li>Financial planning</li>
+                <li>Cash flow optimization</li>
+                <li>Investment strategies</li>
+                <li>Risk management</li>
+              </ul>
+              <Button asChild className="w-full hover:bg-gray-400 hover:text-white">
+                <Link to="/financial-services">Learn More</Link>
+              </Button>
             </div>
-            {/* Consulting */}
+
+            {/* Consulting Services */}
             <div className="p-6 bg-white dark:bg-transparent border rounded-lg shadow-md hover:shadow-lg transition-shadow">
               <h3 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-4">
-                Professional Services
+                Consulting
               </h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                Partner with experts to identify opportunities, overcome challenges, and implement solutions tailored to your goals.
+              <p className="text-gray-600 dark:text-gray-400 mb-6 text-sm">
+                Get expert guidance and strategic advice to overcome challenges and achieve your goals.
               </p>
-              <div className="mt-4">
-                <Button asChild className="hover:bg-gray-400 hover:text-white">
-                  <Link to="/consulting">Learn More</Link>
-                </Button>
-              </div>
+              <ul className="text-gray-600 dark:text-gray-400 text-sm mb-6 list-disc list-inside space-y-2">
+                <li>Business strategy</li>
+                <li>Process optimization</li>
+                <li>Technology solutions</li>
+                <li>Change management</li>
+              </ul>
+              <Button asChild className="w-full hover:bg-gray-400 hover:text-white">
+                <Link to="/consulting">Learn More</Link>
+              </Button>
+            </div>
+
+            {/* Pro Services */}
+            <div className="p-6 bg-white dark:bg-transparent border rounded-lg shadow-md hover:shadow-lg transition-shadow">
+              <h3 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                Primith Pro
+              </h3>
+              <p className="text-gray-600 dark:text-gray-400 mb-6 text-sm">
+                Professional services and custom solutions tailored to your unique business requirements.
+              </p>
+              <ul className="text-gray-600 dark:text-gray-400 text-sm mb-6 list-disc list-inside space-y-2">
+                <li>Custom development</li>
+                <li>System integration</li>
+                <li>Solution architecture</li>
+                <li>Process automation</li>
+              </ul>
+              <Button asChild className="w-full hover:bg-gray-400 hover:text-white">
+                <Link to="/pro">Learn More</Link>
+              </Button>
             </div>
           </div>
         </div>
@@ -160,7 +165,7 @@ export function HomePage() {
               <span className="font-bold text-gray-500">Primith</span>
             </div>
             <div className="flex items-center text-sm text-gray-400">
-            <Link
+              <Link
                 to="/terms-of-service"
                 className="hover:text-gray-400 text-gray-500 dark:text-gray-200 transition-colors text-xs mr-4"
               >
@@ -177,7 +182,6 @@ export function HomePage() {
           </div>
         </div>
       </footer>
-
     </div>
   )
-}
+} 
