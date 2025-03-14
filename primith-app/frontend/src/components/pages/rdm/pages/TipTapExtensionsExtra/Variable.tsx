@@ -30,7 +30,12 @@ const VariableBadgeComponent = ({ node, editor }: { node: any, editor: any }) =>
       } else {
         // If no window variables or value not found, try to fetch from project
         try {
-          const projectId = editor.storage.variable?.projectId || 
+          // First try to get projectId from the page itself
+          const pageProjectId = editor.storage.variable?.pageProjectId;
+          
+          // Then try other sources
+          const projectId = pageProjectId || 
+                          editor.storage.variable?.projectId || 
                           document.querySelector('[data-project-id]')?.getAttribute('data-project-id');
           
           if (projectId) {
@@ -42,9 +47,8 @@ const VariableBadgeComponent = ({ node, editor }: { node: any, editor: any }) =>
             if (foundVariable && foundVariable.value) {
               setVariableValue(foundVariable.value);
               
-              if (!window.PROJECT_VARIABLES) {
-                window.PROJECT_VARIABLES = variables;
-              }
+              // Cache all variables in window object for future use
+              window.PROJECT_VARIABLES = variables;
             }
           }
         } catch (error) {

@@ -383,10 +383,13 @@ const VariablesMenu = ({ editor, projectId }: { editor: Editor, projectId?: stri
 
   useEffect(() => {
     const loadVariables = async () => {
-      if (!projectId) return;
+      // Get effective project ID from either passed prop or editor storage
+      const effectiveProjectId = projectId || editor.storage.variable?.pageProjectId;
+      if (!effectiveProjectId) return;
+      
       setLoading(true);
       try {
-        const projectVariables = await projectService.getProjectVariables(projectId);
+        const projectVariables = await projectService.getProjectVariables(effectiveProjectId);
         setVariables(projectVariables);
       } catch (error) {
         console.error('Failed to load project variables:', error);
@@ -396,9 +399,11 @@ const VariablesMenu = ({ editor, projectId }: { editor: Editor, projectId?: stri
     };
     
     loadVariables();
-  }, [projectId]);
+  }, [projectId, editor]);
 
-  if (!projectId) {
+  // Only show "not associated" message if there's no project ID from any source
+  const effectiveProjectId = projectId || editor.storage.variable?.pageProjectId;
+  if (!effectiveProjectId) {
     return (
       <div className="absolute top-full left-0 bg-white border border-gray-200 rounded-lg shadow-lg p-2 min-w-[250px] z-50">
         <p className="px-3 py-2 text-sm text-gray-500">
@@ -807,6 +812,11 @@ const PageEditor = ({
       const applyContent = async () => {
         // Calculate effective projectId
         const effectiveProjectId = projectId || page.projectId;
+        
+        // Store the page's project ID in editor storage for variable component
+        if (editor.storage.variable) {
+          editor.storage.variable.pageProjectId = page.projectId;
+        }
         
         // Add debugging for the effective projectId
         console.log('PageEditor applyContent - effectiveProjectId:', effectiveProjectId);
@@ -1243,19 +1253,48 @@ useEffect(() => {
   
   const handleGeneratePDF = async () => {
     if (!editor) return;
+    
     try {
+      setIsGeneratingPDF(true);
+      
+      // Get the HTML content from the editor
       const content = editor.getHTML();
-      // Implement PDF generation logic here
-      console.log('Generating PDF with content:', content);
-      // Add artificial delay to see the loading state
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Get the page title
+      const title = page.name || 'Document';
+      
+      // Call the service to generate the PDF
+      const pdfBlob = await pagesService.exportPageToPDF(page.id, content, title);
+      
+      // Create a URL for the blob
+      const url = window.URL.createObjectURL(pdfBlob);
+      
+      // Create a link and trigger the download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      
+      // Clean up
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      toast({
+        title: 'PDF Generated',
+        description: 'Your PDF has been successfully generated and downloaded.',
+        duration: 5000,
+      });
     } catch (error) {
       console.error('Error generating PDF:', error);
       toast({
         title: 'Error',
-        description: 'Failed to generate PDF',
-        variant: 'destructive'
+        description: 'Failed to generate PDF. Please try again.',
+        variant: 'destructive',
+        duration: 5000,
       });
+    } finally {
+      setIsGeneratingPDF(false);
     }
   };
 

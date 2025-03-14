@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -31,11 +30,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/jung-kurt/gofpdf"
 	"github.com/lib/pq"
 	"github.com/rs/cors"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/net/html"
 )
 
 // Session stores user session information
@@ -1210,7 +1211,7 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Handling create user request")
 
 	// Log the raw request body
-	bodyBytes, err := ioutil.ReadAll(r.Body)
+	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("Failed to read request body: %v", err)
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
@@ -1218,7 +1219,7 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Raw request body: %s", string(bodyBytes))
 	// Restore the body for decoding
-	r.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
+	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	var user User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
@@ -10917,6 +10918,260 @@ func nullTimeValue(nt sql.NullTime) interface{} {
 	return nil
 }
 
+func handleGeneratePDF(w http.ResponseWriter, r *http.Request) {
+	// Parse request
+	var req struct {
+		Content string `json:"content"`
+		Title   string `json:"title"`
+		PageID  string `json:"pageId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("PDF generation requested by %s for page %s", claims.Username, req.PageID)
+
+	// Create new PDF
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetMargins(20, 20, 20)
+	pdf.AddPage()
+
+	// Add title
+	pdf.SetFont("Arial", "B", 16)
+	pdf.Cell(170, 10, req.Title)
+	pdf.Ln(15)
+
+	// Reset font for content
+	pdf.SetFont("Arial", "", 12)
+
+	// Process and extract variables if applicable
+	content := req.Content
+	if strings.Contains(content, "data-variable") && req.PageID != "" {
+		var projectID string
+		err := db.QueryRow("SELECT project_id FROM pages.pages_content WHERE id = $1", req.PageID).Scan(&projectID)
+
+		if err == nil && projectID != "" {
+			// Fetch variables
+			rows, err := db.Query("SELECT key, value FROM rdm.project_variables WHERE project_id = $1", projectID)
+			if err == nil {
+				defer rows.Close()
+
+				variables := make(map[string]string)
+				for rows.Next() {
+					var key, value string
+					if err := rows.Scan(&key, &value); err == nil {
+						variables[key] = value
+					}
+				}
+
+				// Manual parsing to replace variables
+				for key, value := range variables {
+					varPattern := fmt.Sprintf(`<span data-variable="%s"[^>]*>([^<]*)</span>`, key)
+					content = regexp.MustCompile(varPattern).ReplaceAllString(content, value)
+				}
+			}
+		}
+	}
+
+	// Parse HTML and add to PDF
+	formattedContent, err := ExtractStructuredText(content)
+	if err != nil {
+		log.Printf("Warning: Error parsing HTML: %v", err)
+		// Fall back to basic content
+		pdf.MultiCell(170, 7, content, "", "", false)
+	} else {
+		// Add structured content
+		for _, item := range formattedContent {
+			switch item.Type {
+			case "heading":
+				pdf.SetFont("Arial", "B", 14)
+				pdf.MultiCell(170, 7, item.Text, "", "", false)
+				pdf.Ln(3)
+				pdf.SetFont("Arial", "", 12)
+			case "paragraph":
+				if item.Text != "" {
+					pdf.MultiCell(170, 7, item.Text, "", "", false)
+					pdf.Ln(3)
+				}
+			case "list-item":
+				pdf.SetX(25) // Indent
+				pdf.MultiCell(165, 7, "• "+item.Text, "", "", false)
+			case "task-item":
+				checkbox := "☐ "
+				if item.Checked {
+					checkbox = "☑ "
+				}
+				pdf.SetX(25) // Indent
+				pdf.MultiCell(165, 7, checkbox+item.Text, "", "", false)
+			case "table-row":
+				// Simple table handling
+				if len(item.Cells) > 0 {
+					cellWidth := 170.0 / float64(len(item.Cells))
+					startX := pdf.GetX()
+					startY := pdf.GetY()
+					maxY := startY
+
+					for i, cell := range item.Cells {
+						pdf.SetXY(startX+float64(i)*cellWidth, startY)
+						pdf.Rect(pdf.GetX(), pdf.GetY(), cellWidth, 10, "D")
+						pdf.MultiCell(cellWidth, 10, cell, "", "C", false)
+						if pdf.GetY() > maxY {
+							maxY = pdf.GetY()
+						}
+					}
+
+					pdf.SetY(maxY)
+					pdf.Ln(2)
+				}
+			}
+		}
+	}
+
+	// Set response headers
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.pdf"`, req.Title))
+
+	// Output PDF to response writer
+	err = pdf.Output(w)
+	if err != nil {
+		log.Printf("Error generating PDF: %v", err)
+		http.Error(w, "Failed to generate PDF", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("PDF successfully generated for page %s", req.PageID)
+}
+
+// ContentItem represents structured text with formatting information
+type ContentItem struct {
+	Type    string
+	Text    string
+	Cells   []string
+	Checked bool
+}
+
+// ExtractStructuredText parses HTML and returns structured content
+func ExtractStructuredText(htmlContent string) ([]ContentItem, error) {
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		return nil, err
+	}
+
+	var items []ContentItem
+	var process func(*html.Node)
+
+	inTable := false
+	currentRow := ContentItem{Type: "table-row"}
+
+	process = func(n *html.Node) {
+		if n.Type == html.ElementNode {
+			switch n.Data {
+			case "h1", "h2", "h3", "h4", "h5", "h6":
+				var text strings.Builder
+				extractText(n, &text)
+				items = append(items, ContentItem{
+					Type: "heading",
+					Text: text.String(),
+				})
+				return
+
+			case "p":
+				var text strings.Builder
+				extractText(n, &text)
+				items = append(items, ContentItem{
+					Type: "paragraph",
+					Text: text.String(),
+				})
+				return
+
+			case "li":
+				var text strings.Builder
+				extractText(n, &text)
+				items = append(items, ContentItem{
+					Type: "list-item",
+					Text: text.String(),
+				})
+				return
+
+			case "table":
+				inTable = true
+
+			case "tr":
+				if inTable {
+					currentRow = ContentItem{Type: "table-row", Cells: []string{}}
+				}
+
+			case "td", "th":
+				if inTable {
+					var text strings.Builder
+					extractText(n, &text)
+					currentRow.Cells = append(currentRow.Cells, text.String())
+				}
+
+			case "input":
+				// Handle checkboxes for task lists
+				var isCheckbox bool
+				var isChecked bool
+				for _, a := range n.Attr {
+					if a.Key == "type" && a.Val == "checkbox" {
+						isCheckbox = true
+					}
+					if a.Key == "checked" {
+						isChecked = true
+					}
+				}
+
+				if isCheckbox {
+					// Get the text that follows
+					var text strings.Builder
+					if n.NextSibling != nil {
+						extractText(n.NextSibling, &text)
+					}
+
+					items = append(items, ContentItem{
+						Type:    "task-item",
+						Text:    text.String(),
+						Checked: isChecked,
+					})
+					return
+				}
+			}
+		}
+
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			process(c)
+		}
+
+		// After processing all children of a table row, add it to items
+		if n.Type == html.ElementNode && n.Data == "tr" && inTable {
+			if len(currentRow.Cells) > 0 {
+				items = append(items, currentRow)
+			}
+		}
+
+		// After processing all children of a table, reset the table state
+		if n.Type == html.ElementNode && n.Data == "table" {
+			inTable = false
+		}
+	}
+
+	process(doc)
+	return items, nil
+}
+
+// Helper function to extract text from HTML nodes
+func extractText(n *html.Node, builder *strings.Builder) {
+	if n.Type == html.TextNode {
+		builder.WriteString(n.Data)
+	}
+
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		extractText(c, builder)
+	}
+}
+
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -11110,6 +11365,7 @@ func main() {
 	r.HandleFunc("/pages/templates/{id}", authMiddleware(handleGetTemplate)).Methods("GET")
 	r.HandleFunc("/pages/templates/{id}", authMiddleware(handleUpdateTemplate)).Methods("PUT")
 	r.HandleFunc("/pages/{id}/project", authMiddleware(handleAssociatePageWithProject)).Methods("PUT")
+	r.HandleFunc("/pages/{id}/export-pdf", authMiddleware(handleGeneratePDF)).Methods("POST")
 
 	// Projects
 	r.HandleFunc("/projects", authMiddleware(handleGetProjects)).Methods("GET")

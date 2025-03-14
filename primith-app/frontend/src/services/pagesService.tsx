@@ -443,4 +443,29 @@ async createTemplate(
       throw error;
     }
   }
+
+  async exportPageToPDF(pageId: string, content: string, title: string): Promise<Blob> {
+    const headers = await this.getAuthHeader();
+    
+    const response = await fetch(`${this.baseUrl}/pages/${pageId}/export-pdf`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        ...headers,
+        'Accept': 'application/pdf'
+      },
+      body: JSON.stringify({
+        content,
+        title,
+        pageId
+      })
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to generate PDF: ${errorText}`);
+    }
+    
+    return response.blob();
+  }
 }
