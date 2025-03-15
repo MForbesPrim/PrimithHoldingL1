@@ -94,7 +94,7 @@ function PageViewer({ pageId, onClose }: PageViewerProps) {
       if (!pageId || !selectedOrgId) return;
       setLoading(true);
       try {
-        const pages = await pagesService.getPages(selectedOrgId);
+        const pages = await pagesService.getProjectPages(selectedOrgId, pageId);
         const pageData = pages.find(p => p.id === pageId);
         if (pageData) {
           setPage(pageData);
@@ -302,7 +302,7 @@ export function ProjectDetailPage() {
   async function loadAssociatedPages() {
     if (!projectId || !project?.organizationId) return;
     try {
-      const pages = await pagesService.getPages(project.organizationId, projectId);
+      const pages = await pagesService.getProjectPages(project.organizationId, projectId);
       setAssociatedPages(Array.isArray(pages) ? pages : []);
     } catch (error) {
       console.error("Failed to load associated pages:", error);
