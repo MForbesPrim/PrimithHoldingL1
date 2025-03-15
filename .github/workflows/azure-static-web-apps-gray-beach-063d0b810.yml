@@ -42,7 +42,9 @@ jobs:
           node-version: '18'
       
       - name: Install Dependencies
-        run: npm ci
+        run: |
+          npm ci
+          npm install terser --save-dev
         working-directory: ./primith-app/frontend
       
       - name: Build
