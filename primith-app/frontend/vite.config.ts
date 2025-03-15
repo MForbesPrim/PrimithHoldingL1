@@ -8,57 +8,50 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-tiptap': [
-            '@tiptap/react',
-            '@tiptap/starter-kit',
-            '@tiptap/extension-color',
-            '@tiptap/extension-highlight',
-            '@tiptap/extension-image',
-            '@tiptap/extension-link',
-            '@tiptap/extension-placeholder',
-            '@tiptap/extension-table',
-            '@tiptap/extension-table-cell',
-            '@tiptap/extension-table-header',
-            '@tiptap/extension-table-row',
-            '@tiptap/extension-task-item',
-            '@tiptap/extension-task-list',
-            '@tiptap/extension-text-align',
-            '@tiptap/extension-text-style',
-            '@tiptap/extension-underline',
-            'tiptap-extension-resize-image'
-          ],
-          'vendor-radix': [
-            '@radix-ui/react-alert-dialog',
-            '@radix-ui/react-avatar',
-            '@radix-ui/react-checkbox',
-            '@radix-ui/react-context-menu',
-            '@radix-ui/react-dialog',
-            '@radix-ui/react-dropdown-menu',
-            '@radix-ui/react-hover-card',
-            '@radix-ui/react-label',
-            '@radix-ui/react-navigation-menu',
-            '@radix-ui/react-popover',
-            '@radix-ui/react-progress',
-            '@radix-ui/react-scroll-area',
-            '@radix-ui/react-select',
-            '@radix-ui/react-separator',
-            '@radix-ui/react-slot',
-            '@radix-ui/react-switch',
-            '@radix-ui/react-tabs',
-            '@radix-ui/react-toast',
-            '@radix-ui/react-tooltip'
-          ],
-          'vendor-utils': [
-            'lucide-react',
-            'date-fns',
-            'axios',
-            'recharts',
-            '@clerk/clerk-react',
-            '@dnd-kit/core',
-            '@tanstack/react-table'
-          ]
+        manualChunks: (id) => {
+          // Basic React dependencies
+          if (id.includes('react/') || id.includes('react-dom/') || id.includes('react-router-dom/')) {
+            return 'vendor-react';
+          }
+          
+          // TipTap editor chunks
+          if (id.includes('@tiptap/')) {
+            return 'vendor-tiptap';
+          }
+
+          // Radix UI - split into smaller chunks
+          if (id.includes('@radix-ui/')) {
+            if (id.includes('dialog') || id.includes('popover') || id.includes('menu')) {
+              return 'radix-overlays';
+            }
+            if (id.includes('avatar') || id.includes('progress') || id.includes('scroll')) {
+              return 'radix-display';
+            }
+            return 'radix-base';
+          }
+
+          // Split clerk auth separately
+          if (id.includes('@clerk/')) {
+            return 'vendor-auth';
+          }
+
+          // Charts and data visualization
+          if (id.includes('recharts/')) {
+            return 'vendor-charts';
+          }
+
+          // UI utilities
+          if (id.includes('lucide-react') || id.includes('date-fns')) {
+            return 'vendor-ui-utils';
+          }
+
+          // Data management
+          if (id.includes('@tanstack/') || id.includes('axios')) {
+            return 'vendor-data';
+          }
+
+          // Default chunk
+          return null;
         },
         chunkFileNames: 'js/[name]-[hash].js',
         entryFileNames: 'js/[name]-[hash].js',
@@ -66,7 +59,8 @@ export default defineConfig({
       }
     },
     chunkSizeWarningLimit: 500,
-    minify: 'esbuild'
+    minify: 'esbuild',
+    target: 'esnext'
   },
   plugins: [react()],
   resolve: {
@@ -74,4 +68,7 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'react-router-dom']
+  }
 })
