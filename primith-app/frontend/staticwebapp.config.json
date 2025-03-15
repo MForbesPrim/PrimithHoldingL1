@@ -1,5 +1,11 @@
 {
     "navigationFallback": {
-        "rewrite": "/index.html"
+      "rewrite": "/index.html"
+    },
+    "mimeTypes": {
+      ".json": "text/json"
+    },
+    "globalHeaders": {
+      "content-security-policy": "default-src https: 'unsafe-eval' 'unsafe-inline'; object-src 'none'"
     }
-}
+  }
