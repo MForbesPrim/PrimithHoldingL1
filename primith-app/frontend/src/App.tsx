@@ -38,6 +38,8 @@ import { ReportingPage } from "@/components/pages/reportingPage"
 import { FinancialServicesPage } from "@/components/pages/financialServicesPage"
 import { ConsultingPage } from "@/components/pages/consultingPage"
 import { ProServicesPage } from "@/components/pages/proServicesPage"
+import { AccountPage } from "@/components/pages/account/AccountPage"
+import { AdminSettingsLayout } from "@/components/pages/admin/settings/AdminSettingsLayout"
 
 function App() {
   useTokenRefresh();
@@ -61,14 +63,21 @@ function App() {
                         <PortalHomePage />
                       </ProtectedRoute>
                     } />
+                    <Route path="/account" element={
+                      <ProtectedRoute>
+                        <AccountPage />
+                      </ProtectedRoute>
+                    } />
                     <Route path="/admin" element={<AdminLayout />}>
                       <Route path="users" element={<UsersPage />} />
                       <Route path="organizations" element={<OrganizationsPage />} />
                       <Route path="roles" element={<RolesPage />} />
                       <Route path="services" element={<ServicesPage />} />
-                      <Route path="settings/administration" element={<AdministrationPage />} />
-                      <Route path="settings/licensing" element={<LicensingPage />} />
-                      <Route path="settings/billing" element={<BillingPage />} />
+                    </Route>
+                    <Route path="/admin/settings" element={<AdminSettingsLayout />}>
+                      <Route path="administration" element={<AdministrationPage />} />
+                      <Route path="licensing" element={<LicensingPage />} />
+                      <Route path="billing" element={<BillingPage />} />
                     </Route>
                   </Route>
                   <Route element={<ProtectedRdmLayout />}>

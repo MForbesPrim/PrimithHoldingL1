@@ -500,7 +500,10 @@ export function RdmHeader() {
 
              <AdminNav />
 
-             <DropdownMenuItem className="cursor-pointer text-xs flex items-center">
+             <DropdownMenuItem
+               onClick={() => window.open('/account', '_self')}
+               className="cursor-pointer text-xs flex items-center"
+             >
                <User className="w-5 h-5 mr-2" />
                <span>Account</span>
              </DropdownMenuItem>
