@@ -27,7 +27,6 @@ export default defineConfig({
             '@tiptap/extension-text-align',
             '@tiptap/extension-text-style',
             '@tiptap/extension-underline',
-            '@tiptap/pm',
             'tiptap-extension-resize-image'
           ],
           'vendor-radix': [
