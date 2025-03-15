@@ -20,7 +20,7 @@ export function HomePage() {
 
       {/* HEADER */}
       <header className="border-b border-white/10 backdrop-blur-sm top-0 w-full z-50">
-        <div className="container mx-auto px-4 py-4">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <nav className="flex items-center justify-between">
             <Link
               to="/"
@@ -68,28 +68,28 @@ export function HomePage() {
       </header>
 
       {/* HERO SECTION */}
-      <section className="pt-32 pb-20 relative overflow-hidden">
+      <section className="pt-20 md:pt-32 pb-16 md:pb-20 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-gray-200/10 to-gray-500/10" />
-        <div className="container mx-auto px-4 relative">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8 relative">
           <Badge className="mb-4 text-gray-500" variant="outline">
             Innovation Solutions
           </Badge>
-          <h1 className="text-5xl md:text-7xl font-bold tracking-tighter mb-4 bg-gradient-to-r from-gray-400 to-gray-900 text-transparent bg-clip-text leading-tight pb-2">
+          <h1 className="text-4xl sm:text-5xl md:text-7xl font-bold tracking-tighter mb-4 bg-gradient-to-r from-gray-400 to-gray-900 text-transparent bg-clip-text leading-tight pb-2">
             Empowering Businesses
             <br />
             With Technology
           </h1>
-          <p className="text-xl text-gray-400 max-w-2xl mb-8">
+          <p className="text-lg sm:text-xl text-gray-400 max-w-2xl mb-8">
             Discover innovative technology solutions designed to optimize workflows, enhance productivity, and drive business growth.
           </p>
-          <div className="flex gap-4">
-            <Button size="lg" className="hover:bg-gray-400 hover:text-white" asChild>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <Button size="lg" className="hover:bg-gray-400 hover:text-white w-full sm:w-auto" asChild>
               <Link to="/services">Services</Link>
             </Button>
             <Button
               size="lg"
               variant="outline"
-              className="border-gray-400 text-gray-500 dark:text-white bg-transparent hover:bg-gray-400 hover:text-white"
+              className="border-gray-400 text-gray-500 dark:text-white bg-transparent hover:bg-gray-400 hover:text-white w-full sm:w-auto"
               asChild
             >
               <Link to="/about-us">About Us</Link>
@@ -99,12 +99,12 @@ export function HomePage() {
       </section>
 
       {/* FEATURED PRODUCTS SECTION */}
-      <section className="py-20 inset-0 bg-gradient-to-b from-gray-200/10 to-gray-500/10">
-        <div className="container mx-auto px-4">
-          <h2 className="text-4xl font-bold tracking-tight text-center mb-12 text-gray-800 dark:text-gray-100">
+      <section className="py-16 md:py-20 inset-0 bg-gradient-to-b from-gray-200/10 to-gray-500/10">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-center mb-12 text-gray-800 dark:text-gray-100">
             Featured Products
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
             {/* Reporting */}
             <div className="p-6 bg-white dark:bg-transparent border rounded-lg shadow-md hover:shadow-lg transition-shadow">
               <h3 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-4">
@@ -152,8 +152,8 @@ export function HomePage() {
       </section>
 
       {/* FOOTER */}
-      <footer className="py-8 border-t border-white/10">
-        <div className="container mx-auto px-4">
+      <footer className="py-6 md:py-8 border-t border-white/10">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <div className="flex items-center gap-2 mb-4 md:mb-0">
               <Sparkle className="w-5 h-5 text-gray-500 hover:text-gray-400" />

@@ -17,7 +17,7 @@ export function ServicesPage() {
     <div className="min-h-screen dark:bg-black text-white">
       {/* HEADER */}
       <header className="border-b border-white/10 backdrop-blur-sm top-0 w-full z-50">
-        <div className="container mx-auto px-4 py-4">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <nav className="flex items-center justify-between">
             <Link
               to="/"
