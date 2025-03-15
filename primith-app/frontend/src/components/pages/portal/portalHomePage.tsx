@@ -201,29 +201,38 @@ export function PortalHomePage() {
                         <span>Settings</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent>
-                        <DropdownMenuItem className="cursor-pointer text-xs font-light flex justify-between items-start p-2">
-                          <div className="flex flex-col">
-                            <span className="text-xs font-normal">Administration</span>
-                            <p className="text-[10px] text-gray-500 mt-0.5">Control user roles and permissions</p>
-                          </div>
-                          <SquareArrowOutUpRight className="w-4 h-4 mt-1 text-gray-500" />
-                        </DropdownMenuItem>
-                        
-                        <DropdownMenuItem className="cursor-pointer text-xs font-light flex justify-between items-start p-2">
-                          <div className="flex flex-col">
-                            <span className="text-xs font-normal">Licensing</span>
-                            <p className="text-[10px] text-gray-500 mt-0.5">View and manage licenses</p>
-                          </div>
-                          <SquareArrowOutUpRight className="w-4 h-4 mt-1 text-gray-500" />
-                        </DropdownMenuItem>
-                        
-                        <DropdownMenuItem className="cursor-pointer text-xs font-light flex justify-between items-start p-2">
-                          <div className="flex flex-col">
-                            <span className="text-xs font-normal">Billing</span>
-                            <p className="text-[10px] text-gray-500 mt-0.5">Update your billing information</p>
-                          </div>
-                          <SquareArrowOutUpRight className="w-4 h-4 mt-1 text-gray-500" />
-                        </DropdownMenuItem>
+                      <DropdownMenuItem 
+                        onClick={() => window.open('/admin/settings/administration', '_blank', 'noopener,noreferrer')}
+                        className="cursor-pointer text-xs font-light flex justify-between items-start p-2"
+                      >
+                        <div className="flex flex-col">
+                          <span className="text-xs font-normal">Administration</span>
+                          <p className="text-[10px] text-gray-500 mt-0.5">Control user roles and permissions</p>
+                        </div>
+                        <SquareArrowOutUpRight className="w-4 h-4 mt-1 text-gray-500" />
+                      </DropdownMenuItem>
+
+                      <DropdownMenuItem 
+                        onClick={() => window.open('/admin/settings/licensing', '_blank', 'noopener,noreferrer')}
+                        className="cursor-pointer text-xs font-light flex justify-between items-start p-2"
+                      >
+                        <div className="flex flex-col">
+                          <span className="text-xs font-normal">Licensing</span>
+                          <p className="text-[10px] text-gray-500 mt-0.5">View and manage licenses</p>
+                        </div>
+                        <SquareArrowOutUpRight className="w-4 h-4 mt-1 text-gray-500" />
+                      </DropdownMenuItem>
+
+                      <DropdownMenuItem 
+                        onClick={() => window.open('/admin/settings/billing', '_blank', 'noopener,noreferrer')}
+                        className="cursor-pointer text-xs font-light flex justify-between items-start p-2"
+                      >
+                        <div className="flex flex-col">
+                          <span className="text-xs font-normal">Billing</span>
+                          <p className="text-[10px] text-gray-500 mt-0.5">Update your billing information</p>
+                        </div>
+                        <SquareArrowOutUpRight className="w-4 h-4 mt-1 text-gray-500" />
+                      </DropdownMenuItem>
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
                     

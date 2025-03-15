@@ -19,6 +19,9 @@ import { UsersPage } from "@/components/pages/admin/usersPage"
 import { OrganizationsPage } from "@/components/pages/admin/organizationsPage"
 import { RolesPage } from "@/components/pages/admin/rolesPage"
 import { ServicesPage } from "@/components/pages/admin/servicesPage"
+import { AdministrationPage } from "@/components/pages/admin/settings/AdministrationPage"
+import { LicensingPage } from "@/components/pages/admin/settings/LicensingPage"
+import { BillingPage } from "@/components/pages/admin/settings/BillingPage"
 import { NotFoundPage } from "@/components/pages/notFoundPage" 
 import { RdmHomePage } from "@/components/pages/rdm/rdmHomePage";
 import { ProjectsPage } from "@/components/pages/rdm/projects/projectsDashboard";
@@ -63,6 +66,9 @@ function App() {
                       <Route path="organizations" element={<OrganizationsPage />} />
                       <Route path="roles" element={<RolesPage />} />
                       <Route path="services" element={<ServicesPage />} />
+                      <Route path="settings/administration" element={<AdministrationPage />} />
+                      <Route path="settings/licensing" element={<LicensingPage />} />
+                      <Route path="settings/billing" element={<BillingPage />} />
                     </Route>
                   </Route>
                   <Route element={<ProtectedRdmLayout />}>
