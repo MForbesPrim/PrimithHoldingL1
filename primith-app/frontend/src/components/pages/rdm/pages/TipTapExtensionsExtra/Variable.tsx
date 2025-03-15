@@ -1,6 +1,7 @@
 import { Node, mergeAttributes } from '@tiptap/core'
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
 import { useEffect, useState } from 'react'
+import { ProjectService } from "@/services/projectService";
 
 export interface VariableOptions {
   HTMLAttributes: Record<string, string>,
@@ -39,7 +40,6 @@ const VariableBadgeComponent = ({ node, editor }: { node: any, editor: any }) =>
                           document.querySelector('[data-project-id]')?.getAttribute('data-project-id');
           
           if (projectId) {
-            const { ProjectService } = await import('@/services/projectService');
             const projectService = new ProjectService();
             const variables = await projectService.getProjectVariables(projectId);
             const foundVariable = variables.find((v: any) => v.key === variableName);
