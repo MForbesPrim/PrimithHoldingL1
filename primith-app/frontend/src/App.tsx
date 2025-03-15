@@ -1,58 +1,43 @@
 import "./App.css"
 import { Routes, Route } from "react-router-dom"
-import { lazy, Suspense } from 'react'
 import { ThemeProvider } from "@/components/theme-provider"
-import { Toaster } from "@/components/ui/toaster"
-import { useTokenRefresh } from './hooks/useTokenRefresh'
+import { Toaster } from "@/components/ui/toaster";
+import { useTokenRefresh } from './hooks/useTokenRefresh';
 
-// Core components loaded immediately
+import { HomePage } from "@/components/pages/homePage"
 import { LoginPage } from "@/components/pages/loginPage"
+import { ContactPage } from "@/components/pages/contactUsPage"
+import { PrivacyPage } from "@/components/pages/privacyNotice"
+import { TermsPage } from "@/components/pages/termsOfService"
 import { AuthRedirect } from "@/redirect"
+import { ProtectedPage } from "@/components/pages/protectedPage"
+import { PortalHomePage } from "@/components/pages/portal/portalHomePage"
 import { ProtectedRoute } from "@/components/protectedRoute"
-import { ProtectedLayout } from '@/protectedLayout'
-
-// Lazy loaded components with named exports
-const HomePage = lazy(() => import("@/components/pages/homePage").then(module => ({ default: module.HomePage })))
-const ContactPage = lazy(() => import("@/components/pages/contactUsPage").then(module => ({ default: module.ContactPage })))
-const PrivacyPage = lazy(() => import("@/components/pages/privacyNotice").then(module => ({ default: module.PrivacyPage })))
-const TermsPage = lazy(() => import("@/components/pages/termsOfService").then(module => ({ default: module.TermsPage })))
-const ProtectedPage = lazy(() => import("@/components/pages/protectedPage").then(module => ({ default: module.ProtectedPage })))
-const PortalHomePage = lazy(() => import("@/components/pages/portal/portalHomePage").then(module => ({ default: module.PortalHomePage })))
-const NotFoundPage = lazy(() => import("@/components/pages/notFoundPage").then(module => ({ default: module.NotFoundPage })))
-const HelpPage = lazy(() => import("@/components/pages/helpCenterPage").then(module => ({ default: module.HelpPage })))
-const MainServicesPage = lazy(() => import("@/components/pages/servicesPage").then(module => ({ default: module.ServicesPage })))
-const AboutUsPage = lazy(() => import("@/components/pages/aboutUsPage").then(module => ({ default: module.AboutUsPage })))
-const ReportingPage = lazy(() => import("@/components/pages/reportingPage").then(module => ({ default: module.ReportingPage })))
-const FinancialServicesPage = lazy(() => import("@/components/pages/financialServicesPage").then(module => ({ default: module.FinancialServicesPage })))
-const ConsultingPage = lazy(() => import("@/components/pages/consultingPage").then(module => ({ default: module.ConsultingPage })))
-const ProServicesPage = lazy(() => import("@/components/pages/proServicesPage").then(module => ({ default: module.ProServicesPage })))
-
-// Admin routes
-const AdminLayout = lazy(() => import("@/components/pages/admin/adminLayout").then(module => ({ default: module.AdminLayout })))
-const UsersPage = lazy(() => import("@/components/pages/admin/usersPage").then(module => ({ default: module.UsersPage })))
-const OrganizationsPage = lazy(() => import("@/components/pages/admin/organizationsPage").then(module => ({ default: module.OrganizationsPage })))
-const RolesPage = lazy(() => import("@/components/pages/admin/rolesPage").then(module => ({ default: module.RolesPage })))
-const ServicesPage = lazy(() => import("@/components/pages/admin/servicesPage").then(module => ({ default: module.ServicesPage })))
-
-// RDM routes
-const ProtectedRdmLayout = lazy(() => import("@/components/pages/rdm/layouts/protected-rdm-layout").then(module => ({ default: module.ProtectedRdmLayout })))
-const RdmHomePage = lazy(() => import("@/components/pages/rdm/rdmHomePage").then(module => ({ default: module.RdmHomePage })))
-const ProjectsPage = lazy(() => import("@/components/pages/rdm/projects/projectsDashboard").then(module => ({ default: module.ProjectsPage })))
-const ProjectDetailPage = lazy(() => import("@/components/pages/rdm/projects/projectDetails").then(module => ({ default: module.ProjectDetailPage })))
-const PagesDashboard = lazy(() => import("@/components/pages/rdm/pages/pagesDashboard").then(module => ({ default: module.PagesDashboard })))
-const CreateTemplate = lazy(() => import("@/components/pages/rdm/pages/pagesCreateTemplate").then(module => ({ default: module.CreateTemplate })))
-const EditTemplate = lazy(() => import("@/components/pages/rdm/pages/pagesEditTemplate").then(module => ({ default: module.EditTemplate })))
-const DocumentManagementPage = lazy(() => import("@/components/pages/rdm/documentManagement/dmDashboard").then(module => ({ default: module.DocumentManagementPage })))
-
-// Loading component
-const LoadingSpinner = () => (
-  <div className="flex h-screen w-screen items-center justify-center">
-    <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
-  </div>
-)
+import { ProtectedLayout } from '@/protectedLayout';
+import { AdminLayout } from "@/components/pages/admin/adminLayout"
+import { UsersPage } from "@/components/pages/admin/usersPage"
+import { OrganizationsPage } from "@/components/pages/admin/organizationsPage"
+import { RolesPage } from "@/components/pages/admin/rolesPage"
+import { ServicesPage } from "@/components/pages/admin/servicesPage"
+import { NotFoundPage } from "@/components/pages/notFoundPage" 
+import { RdmHomePage } from "@/components/pages/rdm/rdmHomePage";
+import { ProjectsPage } from "@/components/pages/rdm/projects/projectsDashboard";
+import { ProjectDetailPage } from "@/components/pages/rdm/projects/projectDetails";
+import { PagesDashboard } from "@/components/pages/rdm/pages/pagesDashboard";
+import { CreateTemplate } from "@/components/pages/rdm/pages/pagesCreateTemplate";
+import { EditTemplate } from "@/components/pages/rdm/pages/pagesEditTemplate";
+import { DocumentManagementPage } from "@/components/pages/rdm/documentManagement/dmDashboard";
+import { ProtectedRdmLayout } from "@/components/pages/rdm/layouts/protected-rdm-layout";
+import { HelpPage } from "@/components/pages/helpCenterPage";
+import { ServicesPage as MainServicesPage } from "@/components/pages/servicesPage"
+import { AboutUsPage } from "@/components/pages/aboutUsPage"
+import { ReportingPage } from "@/components/pages/reportingPage"
+import { FinancialServicesPage } from "@/components/pages/financialServicesPage"
+import { ConsultingPage } from "@/components/pages/consultingPage"
+import { ProServicesPage } from "@/components/pages/proServicesPage"
 
 function App() {
-  useTokenRefresh()
+  useTokenRefresh();
 
   const domain = window.location.hostname
   const isPortal = domain === 'portal.primith.com' || domain === 'portal.localhost'
@@ -62,7 +47,6 @@ function App() {
     <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
       <div className="flex h-screen w-screen">
         <div className="flex flex-1 flex-col">
-          <Suspense fallback={<LoadingSpinner />}>
             <Routes>
               {isSupport ? (
                 <Route path="/" element={<HelpPage />} />
@@ -75,10 +59,10 @@ function App() {
                       </ProtectedRoute>
                     } />
                     <Route path="/admin" element={<AdminLayout />}>
-                      <Route path="users" element={<Suspense fallback={<LoadingSpinner />}><UsersPage /></Suspense>} />
-                      <Route path="organizations" element={<Suspense fallback={<LoadingSpinner />}><OrganizationsPage /></Suspense>} />
-                      <Route path="roles" element={<Suspense fallback={<LoadingSpinner />}><RolesPage /></Suspense>} />
-                      <Route path="services" element={<Suspense fallback={<LoadingSpinner />}><ServicesPage /></Suspense>} />
+                      <Route path="users" element={<UsersPage />} />
+                      <Route path="organizations" element={<OrganizationsPage />} />
+                      <Route path="roles" element={<RolesPage />} />
+                      <Route path="services" element={<ServicesPage />} />
                     </Route>
                   </Route>
                   <Route element={<ProtectedRdmLayout />}>
@@ -121,7 +105,6 @@ function App() {
                 </>
               )}
             </Routes>
-          </Suspense>
         </div>
       </div>
       <Toaster />

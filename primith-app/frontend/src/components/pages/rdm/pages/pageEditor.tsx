@@ -18,7 +18,7 @@ import TextAlign from '@tiptap/extension-text-align';
 import { useToast } from "@/hooks/use-toast";
 import Placeholder from '@tiptap/extension-placeholder';
 import { Divider } from './TipTapExtensionsExtra/Divider';
-import { Variable } from './TipTapExtensionsExtra/Variable';
+// import { Variable } from './TipTapExtensionsExtra/Variable';
 import { InfoPanel } from './TipTapExtensionsExtra/InfoPanel';
 import { DateNode } from './TipTapExtensionsExtra/DateNode';
 import { Expand } from './TipTapExtensionsExtra/Expand';
@@ -428,7 +428,7 @@ const VariablesMenu = ({ editor, projectId }: { editor: Editor, projectId?: stri
               className="flex justify-between items-center px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
               onClick={() => {
                 // Use the new insertVariable command
-                editor.chain().focus().insertVariable(variable.key).run();
+                // editor.chain().focus().insertVariable(variable.key).run();
               }}
             >
               <div className="flex flex-col">
@@ -678,7 +678,7 @@ const PageEditor = ({
       Divider,
       InfoPanel,
       DateNode,
-      Variable,
+      // Variable,
       Expand,
       GapCursorExtension,
     ],
