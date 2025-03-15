@@ -9368,7 +9368,7 @@ func handleAddProjectTag(w http.ResponseWriter, r *http.Request) {
 	var userId string
 	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
 	if err != nil {
-		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		http.Error(w, "Failed to get userID", http.StatusInternalServerError)
 		return
 	}
 
