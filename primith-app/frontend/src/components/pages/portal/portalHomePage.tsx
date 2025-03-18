@@ -25,7 +25,7 @@ import {
 import { ChatBot } from "@/components/pages/portal/primithChat"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 export function PortalHomePage() {
   const user = AuthService.getUser()
@@ -34,6 +34,27 @@ export function PortalHomePage() {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [isLoadingAvatar, setIsLoadingAvatar] = useState(false)
+
+  useEffect(() => {
+    fetchUserAvatar()
+  }, [])
+
+  async function fetchUserAvatar() {
+    setIsLoadingAvatar(true);
+    try {
+      const avatarData = await AuthService.getUserAvatar();
+      if (avatarData.hasAvatar && avatarData.avatarUrl) {
+        setAvatarUrl(avatarData.avatarUrl);
+      }
+    } catch (error) {
+      console.error("Failed to fetch user avatar:", error);
+    } finally {
+      setIsLoadingAvatar(false);
+    }
+  }
+
   const handleRdmNavigation = async () => {
     try {
       // Pass `navigate` into AuthService
@@ -167,14 +188,28 @@ export function PortalHomePage() {
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
                     <Avatar className="h-8 w-8 cursor-pointer hover:ring-1 hover:ring-black">
-                      <AvatarImage 
-                        src="/placeholder-avatar.jpg" 
-                        alt={user ? `${user.firstName} ${user.lastName}` : 'User'} 
-                        className="text-xs"
-                      />
-                      <AvatarFallback className="text-xs">
-                        {user ? getInitials(user.firstName, user.lastName) : 'U'}
-                      </AvatarFallback>
+                      {isLoadingAvatar ? (
+                        <AvatarFallback className="animate-pulse text-xs">
+                          {user ? getInitials(user.firstName, user.lastName) : "U"}
+                        </AvatarFallback>
+                      ) : avatarUrl ? (
+                        <AvatarImage
+                          src={avatarUrl}
+                          alt={user ? `${user.firstName} ${user.lastName}` : "User"}
+                          className="object-cover"
+                        />
+                      ) : (
+                        <>
+                          <AvatarImage
+                            src="/placeholder-avatar.jpg"
+                            alt={user ? `${user.firstName} ${user.lastName}` : "User"}
+                            className="text-xs"
+                          />
+                          <AvatarFallback className="text-xs">
+                            {user ? getInitials(user.firstName, user.lastName) : "U"}
+                          </AvatarFallback>
+                        </>
+                      )}
                     </Avatar>
                   </DropdownMenuTrigger>
                 </TooltipTrigger>

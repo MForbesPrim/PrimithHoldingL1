@@ -20,6 +20,8 @@ export function AdminSettingsLayout() {
     const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
     const [isOpen, setIsOpen] = useState(false)
     const user = AuthService.getUser()
+    const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+    const [isLoadingAvatar, setIsLoadingAvatar] = useState(false)
 
     useEffect(() => {
         const checkAdmin = async () => {
@@ -27,7 +29,22 @@ export function AdminSettingsLayout() {
             setIsAdmin(adminStatus)
         }
         checkAdmin()
+        fetchUserAvatar()
     }, [])
+
+    async function fetchUserAvatar() {
+        setIsLoadingAvatar(true);
+        try {
+            const avatarData = await AuthService.getUserAvatar();
+            if (avatarData.hasAvatar && avatarData.avatarUrl) {
+                setAvatarUrl(avatarData.avatarUrl);
+            }
+        } catch (error) {
+            console.error("Failed to fetch user avatar:", error);
+        } finally {
+            setIsLoadingAvatar(false);
+        }
+    }
 
     const getInitials = (firstName: string, lastName: string) => {
         return `${firstName[0]}${lastName[0]}`
@@ -81,13 +98,28 @@ export function AdminSettingsLayout() {
                     <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
                         <DropdownMenuTrigger asChild>
                             <Avatar className="relative h-8 w-8 text-sm rounded-full hover:ring-1 hover:ring-black focus:ring-0 active:ring-0 data-[state=open]:ring-0 cursor-pointer">
-                                <AvatarImage 
-                                    src="/placeholder-avatar.jpg" 
-                                    alt={user ? `${user.firstName} ${user.lastName}` : 'User'} 
-                                />
-                                <AvatarFallback>
-                                    {user ? getInitials(user.firstName, user.lastName) : 'U'}
-                                </AvatarFallback>
+                                {isLoadingAvatar ? (
+                                    <AvatarFallback className="animate-pulse text-xs">
+                                        {user ? getInitials(user.firstName, user.lastName) : "U"}
+                                    </AvatarFallback>
+                                ) : avatarUrl ? (
+                                    <AvatarImage
+                                        src={avatarUrl}
+                                        alt={user ? `${user.firstName} ${user.lastName}` : "User"}
+                                        className="object-cover"
+                                    />
+                                ) : (
+                                    <>
+                                        <AvatarImage
+                                            src="/placeholder-avatar.jpg"
+                                            alt={user ? `${user.firstName} ${user.lastName}` : "User"}
+                                            className="text-xs"
+                                        />
+                                        <AvatarFallback className="text-xs">
+                                            {user ? getInitials(user.firstName, user.lastName) : "U"}
+                                        </AvatarFallback>
+                                    </>
+                                )}
                             </Avatar>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-56">

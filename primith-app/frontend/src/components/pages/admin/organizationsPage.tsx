@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Loader2 } from "lucide-react"
+import { Loader2, CreditCard, Key } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import AuthService, { Organization } from '@/services/auth'
 import { OrganizationDialog } from '@/components/pages/admin/organizationDialog'
+import { LicensesDialog } from '@/components/pages/admin/licensesDialog'
+import { BillingDialog } from '@/components/pages/admin/billingDialog'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,10 +23,20 @@ export function OrganizationsPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [licensesDialogOpen, setLicensesDialogOpen] = useState(false)
+  const [billingDialogOpen, setBillingDialogOpen] = useState(false)
   const [editingOrganization, setEditingOrganization] = useState<Organization | undefined>()
+  const [selectedOrgId, setSelectedOrgId] = useState<string | undefined>()
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [organizationToDelete, setOrganizationToDelete] = useState<Organization | undefined>()
+  const [isAdmin, setIsAdmin] = useState(false)
   const { toast } = useToast()
+
+  // Helper function to format service names
+  const formatServiceName = (name: string) => {
+    if (name.toLowerCase() === 'rdm') return 'RDM';
+    return name;
+  }
 
   const fetchOrganizations = async () => {
     try {
@@ -45,6 +57,11 @@ export function OrganizationsPage() {
 
   useEffect(() => {
     fetchOrganizations()
+    const checkAdmin = async () => {
+      const admin = await AuthService.isSuperAdmin()
+      setIsAdmin(admin)
+    }
+    checkAdmin()
   }, [])
 
   const handleAddOrganization = async (orgData: Partial<Organization>) => {
@@ -126,6 +143,16 @@ export function OrganizationsPage() {
     }
   }
 
+  const openLicensesDialog = (orgId: string) => {
+    setSelectedOrgId(orgId)
+    setLicensesDialogOpen(true)
+  }
+
+  const openBillingDialog = (orgId: string) => {
+    setSelectedOrgId(orgId)
+    setBillingDialogOpen(true)
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -163,32 +190,50 @@ export function OrganizationsPage() {
               <TableCell>
                 {org.services?.map(service => (
                   <Badge key={service.id} variant="outline" className="mr-1">
-                    {service.name}
+                    {formatServiceName(service.name)}
                   </Badge>
                 ))}
               </TableCell>
-              <TableCell className="text-right space-x-2">
-                <Button 
-                  variant="ghost" 
-                  size="sm"
-                  onClick={() => {
-                    setEditingOrganization(org)
-                    setDialogOpen(true)
-                  }}
-                >
-                  Edit
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="text-destructive hover:text-destructive/90"
-                  onClick={() => {
-                    setOrganizationToDelete(org)
-                    setDeleteDialogOpen(true)
-                  }}
-                >
-                  Delete
-                </Button>
+              <TableCell className="text-right">
+                <div className="flex items-center justify-end space-x-2">
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => {
+                      setEditingOrganization(org)
+                      setDialogOpen(true)
+                    }}
+                  >
+                    Edit
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => openLicensesDialog(org.id)}
+                  >
+                    <Key className="h-4 w-4 mr-2" />
+                    Licenses
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => openBillingDialog(org.id)}
+                  >
+                    <CreditCard className="h-4 w-4 mr-2" />
+                    Billing
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="text-destructive hover:text-destructive/90"
+                    onClick={() => {
+                      setOrganizationToDelete(org)
+                      setDeleteDialogOpen(true)
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </div>
               </TableCell>
             </TableRow>
           ))}
@@ -204,6 +249,24 @@ export function OrganizationsPage() {
         onSubmit={editingOrganization ? handleEditOrganization : handleAddOrganization}
         organization={editingOrganization}
       />
+
+      {selectedOrgId && (
+        <>
+          <LicensesDialog
+            open={licensesDialogOpen}
+            onClose={() => setLicensesDialogOpen(false)}
+            organizationId={selectedOrgId}
+            isAdmin={isAdmin}
+          />
+          
+          <BillingDialog
+            open={billingDialogOpen}
+            onClose={() => setBillingDialogOpen(false)}
+            organizationId={selectedOrgId}
+            isAdmin={isAdmin}
+          />
+        </>
+      )}
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>

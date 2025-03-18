@@ -180,6 +180,7 @@ type Organization struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
+	Services    []Service `json:"services,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
@@ -245,6 +246,38 @@ type ProjectVariable struct {
 	Description string    `json:"description,omitempty"`
 	CreatedBy   string    `json:"createdBy"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type License struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organizationId"`
+	LicenseKey     string    `json:"licenseKey"`
+	LicenseType    string    `json:"licenseType"`
+	SeatsAllowed   int       `json:"seatsAllowed"`
+	SeatsUsed      int       `json:"seatsUsed"`
+	StartsAt       time.Time `json:"startsAt"`
+	ExpiresAt      time.Time `json:"expiresAt"`
+	IsActive       bool      `json:"isActive"`
+	AutoRenew      bool      `json:"autoRenew"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type BillingTransaction struct {
+	ID                 string    `json:"id"`
+	OrganizationID     string    `json:"organizationId"`
+	Amount             float64   `json:"amount"`
+	Currency           string    `json:"currency"`
+	Description        string    `json:"description"`
+	InvoiceNumber      string    `json:"invoiceNumber"`
+	PaymentMethod      string    `json:"paymentMethod"`
+	PaymentStatus      string    `json:"paymentStatus"`
+	TransactionID      string    `json:"transactionId"`
+	BillingPeriodStart time.Time `json:"billingPeriodStart"`
+	BillingPeriodEnd   time.Time `json:"billingPeriodEnd"`
+	InvoiceURL         string    `json:"invoiceUrl"`
+	ReceiptURL         string    `json:"receiptUrl"`
+	CreatedAt          time.Time `json:"createdAt"`
 }
 
 // JWT related constants
@@ -804,27 +837,65 @@ func handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 
 // Organization Handlers
 func handleListOrganizations(w http.ResponseWriter, r *http.Request) {
-	var orgs []Organization
-	rows, err := db.Query(`
-			SELECT id, name, description, created_at, updated_at 
-			FROM auth.organizations ORDER BY created_at DESC
-		`)
+	log.Printf("Starting handleListOrganizations")
+
+	query := `
+        SELECT o.id, o.name, o.description, o.created_at, o.updated_at,
+              COALESCE((SELECT json_agg(row_to_json(s))
+                      FROM (
+                          SELECT s.id, s.name, s.description 
+                          FROM services.services s
+                          INNER JOIN services.organization_services os ON s.id = os.service_id
+                          WHERE os.organization_id = o.id
+                      ) s), '[]') AS services
+        FROM auth.organizations o
+        ORDER BY o.created_at DESC
+    `
+
+	log.Printf("Executing query: %s", query)
+	rows, err := db.Query(query)
 	if err != nil {
+		log.Printf("ERROR: Failed to fetch organizations: %v", err)
 		http.Error(w, "Failed to fetch organizations", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
+	var orgs []Organization
 	for rows.Next() {
 		var org Organization
-		err := rows.Scan(&org.ID, &org.Name, &org.Description, &org.CreatedAt, &org.UpdatedAt)
+		var servicesJSON string // Added to store services as JSON string
+
+		err := rows.Scan(&org.ID, &org.Name, &org.Description, &org.CreatedAt, &org.UpdatedAt, &servicesJSON)
 		if err != nil {
+			log.Printf("ERROR: Failed to scan organization row: %v", err)
 			http.Error(w, "Error scanning organizations", http.StatusInternalServerError)
 			return
 		}
+
+		// Parse services JSON into the org.Services field
+		if servicesJSON != "[]" && servicesJSON != "" {
+			err = json.Unmarshal([]byte(servicesJSON), &org.Services)
+			if err != nil {
+				log.Printf("ERROR: Failed to unmarshal services JSON: %v", err)
+				log.Printf("Services JSON: %s", servicesJSON)
+				// Continue without services rather than failing completely
+			} else {
+				log.Printf("Successfully parsed services for org %s: %d services", org.ID, len(org.Services))
+			}
+		}
+
 		orgs = append(orgs, org)
+		log.Printf("Added organization: %s (%s) with %d services", org.Name, org.ID, len(org.Services))
 	}
 
+	if err = rows.Err(); err != nil {
+		log.Printf("ERROR: Error iterating organization rows: %v", err)
+		http.Error(w, "Error fetching organizations", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Returning %d organizations", len(orgs))
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"organizations": orgs,
 	})
@@ -1022,28 +1093,40 @@ func handleDeleteRole(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(Response{Success: true, Message: "Role deleted successfully"})
 }
 
-// Service Handlers
 func handleListServices(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	log.Printf("handleListServices: Starting to fetch all services")
 
+	// Execute the query - modified to ensure we get a proper array
+	log.Printf("handleListServices: Executing SQL query to fetch services")
 	rows, err := db.Query(`
-			SELECT s.id, s.name, s.description, s.status, s.created_at, s.updated_at,
-				array_agg(json_build_object(
-					'id', o.id,
-					'name', o.name,
-					'description', o.description
-				)) as organizations
+			SELECT 
+				s.id, 
+				s.name, 
+				s.description, 
+				s.created_at, 
+				s.updated_at,
+				COALESCE(
+					(SELECT json_agg(json_build_object(
+						'id', o.id,
+						'name', o.name,
+						'description', o.description
+					))
+					FROM auth.organizations o
+					JOIN services.organization_services os ON o.id = os.organization_id
+					WHERE os.service_id = s.id), 
+					'[]'::json
+				) as organizations
 			FROM services.services s
-			LEFT JOIN services.organization_services os ON s.id = os.service_id
-			LEFT JOIN auth.organizations o ON os.organization_id = o.id
-			GROUP BY s.id, s.name, s.description, s.status, s.created_at, s.updated_at
 		`)
 
 	if err != nil {
+		log.Printf("handleListServices: ERROR querying database: %v", err)
 		http.Error(w, "Failed to fetch services", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
+	log.Printf("handleListServices: Successfully executed query")
 
 	var services []map[string]interface{}
 	for rows.Next() {
@@ -1051,30 +1134,37 @@ func handleListServices(w http.ResponseWriter, r *http.Request) {
 			ID            string
 			Name          string
 			Description   sql.NullString
-			Status        sql.NullString
 			CreatedAt     time.Time
 			UpdatedAt     time.Time
-			Organizations string
+			Organizations []byte // Change from string to []byte to handle raw JSON
 		}
 
 		if err := rows.Scan(
 			&service.ID,
 			&service.Name,
 			&service.Description,
-			&service.Status,
 			&service.CreatedAt,
 			&service.UpdatedAt,
 			&service.Organizations,
 		); err != nil {
+			log.Printf("handleListServices: ERROR scanning row: %v", err)
 			http.Error(w, "Error scanning services", http.StatusInternalServerError)
 			return
 		}
+		log.Printf("handleListServices: Successfully scanned service ID: %s", service.ID)
+		log.Printf("handleListServices: Organizations raw value: %s", string(service.Organizations))
 
 		var orgs []map[string]interface{}
-		if service.Organizations != "[null]" {
-			if err := json.Unmarshal([]byte(service.Organizations), &orgs); err != nil {
-				http.Error(w, "Error parsing organizations", http.StatusInternalServerError)
-				return
+
+		// Skip unmarshaling if it's empty array
+		if string(service.Organizations) != "[]" {
+			if err := json.Unmarshal(service.Organizations, &orgs); err != nil {
+				log.Printf("handleListServices: ERROR unmarshaling organizations JSON: %v", err)
+				log.Printf("handleListServices: Raw JSON: %s", string(service.Organizations))
+				// Continue with empty orgs instead of failing the whole request
+				orgs = []map[string]interface{}{}
+			} else {
+				log.Printf("handleListServices: Successfully unmarshaled organizations, count: %d", len(orgs))
 			}
 		}
 
@@ -1082,7 +1172,6 @@ func handleListServices(w http.ResponseWriter, r *http.Request) {
 			"id":            service.ID,
 			"name":          service.Name,
 			"description":   service.Description.String,
-			"status":        service.Status.String,
 			"createdAt":     service.CreatedAt,
 			"updatedAt":     service.UpdatedAt,
 			"organizations": orgs,
@@ -1091,6 +1180,13 @@ func handleListServices(w http.ResponseWriter, r *http.Request) {
 		services = append(services, serviceMap)
 	}
 
+	if err := rows.Err(); err != nil {
+		log.Printf("handleListServices: ERROR iterating rows: %v", err)
+		http.Error(w, "Error fetching services", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("handleListServices: Successfully processed %d services", len(services))
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"services": services,
 	})
@@ -1669,6 +1765,513 @@ func removeDocReferences(text string) string {
 	// Remove [doc1], [doc2] etc. patterns and any space before a period
 	re := regexp.MustCompile(`\s*\[doc\d+\]\s*\.`)
 	return re.ReplaceAllString(text, ".")
+}
+
+// Handle user avatar upload
+func handleUploadAvatar(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get user ID first
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse multipart form for file
+	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10 MB max
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("avatar")
+	if err != nil {
+		http.Error(w, "Failed to get avatar file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Read file into memory to compute checksum and perform upload
+	data, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+
+	// Validate file type
+	mimeType := http.DetectContentType(data)
+
+	// Only allow specific image types
+	allowedMimeTypes := map[string]bool{
+		"image/jpeg": true,
+		"image/jpg":  true,
+		"image/png":  true,
+		"image/gif":  true,
+		"image/webp": true,
+	}
+
+	if !allowedMimeTypes[mimeType] {
+		http.Error(w, "Invalid file type. Only JPEG, PNG, GIF and WebP images are allowed", http.StatusBadRequest)
+		return
+	}
+
+	// Additional size check
+	if header.Size > 5*1024*1024 { // 5MB max
+		http.Error(w, "File too large. Maximum size is 5MB", http.StatusBadRequest)
+		return
+	}
+
+	// Compute checksum for file identification and logging
+	hasher := sha256.New()
+	hasher.Write(data)
+	fileChecksum := hex.EncodeToString(hasher.Sum(nil))
+	log.Printf("Avatar upload checksum: %s", fileChecksum)
+
+	// Upload to Azure Blob Storage
+	// Get storage client for user's organization
+	// Since avatars are user-specific and not org-specific, use a common container
+	storageAccount, storageKey, err := getStorageCredentials()
+	if err != nil {
+		http.Error(w, "Storage configuration error", http.StatusInternalServerError)
+		return
+	}
+
+	// Create credential and client
+	credential, err := azblob.NewSharedKeyCredential(storageAccount, storageKey)
+	if err != nil {
+		http.Error(w, "Failed to create storage credentials", http.StatusInternalServerError)
+		return
+	}
+
+	serviceURL := fmt.Sprintf("https://%s.blob.core.windows.net", storageAccount)
+	client, err := azblob.NewClientWithSharedKeyCredential(serviceURL, credential, nil)
+	if err != nil {
+		http.Error(w, "Failed to create storage client", http.StatusInternalServerError)
+		return
+	}
+
+	// Use a container specific for avatars
+	containerName := "user-avatars"
+	containerClient := client.ServiceClient().NewContainerClient(containerName)
+
+	// Ensure container exists
+	_, err = containerClient.Create(context.Background(), nil)
+	if err != nil {
+		var stgErr *azcore.ResponseError
+		if errors.As(err, &stgErr) && stgErr.ErrorCode == "ContainerAlreadyExists" {
+			// Ignore this error
+		} else {
+			http.Error(w, "Failed to create storage container", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Build blob name with user ID to ensure uniqueness
+	timestamp := time.Now().Format("20060102-150405")
+	extension := filepath.Ext(header.Filename)
+	if extension == "" {
+		// If no extension in filename, infer from mime type
+		switch mimeType {
+		case "image/jpeg":
+			extension = ".jpg"
+		case "image/png":
+			extension = ".png"
+		case "image/gif":
+			extension = ".gif"
+		case "image/webp":
+			extension = ".webp"
+		default:
+			extension = ".jpg" // Default to jpg
+		}
+	}
+
+	// Create a cleaned filename with just the extension
+	cleanFilename := fmt.Sprintf("avatar%s", extension)
+	blobName := fmt.Sprintf("avatars/%s/%s_%s", userId, timestamp, cleanFilename)
+	blobClient := containerClient.NewBlockBlobClient(blobName)
+
+	// Upload the blob
+	src := nopReadSeekCloser{bytes.NewReader(data)}
+	uploadOptions := &azblob.UploadStreamOptions{
+		BlockSize:   4 * 1024 * 1024, // 4 MiB
+		Concurrency: 3,
+	}
+
+	_, err = client.UploadStream(context.Background(), containerName, blobName, src, uploadOptions)
+	if err != nil {
+		http.Error(w, "Failed to upload to Azure", http.StatusInternalServerError)
+		return
+	}
+
+	// Start transaction for database updates
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Check if user already has an avatar
+	var existingAvatarId string
+	var existingFilePath string
+	err = tx.QueryRow(`
+        SELECT id, file_path FROM auth.user_avatars WHERE user_id = $1
+    `, userId).Scan(&existingAvatarId, &existingFilePath)
+
+	if err != nil && err != sql.ErrNoRows {
+		http.Error(w, "Failed to check existing avatar", http.StatusInternalServerError)
+		return
+	}
+
+	var avatarId string
+	if err == sql.ErrNoRows {
+		// Insert new avatar record
+		err = tx.QueryRow(`
+            INSERT INTO auth.user_avatars 
+            (user_id, file_path, file_name, file_size, mime_type)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+        `, userId, blobClient.URL(), cleanFilename, header.Size, mimeType).Scan(&avatarId)
+	} else {
+		// Update existing avatar record
+		_, err = tx.Exec(`
+            UPDATE auth.user_avatars 
+            SET file_path = $1, file_name = $2, file_size = $3, mime_type = $4, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $5
+        `, blobClient.URL(), cleanFilename, header.Size, mimeType, existingAvatarId)
+		avatarId = existingAvatarId
+
+		// Delete the old blob if it exists
+		if existingFilePath != "" {
+			// Parse the old URL to extract container and blob name
+			oldURL, err := url.Parse(existingFilePath)
+			if err == nil {
+				parts := strings.Split(strings.TrimPrefix(oldURL.Path, "/"), "/")
+				if len(parts) >= 2 {
+					oldContainer := parts[0]
+					oldBlobName := strings.Join(parts[1:], "/")
+
+					// Delete the old blob
+					oldBlobClient := client.ServiceClient().NewContainerClient(oldContainer).NewBlockBlobClient(oldBlobName)
+					_, err = oldBlobClient.Delete(context.Background(), nil)
+					if err != nil {
+						// Log but continue even if old blob deletion fails
+						log.Printf("Warning: Failed to delete old avatar blob: %v", err)
+					}
+				}
+			}
+		}
+	}
+
+	if err != nil {
+		http.Error(w, "Failed to update avatar record", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate a SAS token for the avatar URL
+	sasURL, err := getBlobSasUrl(containerName, blobName)
+	if err != nil {
+		http.Error(w, "Failed to generate avatar access URL", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response with URL
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   true,
+		"message":   "Avatar uploaded successfully",
+		"avatarUrl": sasURL,
+		"avatarId":  avatarId,
+	})
+}
+
+func handleGetUserAvatar(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get user ID
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Get avatar information
+	var filePath, fileName string
+	err = db.QueryRow(`
+        SELECT file_path, file_name FROM auth.user_avatars WHERE user_id = $1
+    `, userId).Scan(&filePath, &fileName)
+
+	if err == sql.ErrNoRows {
+		// User has no avatar, return empty but successful response
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":   true,
+			"hasAvatar": false,
+		})
+		return
+	}
+
+	if err != nil {
+		http.Error(w, "Failed to get avatar information", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the URL to extract container and blob name
+	parsedURL, err := url.Parse(filePath)
+	if err != nil {
+		http.Error(w, "Failed to parse avatar URL", http.StatusInternalServerError)
+		return
+	}
+
+	parts := strings.Split(strings.TrimPrefix(parsedURL.Path, "/"), "/")
+	if len(parts) < 2 {
+		http.Error(w, "Invalid avatar URL format", http.StatusInternalServerError)
+		return
+	}
+
+	containerName := parts[0]
+	blobName := strings.Join(parts[1:], "/")
+
+	// Generate a SAS token for the avatar URL
+	sasURL, err := getBlobSasUrl(containerName, blobName)
+	if err != nil {
+		http.Error(w, "Failed to generate avatar access URL", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the avatar URL with SAS token
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"hasAvatar":  true,
+		"avatarUrl":  sasURL,
+		"avatarName": fileName,
+	})
+}
+
+// Handle deleting user avatar
+func handleDeleteUserAvatar(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get user ID
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Get avatar information
+	var avatarId, filePath string
+	err = tx.QueryRow(`
+        SELECT id, file_path FROM auth.user_avatars WHERE user_id = $1
+    `, userId).Scan(&avatarId, &filePath)
+
+	if err == sql.ErrNoRows {
+		// User has no avatar, nothing to delete
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "No avatar to delete",
+		})
+		return
+	}
+
+	if err != nil {
+		http.Error(w, "Failed to get avatar information", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the URL to extract container and blob name
+	parsedURL, err := url.Parse(filePath)
+	if err != nil {
+		http.Error(w, "Failed to parse avatar URL", http.StatusInternalServerError)
+		return
+	}
+
+	parts := strings.Split(strings.TrimPrefix(parsedURL.Path, "/"), "/")
+	if len(parts) < 2 {
+		http.Error(w, "Invalid avatar URL format", http.StatusInternalServerError)
+		return
+	}
+
+	containerName := parts[0]
+	blobName := strings.Join(parts[1:], "/")
+
+	// Delete from Azure Blob Storage
+	storageAccount, storageKey, err := getStorageCredentials()
+	if err != nil {
+		http.Error(w, "Storage configuration error", http.StatusInternalServerError)
+		return
+	}
+
+	credential, err := azblob.NewSharedKeyCredential(storageAccount, storageKey)
+	if err != nil {
+		http.Error(w, "Failed to create storage credentials", http.StatusInternalServerError)
+		return
+	}
+
+	serviceURL := fmt.Sprintf("https://%s.blob.core.windows.net", storageAccount)
+	client, err := azblob.NewClientWithSharedKeyCredential(serviceURL, credential, nil)
+	if err != nil {
+		http.Error(w, "Failed to create storage client", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete the blob
+	blobClient := client.ServiceClient().NewContainerClient(containerName).NewBlockBlobClient(blobName)
+	_, err = blobClient.Delete(context.Background(), nil)
+	if err != nil {
+		// Log but continue even if blob deletion fails
+		log.Printf("Warning: Failed to delete avatar blob: %v", err)
+	}
+
+	// Delete the avatar record from the database
+	_, err = tx.Exec(`
+        DELETE FROM auth.user_avatars WHERE id = $1
+    `, avatarId)
+
+	if err != nil {
+		http.Error(w, "Failed to delete avatar record", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Avatar deleted successfully",
+	})
+}
+
+func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var updateData struct {
+		FirstName string `json:"firstName"`
+		LastName  string `json:"lastName"`
+		Email     string `json:"email"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// First get the original user data to verify changes
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Update the user profile
+	_, err = db.Exec(`
+        UPDATE auth.users 
+        SET first_name = $1, last_name = $2, email = $3, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $4
+    `, updateData.FirstName, updateData.LastName, updateData.Email, userId)
+
+	if err != nil {
+		// Check for email uniqueness constraint violation
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			http.Error(w, "Email address already in use", http.StatusConflict)
+			return
+		}
+		http.Error(w, "Failed to update profile", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(Response{
+		Success: true,
+		Message: "Profile updated successfully",
+	})
+}
+
+func handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var updateData struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify current password
+	var userId string
+	var storedHash string
+	err := db.QueryRow(`
+        SELECT id, password_hash 
+        FROM auth.users 
+        WHERE email = $1
+    `, claims.Username).Scan(&userId, &storedHash)
+
+	if err != nil {
+		http.Error(w, "Failed to verify user", http.StatusInternalServerError)
+		return
+	}
+
+	// Compare the current password with stored hash
+	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(updateData.CurrentPassword)); err != nil {
+		http.Error(w, "Current password is incorrect", http.StatusUnauthorized)
+		return
+	}
+
+	// Generate hash for new password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(updateData.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, "Failed to process new password", http.StatusInternalServerError)
+		return
+	}
+
+	// Update the password
+	_, err = db.Exec(`
+        UPDATE auth.users 
+        SET password_hash = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+    `, string(hashedPassword), userId)
+
+	if err != nil {
+		http.Error(w, "Failed to update password", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(Response{
+		Success: true,
+		Message: "Password updated successfully",
+	})
 }
 
 func handleChat(w http.ResponseWriter, r *http.Request) {
@@ -10538,6 +11141,489 @@ func handleGetOrganizationUsers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Handler for getting organization licenses
+func handleGetOrganizationLicenses(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get the user's ID from claims
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user details", http.StatusInternalServerError)
+		return
+	}
+
+	// Get the user's organization ID
+	var organizationId string
+	err = db.QueryRow(`
+        SELECT organization_id FROM auth.organization_members 
+        WHERE user_id = $1 
+        LIMIT 1
+    `, userId).Scan(&organizationId)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// User doesn't belong to any organization
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"licenses": []interface{}{},
+			})
+			return
+		}
+		http.Error(w, "Failed to get user's organization", http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch licenses for the organization
+	rows, err := db.Query(`
+        SELECT 
+            id, organization_id, license_key, license_type, 
+            seats_allowed, seats_used, starts_at, expires_at, 
+            is_active, auto_renew, created_at, updated_at
+        FROM services.organization_licenses
+        WHERE organization_id = $1
+        ORDER BY created_at DESC
+    `, organizationId)
+
+	if err != nil {
+		log.Printf("Error fetching licenses: %v", err)
+		http.Error(w, "Failed to fetch licenses", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var licenses []License
+	for rows.Next() {
+		var license License
+		err := rows.Scan(
+			&license.ID, &license.OrganizationID, &license.LicenseKey, &license.LicenseType,
+			&license.SeatsAllowed, &license.SeatsUsed, &license.StartsAt, &license.ExpiresAt,
+			&license.IsActive, &license.AutoRenew, &license.CreatedAt, &license.UpdatedAt,
+		)
+		if err != nil {
+			continue
+		}
+		licenses = append(licenses, license)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"licenses": licenses,
+	})
+}
+
+// Handler for adding a new license
+func handleAddOrganizationLicense(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if user is a super admin
+	isAdmin, err := isSuperAdmin(claims.Username)
+	if err != nil || !isAdmin {
+		http.Error(w, "Only super admins can add licenses", http.StatusForbidden)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		LicenseType  string    `json:"licenseType"`
+		SeatsAllowed int       `json:"seatsAllowed"`
+		StartsAt     time.Time `json:"startsAt"`
+		ExpiresAt    time.Time `json:"expiresAt"`
+		IsActive     bool      `json:"isActive"`
+		AutoRenew    bool      `json:"autoRenew"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID
+	var userId string
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate a unique license key
+	licenseKey := fmt.Sprintf("PRI-%s-%s-%s",
+		strings.ToUpper(req.LicenseType[:3]),
+		time.Now().Format("20060102"),
+		strings.ToUpper(uuid.New().String()[:8]))
+
+	// Create the license
+	var licenseId string
+	err = db.QueryRow(`
+        CALL services.create_organization_license(
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, NULL
+        )
+    `,
+		organizationId, licenseKey, req.LicenseType, req.SeatsAllowed,
+		req.StartsAt, req.ExpiresAt, req.IsActive, req.AutoRenew, userId,
+	).Scan(&licenseId)
+
+	if err != nil {
+		log.Printf("Error creating license: %v", err)
+		http.Error(w, "Failed to create license", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the new license
+	var license License
+	err = db.QueryRow(`
+        SELECT 
+            id, organization_id, license_key, license_type, 
+            seats_allowed, seats_used, starts_at, expires_at, 
+            is_active, auto_renew, created_at, updated_at
+        FROM services.organization_licenses
+        WHERE id = $1
+    `, licenseId).Scan(
+		&license.ID, &license.OrganizationID, &license.LicenseKey, &license.LicenseType,
+		&license.SeatsAllowed, &license.SeatsUsed, &license.StartsAt, &license.ExpiresAt,
+		&license.IsActive, &license.AutoRenew, &license.CreatedAt, &license.UpdatedAt,
+	)
+
+	if err != nil {
+		log.Printf("Error fetching new license: %v", err)
+		http.Error(w, "License created but failed to fetch details", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(license)
+}
+
+// Handler for updating a license
+func handleUpdateOrganizationLicense(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	licenseId := vars["licenseId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if user is a super admin
+	isAdmin, err := isSuperAdmin(claims.Username)
+	if err != nil || !isAdmin {
+		http.Error(w, "Only super admins can update licenses", http.StatusForbidden)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		SeatsAllowed *int       `json:"seatsAllowed"`
+		ExpiresAt    *time.Time `json:"expiresAt"`
+		IsActive     *bool      `json:"isActive"`
+		AutoRenew    *bool      `json:"autoRenew"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Build dynamic update query
+	updates := []string{"updated_at = CURRENT_TIMESTAMP"}
+	args := []interface{}{}
+	paramCount := 0
+
+	if req.SeatsAllowed != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("seats_allowed = $%d", paramCount))
+		args = append(args, *req.SeatsAllowed)
+	}
+
+	if req.ExpiresAt != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("expires_at = $%d", paramCount))
+		args = append(args, *req.ExpiresAt)
+	}
+
+	if req.IsActive != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("is_active = $%d", paramCount))
+		args = append(args, *req.IsActive)
+	}
+
+	if req.AutoRenew != nil {
+		paramCount++
+		updates = append(updates, fmt.Sprintf("auto_renew = $%d", paramCount))
+		args = append(args, *req.AutoRenew)
+	}
+
+	if len(args) == 0 {
+		http.Error(w, "No fields to update", http.StatusBadRequest)
+		return
+	}
+
+	// Add license ID to args
+	paramCount++
+	args = append(args, licenseId)
+
+	// Execute the update
+	query := fmt.Sprintf(`
+        UPDATE services.organization_licenses
+        SET %s
+        WHERE id = $%d
+    `, strings.Join(updates, ", "), paramCount)
+
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		log.Printf("Error updating license: %v", err)
+		http.Error(w, "Failed to update license", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		http.Error(w, "License not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// Handler for getting billing history
+func handleGetBillingHistory(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	// Optional limit and offset parameters
+	limit := 10
+	offset := 0
+	if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
+		if parsedLimit, err := strconv.Atoi(limitParam); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+	if offsetParam := r.URL.Query().Get("offset"); offsetParam != "" {
+		if parsedOffset, err := strconv.Atoi(offsetParam); err == nil && parsedOffset >= 0 {
+			offset = parsedOffset
+		}
+	}
+
+	// Fetch billing history for the organization
+	rows, err := db.Query(`
+        SELECT 
+            id, organization_id, amount, currency, description, invoice_number,
+            payment_method, payment_status, transaction_id,
+            billing_period_start, billing_period_end, invoice_url, receipt_url, created_at
+        FROM services.billing_history
+        WHERE organization_id = $1
+        ORDER BY created_at DESC
+        LIMIT $2 OFFSET $3
+    `, organizationId, limit, offset)
+
+	if err != nil {
+		log.Printf("Error fetching billing history: %v", err)
+		http.Error(w, "Failed to fetch billing history", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var transactions []BillingTransaction
+	for rows.Next() {
+		var tx BillingTransaction
+		var description, invoiceNumber, paymentMethod, transactionID sql.NullString
+		var invoiceURL, receiptURL sql.NullString
+		var billingPeriodStart, billingPeriodEnd sql.NullTime
+
+		err := rows.Scan(
+			&tx.ID, &tx.OrganizationID, &tx.Amount, &tx.Currency, &description, &invoiceNumber,
+			&paymentMethod, &tx.PaymentStatus, &transactionID,
+			&billingPeriodStart, &billingPeriodEnd, &invoiceURL, &receiptURL, &tx.CreatedAt,
+		)
+		if err != nil {
+			log.Printf("Error scanning billing row: %v", err)
+			continue
+		}
+
+		// Handle nullable fields
+		if description.Valid {
+			tx.Description = description.String
+		}
+		if invoiceNumber.Valid {
+			tx.InvoiceNumber = invoiceNumber.String
+		}
+		if paymentMethod.Valid {
+			tx.PaymentMethod = paymentMethod.String
+		}
+		if transactionID.Valid {
+			tx.TransactionID = transactionID.String
+		}
+		if invoiceURL.Valid {
+			tx.InvoiceURL = invoiceURL.String
+		}
+		if receiptURL.Valid {
+			tx.ReceiptURL = receiptURL.String
+		}
+		if billingPeriodStart.Valid {
+			tx.BillingPeriodStart = billingPeriodStart.Time
+		}
+		if billingPeriodEnd.Valid {
+			tx.BillingPeriodEnd = billingPeriodEnd.Time
+		}
+
+		transactions = append(transactions, tx)
+	}
+
+	// Get total count for pagination
+	var totalCount int
+	err = db.QueryRow(`
+        SELECT COUNT(*) 
+        FROM services.billing_history
+        WHERE organization_id = $1
+    `, organizationId).Scan(&totalCount)
+
+	if err != nil {
+		log.Printf("Error getting total count: %v", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"transactions": transactions,
+		"pagination": map[string]interface{}{
+			"total":  totalCount,
+			"limit":  limit,
+			"offset": offset,
+		},
+	})
+}
+
+// Handler for adding a billing transaction (admin only)
+func handleAddBillingTransaction(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if user is a super admin
+	isAdmin, err := isSuperAdmin(claims.Username)
+	if err != nil || !isAdmin {
+		http.Error(w, "Only super admins can add billing transactions", http.StatusForbidden)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		Amount             float64   `json:"amount"`
+		Currency           string    `json:"currency"`
+		Description        string    `json:"description"`
+		InvoiceNumber      string    `json:"invoiceNumber"`
+		PaymentMethod      string    `json:"paymentMethod"`
+		PaymentStatus      string    `json:"paymentStatus"`
+		TransactionID      string    `json:"transactionId"`
+		BillingPeriodStart time.Time `json:"billingPeriodStart"`
+		BillingPeriodEnd   time.Time `json:"billingPeriodEnd"`
+		InvoiceURL         string    `json:"invoiceUrl"`
+		ReceiptURL         string    `json:"receiptUrl"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Add the transaction
+	var billingId string
+	err = db.QueryRow(`
+        SELECT services.record_billing_transaction(
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+        )
+    `,
+		organizationId, req.Amount, req.Currency, req.Description, req.InvoiceNumber,
+		req.PaymentMethod, req.PaymentStatus, req.TransactionID,
+		req.BillingPeriodStart, req.BillingPeriodEnd, req.InvoiceURL, req.ReceiptURL,
+	).Scan(&billingId)
+
+	if err != nil {
+		log.Printf("Error recording billing transaction: %v", err)
+		http.Error(w, "Failed to record transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"id":      billingId,
+	})
+}
+
+// Handler to download an invoice or receipt
+func handleDownloadInvoice(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	transactionId := vars["transactionId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// First get the organization ID to verify permissions
+	var organizationId string
+	err := db.QueryRow(`
+        SELECT organization_id 
+        FROM services.billing_history 
+        WHERE id = $1
+    `, transactionId).Scan(&organizationId)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Transaction not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		log.Printf("Error fetching transaction: %v", err)
+		http.Error(w, "Failed to fetch transaction", http.StatusInternalServerError)
+		return
+	}
+
+	// Verify user has access to the organization
+	var authorized bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )
+    `, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil || !authorized {
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	// Get invoice URL
+	var invoiceURL string
+	err = db.QueryRow(`
+        SELECT invoice_url 
+        FROM services.billing_history 
+        WHERE id = $1
+    `, transactionId).Scan(&invoiceURL)
+
+	if err != nil || invoiceURL == "" {
+		http.Error(w, "Invoice not available", http.StatusNotFound)
+		return
+	}
+
+	// Redirect to the invoice URL
+	http.Redirect(w, r, invoiceURL, http.StatusSeeOther)
+}
+
 func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	log.Printf("handleUpdateTask: Starting task update for taskId: %s", mux.Vars(r)["id"])
 	vars := mux.Vars(r)
@@ -11285,6 +12371,13 @@ func main() {
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
 	r.HandleFunc("/me", authMiddleware(handleGetCurrentUser)).Methods("GET")
 
+	// Account routes
+	r.HandleFunc("/api/account/profile", authMiddleware(handleUpdateProfile)).Methods("PUT")
+	r.HandleFunc("/api/account/password", authMiddleware(handleUpdatePassword)).Methods("PUT")
+	r.HandleFunc("/api/account/avatar", authMiddleware(handleGetUserAvatar)).Methods("GET")
+	r.HandleFunc("/api/account/avatar", authMiddleware(handleUploadAvatar)).Methods("POST")
+	r.HandleFunc("/api/account/avatar", authMiddleware(handleDeleteUserAvatar)).Methods("DELETE")
+
 	// Admin check
 	r.HandleFunc("/admin/check", authMiddleware(handleAdminCheck)).Methods("GET")
 
@@ -11417,6 +12510,13 @@ func main() {
 	r.HandleFunc("/projects/{projectId}/tags/{tagId}", authMiddleware(handleUpdateProjectTag)).Methods("PUT")
 	r.HandleFunc("/projects/{projectId}/tags/{tagId}", authMiddleware(handleDeleteProjectTag)).Methods("DELETE")
 	r.HandleFunc("/organizations/{organizationId}/users", authMiddleware(handleGetOrganizationUsers)).Methods("GET")
+	// Settings Routes
+	r.HandleFunc("/organizations/licenses", authMiddleware(handleGetOrganizationLicenses)).Methods("GET")
+	r.HandleFunc("/organizations/{organizationId}/licenses", superAdminMiddleware(handleAddOrganizationLicense)).Methods("POST")
+	r.HandleFunc("/organizations/{organizationId}/licenses/{licenseId}", superAdminMiddleware(handleUpdateOrganizationLicense)).Methods("PUT")
+	r.HandleFunc("/organizations/{organizationId}/billing", authMiddleware(handleGetBillingHistory)).Methods("GET")
+	r.HandleFunc("/organizations/{organizationId}/billing", superAdminMiddleware(handleAddBillingTransaction)).Methods("POST")
+	r.HandleFunc("/billing/transactions/{transactionId}/download", authMiddleware(handleDownloadInvoice)).Methods("GET")
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
 

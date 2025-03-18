@@ -74,6 +74,38 @@ export interface Document {
   updatedAt?: string;
 }
 
+export interface License {
+  id: string;
+  organizationId: string;
+  licenseKey: string;
+  licenseType: string;
+  seatsAllowed: number | null;
+  seatsUsed: number;
+  startsAt: string | Date;
+  expiresAt: string | Date;
+  isActive: boolean;
+  autoRenew: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BillingTransaction {
+  id: string;
+  organizationId: string;
+  amount: number;
+  currency: string;
+  description?: string;
+  invoiceNumber?: string;
+  paymentMethod?: string;
+  paymentStatus: string;
+  transactionId?: string;
+  billingPeriodStart?: string;
+  billingPeriodEnd?: string;
+  invoiceUrl?: string;
+  receiptUrl?: string;
+  createdAt: string;
+}
+
 class AuthService {
   private static readonly ACCESS_TOKEN_KEY = 'accessToken';
   private static readonly REFRESH_TOKEN_KEY = 'refreshToken';
@@ -269,24 +301,6 @@ class AuthService {
     });
   
     if (!response.ok) throw new Error('Failed to create user');
-    const data = await response.json();
-    return data.user;
-  }
-  
-  static async updateUser(id: string, userData: Partial<User>): Promise<User> {
-    const tokens = this.getTokens();
-    if (!tokens) throw new Error('No authentication tokens');
-  
-    const response = await fetch(`${import.meta.env.VITE_API_URL}/admin/users/${id}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${tokens.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(userData),
-    });
-  
-    if (!response.ok) throw new Error('Failed to update user');
     const data = await response.json();
     return data.user;
   }
@@ -721,6 +735,233 @@ static async getRdmOrganizations(): Promise<Organization[]> {
   if (!response.ok) throw new Error("Failed to fetch RDM organizations");
   const data = await response.json();
   return data.organizations;
+}
+
+static async updateUser(userData: { firstName: string, lastName: string, email: string }): Promise<any> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error("No authentication tokens");
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/account/profile`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${tokens.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        email: userData.email
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || "Failed to update profile");
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error updating user profile:", error);
+    throw error;
+  }
+}
+
+// Update user password
+static async updatePassword(currentPassword: string, newPassword: string): Promise<any> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error("No authentication tokens");
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/account/password`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${tokens.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        currentPassword,
+        newPassword
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || "Failed to update password");
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error updating password:", error);
+    throw error;
+  }
+}
+
+static async getUserAvatar(): Promise<{hasAvatar: boolean, avatarUrl?: string, avatarName?: string}> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error("No authentication tokens");
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/account/avatar`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${tokens.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || "Failed to get avatar");
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error getting user avatar:", error);
+    throw error;
+  }
+}
+
+// Upload user avatar
+static async uploadAvatar(file: File): Promise<{avatarUrl: string}> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error("No authentication tokens");
+
+  try {
+    const formData = new FormData();
+    formData.append('avatar', file);
+
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/account/avatar`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${tokens.token}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || "Failed to upload avatar");
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error uploading avatar:", error);
+    throw error;
+  }
+}
+
+// Delete user avatar
+static async deleteAvatar(): Promise<{success: boolean, message: string}> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error("No authentication tokens");
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/account/avatar`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${tokens.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || "Failed to delete avatar");
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error deleting avatar:", error);
+    throw error;
+  }
+}
+
+static async getOrganizationLicenses(): Promise<License[]> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/organizations/licenses`, {
+    headers: {
+      'Authorization': `Bearer ${tokens.token}`
+    }
+  });
+
+  if (!response.ok) throw new Error('Failed to fetch licenses');
+  const data = await response.json();
+  return data.licenses;
+}
+
+static async addOrganizationLicense(organizationId: string, licenseData: Partial<License>): Promise<License> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/organizations/${organizationId}/licenses`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${tokens.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(licenseData),
+  });
+
+  if (!response.ok) throw new Error('Failed to add license');
+  return await response.json();
+}
+
+static async updateOrganizationLicense(organizationId: string, licenseId: string, licenseData: Partial<License>): Promise<void> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/organizations/${organizationId}/licenses/${licenseId}`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${tokens.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(licenseData),
+  });
+
+  if (!response.ok) throw new Error('Failed to update license');
+}
+
+static async getBillingHistory(organizationId: string, limit: number = 10, offset: number = 0): Promise<{
+  transactions: BillingTransaction[],
+  pagination: { total: number, limit: number, offset: number }
+}> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  const response = await fetch(
+    `${import.meta.env.VITE_API_URL}/organizations/${organizationId}/billing?limit=${limit}&offset=${offset}`, 
+    {
+      headers: {
+        'Authorization': `Bearer ${tokens.token}`
+      }
+    }
+  );
+
+  if (!response.ok) throw new Error('Failed to fetch billing history');
+  return await response.json();
+}
+
+static async addBillingTransaction(organizationId: string, transactionData: Partial<BillingTransaction>): Promise<{id: string}> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/organizations/${organizationId}/billing`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${tokens.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(transactionData),
+  });
+
+  if (!response.ok) throw new Error('Failed to add transaction');
+  return await response.json();
+}
+
+static getInvoiceDownloadUrl(transactionId: string): string {
+  return `${import.meta.env.VITE_API_URL}/billing/transactions/${transactionId}/download`;
 }
 
 }

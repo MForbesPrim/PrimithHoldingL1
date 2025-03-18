@@ -25,52 +25,60 @@ export function OrganizationDialog({ open, onClose, onSubmit, organization }: Or
   const [formData, setFormData] = useState<Partial<Organization>>(defaultFormData);
   const [loading, setLoading] = useState(false);
   const [services, setServices] = useState<Service[]>([]);
+  const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
 
   // Reset form when dialog closes
   useEffect(() => {
     if (!open) {
       setFormData(defaultFormData);
+      setSelectedServiceIds([]);
     }
   }, [open]);
 
-  // Load organization data when editing
+  // Initialize data when dialog opens
   useEffect(() => {
-    if (organization) {
-      setFormData({
-        ...organization,
-        services: organization.services || []
-      });
-    }
-  }, [organization]);
+    const initializeDialog = async () => {
+      if (!open) return;
 
-  // Fetch services when dialog opens
-  useEffect(() => {
-    if (open) {
-      isEditing.current = !!organization;
-      const fetchServices = async () => {
-        try {
-          const fetchedServices = await AuthService.getServices();
-          setServices(fetchedServices);
-        } catch (error) {
-          console.error('Failed to fetch services:', error);
+      try {
+        // Fetch services first
+        const fetchedServices = await AuthService.getServices();
+        setServices(fetchedServices);
+
+        // If we're editing and have an organization with services, set the data
+        if (organization?.services) {
+          const serviceIds = organization.services.map(service => service.id);
+          setSelectedServiceIds(serviceIds);
+          setFormData({
+            ...organization,
+            services: organization.services
+          });
         }
-      };
-      fetchServices();
-    }
+      } catch (error) {
+        console.error('Failed to initialize dialog:', error);
+      }
+    };
+
+    initializeDialog();
   }, [open, organization]);
 
+  // Create a unique key for the MultiSelect component
+  const multiSelectKey = React.useMemo(() => {
+    return `${open}-${organization?.id || 'new'}-${selectedServiceIds.join(',')}`
+  }, [open, organization?.id, selectedServiceIds]);
+
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
+    e.preventDefault();
+    setLoading(true);
     try {
-      await onSubmit(formData)
-      onClose()
+      await onSubmit(formData);
+      onClose();
     } catch (error) {
-      console.error('Failed to save organization:', error)
+      console.error('Failed to save organization:', error);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -102,11 +110,13 @@ export function OrganizationDialog({ open, onClose, onSubmit, organization }: Or
             <div className="space-y-2">
               <Label>Services</Label>
               <MultiSelect
+                key={multiSelectKey}
                 options={services.map(service => ({
-                  label: service.name,
+                  label: service.name === 'rdm' ? 'RDM' : service.name,
                   value: service.id
                 }))}
                 onValueChange={(values) => {
+                  setSelectedServiceIds(values);
                   const selectedServices = services.filter(service => 
                     values.includes(service.id)
                   );
@@ -115,7 +125,7 @@ export function OrganizationDialog({ open, onClose, onSubmit, organization }: Or
                     services: selectedServices
                   }));
                 }}
-                defaultValue={formData.services?.map(service => service.id)}
+                defaultValue={selectedServiceIds}
                 placeholder="Select services"
               />
             </div>

@@ -1,37 +1,100 @@
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { CreditCard, Download, Receipt } from "lucide-react"
+import { Download, Loader2, Receipt } from "lucide-react"
 import { AdminSettingsHeader } from "./AdminSettingsHeader"
+import AuthService, { BillingTransaction, License } from "@/services/auth"
+import { Button } from "@/components/ui/button"
+import { format } from "date-fns"
+import { useToast } from "@/hooks/use-toast"
+import { Badge } from "@/components/ui/badge"
 
 export function BillingPage() {
+  const [loading, setLoading] = useState(true)
+  const [transactions, setTransactions] = useState<BillingTransaction[]>([])
+  const [licenses, setLicenses] = useState<License[]>([])
+  const [_orgId, setOrgId] = useState<string>("")
+  const { toast } = useToast()
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true)
+        // First get the user's organization(s)
+        const orgs = await AuthService.getRdmOrganizations()
+        if (orgs && orgs.length > 0) {
+          const organizationId = orgs[0].id // Using the first org for simplicity
+          setOrgId(organizationId)
+          
+          // Fetch billing history for the organization
+          const billingData = await AuthService.getBillingHistory(organizationId, 10, 0)
+          setTransactions(billingData.transactions || [])
+          
+          // Fetch licenses (current plan)
+          const licensesData = await AuthService.getOrganizationLicenses()
+          setLicenses(licensesData || [])
+        }
+      } catch (error) {
+        console.error("Failed to fetch billing data:", error)
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to load billing information",
+          duration: 5000,
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    fetchData()
+  }, [toast])
+
+  const formatDate = (date: string | Date) => {
+    if (!date) return 'N/A'
+    return format(new Date(date), "MMM d, yyyy")
+  }
+
+  const formatCurrency = (amount: number, currency: string) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency || 'USD',
+    }).format(amount)
+  }
+
+  const getStatusBadge = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'paid':
+        return <span className="text-sm text-green-600">Paid</span>
+      case 'pending':
+        return <span className="text-sm text-yellow-600">Pending</span>
+      case 'failed':
+        return <span className="text-sm text-red-600">Failed</span>
+      case 'refunded':
+        return <span className="text-sm text-blue-600">Refunded</span>
+      default:
+        return <span className="text-sm text-muted-foreground">{status}</span>
+    }
+  }
+
+  // Find the active license (current plan)
+  const activeLicense = licenses.find(license => license.isActive)
+  
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
+  }
+
   return (
     <div className="flex-1">
       <AdminSettingsHeader 
         title="Billing" 
-        description="Manage your billing information and view invoices" 
+        description="View your billing information and invoices" 
       />
       <div className="py-2 px-12">
         <div className="grid gap-6">
-          {/* Payment Method */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Payment Method</CardTitle>
-              <CardDescription>Manage your payment methods</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-center gap-4 p-4 border rounded-lg">
-                  <CreditCard className="h-6 w-6 text-muted-foreground" />
-                  <div>
-                    <p className="font-medium">•••• •••• •••• 4242</p>
-                    <p className="text-sm text-muted-foreground">Expires 12/2024</p>
-                  </div>
-                </div>
-                <Button variant="outline">Update Payment Method</Button>
-              </div>
-            </CardContent>
-          </Card>
-
           {/* Billing History */}
           <Card>
             <CardHeader>
@@ -40,28 +103,38 @@ export function BillingPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {/* Invoice Items */}
-                {[
-                  { date: "Mar 1, 2024", amount: "$599.00", status: "Paid" },
-                  { date: "Feb 1, 2024", amount: "$599.00", status: "Paid" },
-                  { date: "Jan 1, 2024", amount: "$599.00", status: "Paid" },
-                ].map((invoice, index) => (
-                  <div key={index} className="flex items-center justify-between p-4 border rounded-lg">
-                    <div className="flex items-center gap-4">
-                      <Receipt className="h-5 w-5 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium">{invoice.date}</p>
-                        <p className="text-sm text-muted-foreground">{invoice.amount}</p>
+                {transactions.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-4">No billing history available</p>
+                ) : (
+                  transactions.map((transaction) => (
+                    <div key={transaction.id} className="flex items-center justify-between p-4 border rounded-lg">
+                      <div className="flex items-center gap-4">
+                        <Receipt className="h-5 w-5 text-muted-foreground" />
+                        <div>
+                          <p className="font-medium">{formatDate(transaction.createdAt)}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {transaction.description || 'Invoice'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right mr-4">
+                          <p className="font-medium">{formatCurrency(transaction.amount, transaction.currency)}</p>
+                          {getStatusBadge(transaction.paymentStatus)}
+                        </div>
+                        {transaction.invoiceUrl && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => window.open(AuthService.getInvoiceDownloadUrl(transaction.id), '_blank')}
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <span className="text-sm text-green-600">{invoice.status}</span>
-                      <Button variant="ghost" size="icon">
-                        <Download className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
@@ -73,22 +146,44 @@ export function BillingPage() {
               <CardDescription>Your subscription plan details</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h3 className="font-semibold">Enterprise Plan</h3>
-                    <p className="text-sm text-muted-foreground">$599/month</p>
+              {!activeLicense ? (
+                <p className="text-center text-muted-foreground py-4">No active subscription found</p>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h3 className="font-semibold">{activeLicense.licenseType} Plan</h3>
+                      <p className="text-sm text-muted-foreground">
+                        {activeLicense.seatsUsed} / {activeLicense.seatsAllowed === null || activeLicense.seatsAllowed === 0 ? '∞' : activeLicense.seatsAllowed} seats used
+                      </p>
+                    </div>
+                    <Badge 
+                      variant={
+                        new Date(activeLicense.expiresAt) < new Date() 
+                          ? "destructive" 
+                          : "success"
+                      }
+                    >
+                      {new Date(activeLicense.expiresAt) < new Date() 
+                        ? "Expired" 
+                        : "Active"}
+                    </Badge>
                   </div>
-                  <Button>Change Plan</Button>
+                  <div className="text-sm text-muted-foreground">
+                    <div>Started: {formatDate(activeLicense.startsAt)}</div>
+                    <div>Expires: {formatDate(activeLicense.expiresAt)}</div>
+                    {activeLicense.autoRenew && (
+                      <div className="mt-2">
+                        <Badge variant="outline">Auto-renew enabled</Badge>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="text-sm text-muted-foreground">
-                  Next billing date: April 1, 2024
-                </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         </div>
       </div>
     </div>
   )
-} 
+}
