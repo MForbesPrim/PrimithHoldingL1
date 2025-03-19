@@ -126,7 +126,37 @@ export function BillingPage() {
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            onClick={() => window.open(AuthService.getInvoiceDownloadUrl(transaction.id), '_blank')}
+                            onClick={async () => {
+                              try {
+                                // Get the blob from the service
+                                const blob = await AuthService.downloadInvoice(transaction.id);
+                                
+                                // Create a URL for the blob
+                                const url = window.URL.createObjectURL(blob);
+                                
+                                // Create a download link
+                                const a = document.createElement('a');
+                                a.style.display = 'none';
+                                a.href = url;
+                                a.download = `invoice-${transaction.id}.pdf`;
+                                document.body.appendChild(a);
+                                a.click();
+                                
+                                // Clean up
+                                window.URL.revokeObjectURL(url);
+                                document.body.removeChild(a);
+                              } catch (error) {
+                                console.error('Failed to download invoice:', error);
+                                toast({
+                                  variant: "destructive",
+                                  title: "Error",
+                                  description: "Failed to download invoice",
+                                  duration: 5000,
+                                });
+                              }
+                            }}
+                            aria-label="Download invoice"
+                            title="Download invoice"
                           >
                             <Download className="h-4 w-4" />
                           </Button>

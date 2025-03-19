@@ -6,12 +6,22 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
-import { Loader2, Download, PlusCircle, Calendar as CalendarIcon } from "lucide-react"
+import { Loader2, Download, PlusCircle, Trash2, Calendar as CalendarIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import AuthService, { BillingTransaction } from "@/services/auth"
 import { format } from "date-fns"
 import { Calendar } from "@/components/ui/calendar"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Select,
@@ -67,7 +77,7 @@ interface DatePickerProps {
   label: string;
 }
 
-function DatePicker({ date, onSelect, label }: DatePickerProps) {
+function DatePicker({ date, onSelect }: DatePickerProps) {
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -104,6 +114,12 @@ export function BillingDialog({ open, onClose, organizationId, isAdmin }: Billin
   const [endDate, setEndDate] = useState<Date | undefined>(
     formData.billingPeriodEnd ? new Date(formData.billingPeriodEnd) : undefined
   )
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null) 
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [transactionToDelete, setTransactionToDelete] = useState<string | null>(null)
+  const [isDownloading, setIsDownloading] = useState<string | null>(null);
+  const [amount, setAmount] = useState<string>("0.00");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false)
   const [totalItems, setTotalItems] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
@@ -161,37 +177,125 @@ export function BillingDialog({ open, onClose, organizationId, isAdmin }: Billin
     }
   }, [currentPage, open])
 
-  const handleAddTransaction = async () => {
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Get the current input value
+    const inputValue = e.target.value;
+    
+    // Allow only numbers and a single decimal point
+    // This regex allows: empty string, single decimal point, numbers, and one decimal point with numbers
+    if (/^$|^[0-9]+(\.[0-9]*)?$|^\.[0-9]*$/.test(inputValue)) {
+      setAmount(inputValue);
+      
+      // Update the form data with the numeric value
+      const numValue = parseFloat(inputValue) || 0;
+      setFormData(prev => ({ ...prev, amount: numValue }));
+    }
+  };
+
+  const handleDeleteTransaction = async () => {
+    if (!transactionToDelete) return
+    
     try {
-      await AuthService.addBillingTransaction(organizationId, {
-        ...formData,
-        amount: Number(formData.amount),
-        // Convert to string format for API compatibility
-        billingPeriodStart: formData.billingPeriodStart,
-        billingPeriodEnd: formData.billingPeriodEnd,
-      })
+      await AuthService.deleteBillingTransaction(organizationId, transactionToDelete)
+      setTransactionToDelete(null)
+      setDeleteDialogOpen(false)
       toast({
         title: "Success",
-        description: "Transaction added successfully",
+        description: "Transaction deleted successfully",
         duration: 5000,
       })
-      setShowAddForm(false)
-      setFormData(defaultFormData)
-      fetchBillingHistory()
+      fetchBillingHistory(currentPage)
     } catch (error) {
-      console.error('Failed to add transaction:', error)
+      console.error('Failed to delete transaction:', error)
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to add transaction",
+        description: "Failed to delete transaction",
         duration: 5000,
       })
     }
   }
 
-  const downloadInvoice = (transactionId: string) => {
-    window.open(AuthService.getInvoiceDownloadUrl(transactionId), '_blank')
-  }
+  const handleAddTransaction = async () => {
+    try {
+      setIsSubmitting(true); // Set loading state to true when starting
+  
+      // Create FormData if using file upload
+      const formDataToSend = new FormData();
+      
+      // Add transaction details
+      formDataToSend.append('amount', formData.amount.toString());
+      formDataToSend.append('currency', formData.currency);
+      formDataToSend.append('description', formData.description);
+      formDataToSend.append('invoiceNumber', formData.invoiceNumber);
+      formDataToSend.append('paymentMethod', formData.paymentMethod);
+      formDataToSend.append('paymentStatus', formData.paymentStatus);
+      formDataToSend.append('billingPeriodStart', formData.billingPeriodStart);
+      formDataToSend.append('billingPeriodEnd', formData.billingPeriodEnd);
+      
+      // Add invoice file if available
+      if (invoiceFile) {
+        formDataToSend.append('invoiceFile', invoiceFile);
+      }
+      
+      // Call the API with the form data
+      await AuthService.addBillingTransactionWithInvoice(organizationId, formDataToSend);
+      
+      toast({
+        title: "Success",
+        description: "Transaction added successfully",
+        duration: 5000,
+      });
+      setShowAddForm(false);
+      setFormData(defaultFormData);
+      setInvoiceFile(null);
+      fetchBillingHistory();
+    } catch (error) {
+      console.error('Failed to add transaction:', error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to add transaction",
+        duration: 5000,
+      });
+    } finally {
+      setIsSubmitting(false); // Reset loading state regardless of outcome
+    }
+  };
+
+  const downloadInvoice = async (transactionId: string) => {
+    try {
+      setIsDownloading(transactionId); // Add this state to track which invoice is downloading
+      
+      // Use the AuthService to get the blob
+      const blob = await AuthService.downloadInvoice(transactionId);
+      
+      // Create object URL for the blob
+      const url = window.URL.createObjectURL(blob);
+      
+      // Create a temporary link element to trigger download
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `invoice-${transactionId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      
+      // Clean up
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Failed to download invoice:', error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to download invoice",
+        duration: 5000,
+      });
+    } finally {
+      setIsDownloading(null);
+    }
+  };
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page)
@@ -323,28 +427,33 @@ export function BillingDialog({ open, onClose, organizationId, isAdmin }: Billin
       <h3 className="text-lg font-medium mb-4">Add New Transaction</h3>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="amount">Amount</Label>
           <div className="flex items-center gap-2">
-            <Select 
-              value={formData.currency}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, currency: value }))}
-            >
-              <SelectTrigger className="w-20">
-                <SelectValue placeholder="$" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="USD">$</SelectItem>
-                <SelectItem value="EUR">€</SelectItem>
-                <SelectItem value="GBP">£</SelectItem>
-              </SelectContent>
-            </Select>
-            <Input
-              id="amount"
-              type="number"
-              className="flex-1"
-              value={formData.amount}
-              onChange={(e) => setFormData(prev => ({ ...prev, amount: Number(e.target.value) }))}
-            />
+            <div className="space-y-2">
+              <Label htmlFor="amount">Amount</Label>
+              <div className="flex items-center gap-2">
+                <Select 
+                  value={formData.currency}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, currency: value }))}
+                >
+                  <SelectTrigger className="w-20">
+                    <SelectValue placeholder="$" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="USD">$</SelectItem>
+                    <SelectItem value="EUR">€</SelectItem>
+                    <SelectItem value="GBP">£</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  id="amount"
+                  type="text"
+                  className="flex-1"
+                  value={amount}
+                  onChange={handleAmountChange}
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
           </div>
         </div>
         <div className="space-y-2">
@@ -414,10 +523,44 @@ export function BillingDialog({ open, onClose, organizationId, isAdmin }: Billin
             rows={3}
           />
         </div>
+        <div className="space-y-2 col-span-2">
+          <Label htmlFor="invoiceFile">Upload Invoice (PDF)</Label>
+          <Input
+            id="invoiceFile"
+            type="file"
+            accept=".pdf"
+            onChange={(e) => setInvoiceFile(e.target.files?.[0] || null)}
+          />
+          {invoiceFile && (
+            <p className="text-xs text-muted-foreground">
+              Selected file: {invoiceFile.name}
+            </p>
+          )}
+        </div>
       </div>
       <div className="flex justify-end space-x-2 mt-4">
-        <Button variant="outline" onClick={() => setShowAddForm(false)}>Cancel</Button>
-        <Button onClick={handleAddTransaction}>Add Transaction</Button>
+        <div className="flex justify-end space-x-2 mt-4">
+          <Button 
+            variant="outline" 
+            onClick={() => setShowAddForm(false)} 
+            disabled={isSubmitting}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleAddTransaction} 
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Adding...
+              </>
+            ) : (
+              "Add Transaction"
+            )}
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -510,15 +653,36 @@ export function BillingDialog({ open, onClose, organizationId, isAdmin }: Billin
                           {getStatusBadge(transaction.paymentStatus)}
                         </TableCell>
                         <TableCell>
-                          {transaction.invoiceUrl && (
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              onClick={() => downloadInvoice(transaction.id)}
-                            >
-                              <Download className="h-4 w-4 mr-1" /> Invoice
-                            </Button>
-                          )}
+                          <div className="flex space-x-2">
+                            {transaction.invoiceUrl && (
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => downloadInvoice(transaction.id)}
+                                disabled={isDownloading === transaction.id}
+                              >
+                                {isDownloading === transaction.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Download className="h-4 w-4 mr-1" />
+                                )}
+                                {isDownloading === transaction.id ? "Downloading..." : "Invoice"}
+                              </Button>
+                            )}
+                            {isAdmin && (
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                className="text-red-500 hover:text-red-700"
+                                onClick={() => {
+                                  setTransactionToDelete(transaction.id)
+                                  setDeleteDialogOpen(true)
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -531,6 +695,23 @@ export function BillingDialog({ open, onClose, organizationId, isAdmin }: Billin
           </>
         )}
       </DialogContent>
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this transaction and its associated invoice.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteTransaction}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   )
 }

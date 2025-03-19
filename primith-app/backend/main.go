@@ -10910,6 +10910,436 @@ func buildTaskHierarchy(tasks []map[string]interface{}) []map[string]interface{}
 	return rootTasks
 }
 
+func handleAddBillingTransactionWithInvoice(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	log.Printf("Received organization ID: '%s'", organizationId)
+
+	// Validate organizationId is not empty and is a valid UUID
+	if organizationId == "" {
+		log.Printf("ERROR: organizationId is empty")
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify organizationId is a valid UUID
+	_, err := uuid.Parse(organizationId)
+	if err != nil {
+		log.Printf("ERROR: Invalid organization ID format: %v", err)
+		http.Error(w, "Invalid organization ID format", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Organization ID is valid UUID: %s", organizationId)
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("User: %s", claims.Username)
+
+	// Check if user is a super admin
+	isAdmin, err := isSuperAdmin(claims.Username)
+	if err != nil || !isAdmin {
+		log.Printf("ERROR: User is not admin: %v", err)
+		http.Error(w, "Only super admins can add billing transactions", http.StatusForbidden)
+		return
+	}
+	log.Printf("User is super admin")
+
+	// Parse multipart form with 10MB max memory
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		log.Printf("Error parsing form: %v", err)
+		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Parsed multipart form successfully")
+
+	// Extract transaction data from form
+	amountStr := r.FormValue("amount")
+	log.Printf("Amount string value: '%s'", amountStr)
+	amount, err := strconv.ParseFloat(amountStr, 64)
+	if err != nil {
+		log.Printf("ERROR: Invalid amount format: %v", err)
+		http.Error(w, "Invalid amount format", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Parsed amount: %f", amount)
+
+	currency := r.FormValue("currency")
+	if currency == "" {
+		currency = "USD" // Default currency
+	}
+	log.Printf("Currency: %s", currency)
+
+	// Get form data
+	description := r.FormValue("description")
+	invoiceNumber := r.FormValue("invoiceNumber")
+	paymentMethod := r.FormValue("paymentMethod")
+	paymentStatus := r.FormValue("paymentStatus")
+	billingPeriodStart := r.FormValue("billingPeriodStart")
+	billingPeriodEnd := r.FormValue("billingPeriodEnd")
+	log.Printf("Form data: description='%s', invoiceNumber='%s', paymentMethod='%s', paymentStatus='%s'",
+		description, invoiceNumber, paymentMethod, paymentStatus)
+	log.Printf("Billing period: start='%s', end='%s'", billingPeriodStart, billingPeriodEnd)
+
+	// Convert date strings to time.Time
+	var startDate, endDate *time.Time
+	if billingPeriodStart != "" {
+		parsedStart, err := time.Parse("2006-01-02", billingPeriodStart)
+		if err != nil {
+			log.Printf("ERROR: Invalid billing period start date format: %v", err)
+			http.Error(w, "Invalid billing period start date format", http.StatusBadRequest)
+			return
+		}
+		startDate = &parsedStart
+		log.Printf("Parsed start date: %v", startDate)
+	}
+
+	if billingPeriodEnd != "" {
+		parsedEnd, err := time.Parse("2006-01-02", billingPeriodEnd)
+		if err != nil {
+			log.Printf("ERROR: Invalid billing period end date format: %v", err)
+			http.Error(w, "Invalid billing period end date format", http.StatusBadRequest)
+			return
+		}
+		endDate = &parsedEnd
+		log.Printf("Parsed end date: %v", endDate)
+	}
+
+	// Get the invoice file from the form
+	invoiceFile, invoiceHeader, err := r.FormFile("invoiceFile")
+	var invoiceURL string
+	if err != nil {
+		log.Printf("No invoice file found or error: %v", err)
+	}
+
+	if err == nil && invoiceFile != nil {
+		defer invoiceFile.Close()
+		log.Printf("Invoice file found: %s, size: %d", invoiceHeader.Filename, invoiceHeader.Size)
+
+		// Validate file type (PDF only)
+		fileType := invoiceHeader.Header.Get("Content-Type")
+		log.Printf("File type: %s", fileType)
+		if fileType != "application/pdf" {
+			log.Printf("ERROR: Invalid file type: %s", fileType)
+			http.Error(w, "Only PDF files are allowed for invoices", http.StatusBadRequest)
+			return
+		}
+
+		// Read file into memory
+		invoiceData, err := io.ReadAll(invoiceFile)
+		if err != nil {
+			log.Printf("Error reading invoice file: %v", err)
+			http.Error(w, "Failed to read invoice file", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Read %d bytes from invoice file", len(invoiceData))
+
+		// Create a unique filename
+		fileName := fmt.Sprintf("invoice_%s_%s.pdf",
+			invoiceNumber,
+			time.Now().Format("20060102_150405"))
+		log.Printf("Generated filename: %s", fileName)
+
+		// Upload to blob storage
+		storageAccount, storageKey, err := getStorageCredentials()
+		if err != nil {
+			log.Printf("Error getting storage credentials: %v", err)
+			http.Error(w, "Failed to configure storage", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Got storage credentials for account: %s", storageAccount)
+
+		credential, err := azblob.NewSharedKeyCredential(storageAccount, storageKey)
+		if err != nil {
+			log.Printf("Error creating storage credentials: %v", err)
+			http.Error(w, "Failed to create storage credentials", http.StatusInternalServerError)
+			return
+		}
+
+		serviceURL := fmt.Sprintf("https://%s.blob.core.windows.net", storageAccount)
+		client, err := azblob.NewClientWithSharedKeyCredential(serviceURL, credential, nil)
+		if err != nil {
+			log.Printf("Error creating storage client: %v", err)
+			http.Error(w, "Failed to create storage client", http.StatusInternalServerError)
+			return
+		}
+
+		// Use a container for invoices
+		containerName := fmt.Sprintf("org-%s-invoices", organizationId)
+		containerClient := client.ServiceClient().NewContainerClient(containerName)
+
+		// Ensure container exists
+		_, err = containerClient.Create(context.Background(), nil)
+		if err != nil {
+			var stgErr *azcore.ResponseError
+			if errors.As(err, &stgErr) && stgErr.ErrorCode == "ContainerAlreadyExists" {
+				// Ignore this error
+			} else {
+				log.Printf("Error creating container: %v", err)
+				http.Error(w, "Failed to create storage container", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Upload the blob using UploadStream
+		uploadOptions := &azblob.UploadStreamOptions{
+			BlockSize:   4 * 1024 * 1024, // 4 MiB
+			Concurrency: 3,
+		}
+		_, err = client.UploadStream(
+			context.Background(),
+			containerName,
+			fileName,
+			nopReadSeekCloser{bytes.NewReader(invoiceData)},
+			uploadOptions,
+		)
+
+		if err != nil {
+			log.Printf("Error uploading invoice file: %v", err)
+			http.Error(w, "Failed to upload invoice file", http.StatusInternalServerError)
+			return
+		}
+
+		// Generate a SAS token for the invoice URL
+		invoiceURL, err = getBlobSasUrl(containerName, fileName)
+		if err != nil {
+			log.Printf("Error generating SAS URL: %v", err)
+			http.Error(w, "Failed to generate invoice access URL", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Generated invoice URL: %s", invoiceURL)
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		http.Error(w, "Failed to start database transaction", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Started database transaction")
+	defer tx.Rollback()
+
+	// Add the transaction with the invoice URL
+	var billingId string
+
+	// Generate a transaction ID
+	transactionId := uuid.New().String()
+	log.Printf("Generated transaction ID: %s", transactionId)
+
+	// Log all parameters before the CALL
+	log.Printf("Parameters for record_billing_transaction:")
+	log.Printf("  1. organizationId: '%s'", organizationId)
+	log.Printf("  2. amount: %f", amount)
+	log.Printf("  3. currency: '%s'", currency)
+	log.Printf("  4. description: '%s'", description)
+	log.Printf("  5. invoiceNumber: '%s'", invoiceNumber)
+	log.Printf("  6. paymentMethod: '%s'", paymentMethod)
+	log.Printf("  7. paymentStatus: '%s'", paymentStatus)
+	log.Printf("  8. transactionId: '%s'", transactionId)
+	if startDate != nil {
+		log.Printf("  9. startDate: %v", *startDate)
+	} else {
+		log.Printf("  9. startDate: <nil>")
+	}
+	if endDate != nil {
+		log.Printf("  10. endDate: %v", *endDate)
+	} else {
+		log.Printf("  10. endDate: <nil>")
+	}
+	log.Printf("  11. invoiceURL: '%s'", invoiceURL)
+	log.Printf("  12. receiptURL (same as invoiceURL): '%s'", invoiceURL)
+	log.Printf("  13. billingId (OUT parameter): <empty>")
+
+	// Try to execute with billingId as NULL instead of empty string
+	_, err = tx.Exec(`
+        CALL services.record_billing_transaction(
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL
+        )
+    `,
+		organizationId, amount, currency, description, invoiceNumber,
+		paymentMethod, paymentStatus, transactionId,
+		startDate, endDate, invoiceURL, invoiceURL)
+
+	if err != nil {
+		log.Printf("Error recording billing transaction: %v", err)
+		http.Error(w, "Failed to record transaction", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Successfully executed record_billing_transaction procedure")
+
+	// After CALL, fetch the ID using the transaction ID
+	err = tx.QueryRow(`
+		SELECT id FROM services.billing_history 
+		WHERE organization_id = $1 AND transaction_id = $2
+	`, organizationId, transactionId).Scan(&billingId)
+
+	if err != nil {
+		log.Printf("Error getting billing transaction ID by transaction_id: %v", err)
+
+		// Try alternate query as fallback
+		err = tx.QueryRow(`
+			SELECT id FROM services.billing_history 
+			WHERE organization_id = $1 
+			ORDER BY created_at DESC LIMIT 1
+		`, organizationId).Scan(&billingId)
+
+		if err != nil {
+			log.Printf("Error getting billing transaction ID by latest date: %v", err)
+			// Use the transaction ID if we can't get the actual ID
+			billingId = transactionId
+			log.Printf("Using transaction ID as fallback: %s", billingId)
+		} else {
+			log.Printf("Got billing ID by latest date: %s", billingId)
+		}
+	} else {
+		log.Printf("Got billing ID by transaction_id: %s", billingId)
+	}
+
+	// Commit the transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Error committing transaction: %v", err)
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Successfully committed transaction")
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"id":         billingId,
+		"invoiceUrl": invoiceURL,
+	})
+	log.Printf("Successfully returned response with billing ID: %s", billingId)
+}
+
+func handleDeleteBillingTransaction(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	transactionId := vars["transactionId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if user is a super admin
+	isAdmin, err := isSuperAdmin(claims.Username)
+	if err != nil || !isAdmin {
+		http.Error(w, "Only super admins can delete billing transactions", http.StatusForbidden)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Error starting transaction: %v", err)
+		http.Error(w, "Failed to start database transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// First get the transaction's details to delete the associated invoice
+	var invoiceUrl string
+	err = tx.QueryRow(`
+        SELECT invoice_url 
+        FROM services.billing_history 
+        WHERE id = $1 AND organization_id = $2
+    `, transactionId, organizationId).Scan(&invoiceUrl)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Transaction not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		log.Printf("Error getting transaction details: %v", err)
+		http.Error(w, "Failed to get transaction details", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete the invoice file from storage if exists
+	if invoiceUrl != "" {
+		if err := deleteInvoiceFile(invoiceUrl); err != nil {
+			// Log error but continue with transaction deletion
+			log.Printf("Warning: Failed to delete invoice file: %v", err)
+		}
+	}
+
+	// Delete the transaction
+	result, err := tx.Exec(`
+        DELETE FROM services.billing_history
+        WHERE id = $1 AND organization_id = $2
+    `, transactionId, organizationId)
+
+	if err != nil {
+		log.Printf("Error deleting transaction: %v", err)
+		http.Error(w, "Failed to delete transaction", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Error getting rows affected: %v", err)
+		http.Error(w, "Failed to verify deletion", http.StatusInternalServerError)
+		return
+	}
+
+	if rowsAffected == 0 {
+		http.Error(w, "Transaction not found or not authorized", http.StatusNotFound)
+		return
+	}
+
+	// Commit the transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Error committing transaction: %v", err)
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// Function to delete an invoice file from Azure Blob Storage
+func deleteInvoiceFile(invoiceUrl string) error {
+	// Parse the URL to extract container and blob name
+	parsedUrl, err := url.Parse(invoiceUrl)
+	if err != nil {
+		return fmt.Errorf("failed to parse invoice URL: %v", err)
+	}
+
+	// The URL may contain a SAS token, so we need to extract just the path
+	path := parsedUrl.Path
+
+	// Path format: /container/blobname
+	pathParts := strings.SplitN(strings.TrimPrefix(path, "/"), "/", 2)
+	if len(pathParts) != 2 {
+		return fmt.Errorf("invalid blob path format")
+	}
+
+	containerName := pathParts[0]
+	blobName := pathParts[1]
+
+	// Get storage credentials
+	storageAccount, storageKey, err := getStorageCredentials()
+	if err != nil {
+		return fmt.Errorf("failed to get storage credentials: %v", err)
+	}
+
+	// Create a blob client
+	credential, err := azblob.NewSharedKeyCredential(storageAccount, storageKey)
+	if err != nil {
+		return fmt.Errorf("failed to create storage credentials: %v", err)
+	}
+
+	serviceURL := fmt.Sprintf("https://%s.blob.core.windows.net", storageAccount)
+	client, err := azblob.NewClientWithSharedKeyCredential(serviceURL, credential, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create storage client: %v", err)
+	}
+
+	// Delete the blob
+	blobClient := client.ServiceClient().NewContainerClient(containerName).NewBlockBlobClient(blobName)
+	_, err = blobClient.Delete(context.Background(), nil)
+
+	return err
+}
+
 func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectId := vars["projectId"]
@@ -11607,21 +12037,61 @@ func handleDownloadInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get invoice URL
-	var invoiceURL string
+	// Get invoice URL and filename
+	var invoiceURL, invoiceNumber string
 	err = db.QueryRow(`
-        SELECT invoice_url 
+        SELECT invoice_url, invoice_number
         FROM services.billing_history 
         WHERE id = $1
-    `, transactionId).Scan(&invoiceURL)
+    `, transactionId).Scan(&invoiceURL, &invoiceNumber)
 
 	if err != nil || invoiceURL == "" {
 		http.Error(w, "Invoice not available", http.StatusNotFound)
 		return
 	}
 
-	// Redirect to the invoice URL
-	http.Redirect(w, r, invoiceURL, http.StatusSeeOther)
+	// Create a filename for the download
+	filename := fmt.Sprintf("invoice-%s.pdf", invoiceNumber)
+	if invoiceNumber == "" {
+		filename = fmt.Sprintf("invoice-%s.pdf", transactionId)
+	}
+
+	// Initialize HTTP client
+	client := &http.Client{}
+
+	// Create request to Azure blob
+	req, err := http.NewRequest("GET", invoiceURL, nil)
+	if err != nil {
+		log.Printf("Error creating request: %v", err)
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Execute request
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Error downloading from Azure: %v", err)
+		http.Error(w, "Failed to retrieve invoice", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Azure responded with status: %d", resp.StatusCode)
+		http.Error(w, "Failed to retrieve invoice", http.StatusInternalServerError)
+		return
+	}
+
+	// Set appropriate headers for download
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.Header().Set("Content-Type", "application/pdf")
+
+	// Copy the response body to our response writer
+	_, err = io.Copy(w, resp.Body)
+	if err != nil {
+		log.Printf("Error streaming file: %v", err)
+		// Can't send an error response at this point as headers are already sent
+	}
 }
 
 func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
@@ -12517,6 +12987,9 @@ func main() {
 	r.HandleFunc("/organizations/{organizationId}/billing", authMiddleware(handleGetBillingHistory)).Methods("GET")
 	r.HandleFunc("/organizations/{organizationId}/billing", superAdminMiddleware(handleAddBillingTransaction)).Methods("POST")
 	r.HandleFunc("/billing/transactions/{transactionId}/download", authMiddleware(handleDownloadInvoice)).Methods("GET")
+	// In your main function, add these routes to your router
+	r.HandleFunc("/organizations/{organizationId}/billing/with-invoice", superAdminMiddleware(handleAddBillingTransactionWithInvoice)).Methods("POST")
+	r.HandleFunc("/organizations/{organizationId}/billing/{transactionId}", superAdminMiddleware(handleDeleteBillingTransaction)).Methods("DELETE")
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
 

@@ -960,8 +960,58 @@ static async addBillingTransaction(organizationId: string, transactionData: Part
   return await response.json();
 }
 
+static async addBillingTransactionWithInvoice(organizationId: string, formData: FormData): Promise<{id: string}> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/organizations/${organizationId}/billing/with-invoice`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${tokens.token}`,
+      // Don't set Content-Type here as FormData will set it automatically with the boundary
+    },
+    body: formData,
+  });
+
+  if (!response.ok) throw new Error('Failed to add transaction with invoice');
+  return await response.json();
+}
+
+static async deleteBillingTransaction(organizationId: string, transactionId: string): Promise<void> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/organizations/${organizationId}/billing/${transactionId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${tokens.token}`,
+    },
+  });
+
+  if (!response.ok) throw new Error('Failed to delete transaction');
+}
+
 static getInvoiceDownloadUrl(transactionId: string): string {
+  // Basic URL for direct browser navigation
   return `${import.meta.env.VITE_API_URL}/billing/transactions/${transactionId}/download`;
+}
+
+static async downloadInvoice(transactionId: string): Promise<Blob> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/billing/transactions/${transactionId}/download`, {
+    headers: {
+      'Authorization': `Bearer ${tokens.token}`
+    }
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'Failed to download invoice');
+  }
+  
+  return await response.blob();
 }
 
 }
