@@ -199,7 +199,7 @@ export function RoleManagement() {
       
       toast({
         title: "Success",
-        description: "Role has been deleted successfully",
+        description: "Role deleted successfully",
         duration: 5000,
       })
     } catch (error) {
