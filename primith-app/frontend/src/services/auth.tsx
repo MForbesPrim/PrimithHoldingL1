@@ -20,7 +20,8 @@ export interface Role {
   id: string;
   name: string;
   description?: string;
-  organizationId: string | null; 
+  organizationId: string | null;
+  isGlobal?: boolean;
 }
 
 export interface Organization {
@@ -1012,6 +1013,243 @@ static async downloadInvoice(transactionId: string): Promise<Blob> {
   }
   
   return await response.blob();
+}
+
+static async isOrganizationAdmin(): Promise<boolean> {
+  try {
+    const tokens = this.getTokens();
+    if (!tokens) return false;
+
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/account/permissions`, {
+      headers: {
+        'Authorization': `Bearer ${tokens.token}`
+      }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return data.isOrganizationAdmin;
+    }
+    return false;
+  } catch (error) {
+    console.error('Error checking organization admin status:', error);
+    return false;
+  }
+}
+
+// Get all users for the current user's organization
+static async getOrganizationUsers(): Promise<User[]> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+  
+  try {
+    // Make the request to get organization users
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/organization/users`, {
+      headers: {
+        'Authorization': `Bearer ${tokens.token}`
+      }
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Error response: ${response.status} - ${errorText}`);
+      throw new Error('Failed to fetch organization users');
+    }
+    
+    const data = await response.json();
+    return data.users;
+  } catch (error) {
+    console.error('Error fetching organization users:', error);
+    throw error;
+  }
+}
+
+// Get all roles for the current user's organization
+static async getOrganizationRoles(): Promise<Role[]> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/organization/roles`, {
+      headers: {
+        'Authorization': `Bearer ${tokens.token}`
+      }
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch organization roles');
+    const data = await response.json();
+    return data.roles;
+  } catch (error) {
+    console.error('Error fetching organization roles:', error);
+    throw error;
+  }
+}
+
+// Create a new user in the current user's organization
+static async createOrganizationUser(userData: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  roleId: string;
+  isActive: boolean;
+}): Promise<User> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/organization/users`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${tokens.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(userData),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Failed to create user');
+    }
+    
+    const data = await response.json();
+    return data.user;
+  } catch (error) {
+    console.error('Error creating organization user:', error);
+    throw error;
+  }
+}
+
+// Update an existing user in the current user's organization
+static async updateOrganizationUser(
+  userId: string, 
+  userData: {
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    password?: string;
+    roleId?: string;
+    isActive?: boolean;
+  }
+): Promise<User> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/organization/users/${userId}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${tokens.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(userData),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Failed to update user');
+    }
+    
+    const data = await response.json();
+    return data.user;
+  } catch (error) {
+    console.error('Error updating organization user:', error);
+    throw error;
+  }
+}
+
+// Delete a user from the current user's organization
+static async deleteOrganizationUser(userId: string): Promise<void> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/organization/users/${userId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${tokens.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Failed to delete user');
+    }
+  } catch (error) {
+    console.error('Error deleting organization user:', error);
+    throw error;
+  }
+}
+
+static async createOrganizationRole(roleData: { 
+  name: string; 
+  description: string;
+  isGlobal?: boolean;
+}): Promise<Role> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/api/organization/roles`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${tokens.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(roleData),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'Failed to create role');
+  }
+
+  const data = await response.json();
+  return data.role;
+}
+
+// Update an existing organization role
+static async updateOrganizationRole(roleId: string, roleData: { 
+  name: string; 
+  description: string;
+  isGlobal?: boolean;
+}): Promise<Role> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/api/organization/roles/${roleId}`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${tokens.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(roleData),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'Failed to update role');
+  }
+
+  const data = await response.json();
+  return data.role;
+}
+
+// Delete an organization role
+static async deleteOrganizationRole(roleId: string): Promise<void> {
+  const tokens = this.getTokens();
+  if (!tokens) throw new Error('No authentication tokens');
+
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/api/organization/roles/${roleId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${tokens.token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'Failed to delete role');
+  }
 }
 
 }

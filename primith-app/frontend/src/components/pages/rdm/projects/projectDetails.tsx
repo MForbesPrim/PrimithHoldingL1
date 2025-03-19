@@ -630,8 +630,8 @@ export function ProjectDetailPage() {
       <Dialog open={showAddArtifactDialog} onOpenChange={setShowAddArtifactDialog}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Add File Artifact to {project.name}</DialogTitle>
-            <DialogDescription>Upload a file and provide details for the new artifact.</DialogDescription>
+            <DialogTitle>Add File Deliverable to {project.name}</DialogTitle>
+            <DialogDescription>Upload a file and provide details for the new deliverable.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div>
@@ -657,7 +657,7 @@ export function ProjectDetailPage() {
                 id="artifact-name"
                 value={newArtifact.name}
                 onChange={(e) => setNewArtifact((prev) => ({ ...prev, name: e.target.value }))}
-                placeholder="Enter artifact name (defaults to filename)"
+                placeholder="Enter deliverable name (defaults to filename)"
                 disabled={isUploading}
               />
             </div>
@@ -727,7 +727,7 @@ export function ProjectDetailPage() {
                 id="artifact-description"
                 value={newArtifact.description}
                 onChange={(e) => setNewArtifact((prev) => ({ ...prev, description: e.target.value }))}
-                placeholder="Enter artifact description"
+                placeholder="Enter deliverable description"
                 rows={3}
                 disabled={isUploading}
               />
@@ -744,7 +744,7 @@ export function ProjectDetailPage() {
                   Uploading...
                 </>
               ) : (
-                "Upload and Add Artifact"
+                "Upload and Add Deliverable"
               )}
             </Button>
           </DialogFooter>
@@ -779,7 +779,7 @@ export function ProjectDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="artifacts" className="rounded-t-lg">
             <List className="h-4 w-4 mr-2" />
-            Artifacts
+            Deliverables
           </TabsTrigger>
           <TabsTrigger value="roadmap" className="rounded-t-lg">
             <SquareChartGantt className="h-4 w-4 mr-2" />
@@ -845,7 +845,7 @@ export function ProjectDetailPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-base font-medium">Recent Artifacts</CardTitle>
+                <CardTitle className="text-base font-medium">Recent Deliverables</CardTitle>
                 <Button variant="outline" size="sm" onClick={handleAddArtifactClick}>
                   <Plus className="mr-2 h-4 w-4" />
                   Add File
@@ -879,7 +879,7 @@ export function ProjectDetailPage() {
                         setActiveTab("artifacts");
                       }}
                     >
-                      View All Artifacts
+                      View All Deliverables
                     </Button>
                   </div>
                 ) : (
@@ -936,7 +936,7 @@ export function ProjectDetailPage() {
         <TabsContent value="artifacts">
           <div className="space-y-4 mt-4">
             <div className="flex justify-between items-center">
-              <h2 className="text-md font-semibold">All Artifacts</h2>
+              <h2 className="text-md font-semibold">All Deliverables</h2>
               <Button size="sm" onClick={handleAddArtifactClick}>
                 <Plus className="h-4 w-4 mr-1" />
                 Add File
@@ -952,15 +952,15 @@ export function ProjectDetailPage() {
                     await projectService.updateArtifact(projectId || "", artifactId, data);
                     toast({
                       title: "Success",
-                      description: "Artifact updated successfully",
+                      description: "Deliverable updated successfully",
                       duration: 5000
                     });
                     loadProjectData();
                   } catch (error) {
-                    console.error('Error updating artifact:', error);
+                    console.error('Error updating deliverable:', error);
                     toast({
                       title: "Error",
-                      description: "Failed to update artifact",
+                      description: "Failed to update deliverable",
                       variant: "destructive",
                       duration: 5000
                     });

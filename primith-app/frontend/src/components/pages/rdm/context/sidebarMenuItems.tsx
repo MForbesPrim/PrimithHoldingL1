@@ -4,7 +4,6 @@ import {
     Layers2,
     Lightbulb,
     Users,
-    LockKeyhole,
     FileText
 } from "lucide-react"
 
@@ -38,10 +37,5 @@ export const menuItems = [
     title: "Collaborators",
     url: "#",
     icon: Users,
-  },
-  {
-    title: "Admin Console",
-    url: "#",
-    icon: LockKeyhole,
   },
 ]

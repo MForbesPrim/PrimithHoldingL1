@@ -1,4 +1,4 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { UserManagement } from "./sections/UserManagement"
 import { RoleManagement } from "@/components/pages/admin/settings/sections/RoleManagement"
@@ -20,12 +20,6 @@ export function AdministrationPage() {
           
           <TabsContent value="users" className="space-y-4">
             <Card>
-              <CardHeader>
-                <CardTitle>User Management</CardTitle>
-                <CardDescription>
-                  View and manage user accounts, permissions, and access levels
-                </CardDescription>
-              </CardHeader>
               <CardContent>
                 <UserManagement />
               </CardContent>
@@ -34,12 +28,6 @@ export function AdministrationPage() {
 
           <TabsContent value="roles" className="space-y-4">
             <Card>
-              <CardHeader>
-                <CardTitle>Roles & Permissions</CardTitle>
-                <CardDescription>
-                  Configure roles and their associated permissions
-                </CardDescription>
-              </CardHeader>
               <CardContent>
                 <RoleManagement />
               </CardContent>

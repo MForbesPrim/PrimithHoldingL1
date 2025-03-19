@@ -409,7 +409,7 @@ useEffect(() => {
         <div className="relative w-[300px]">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search artifacts..."
+            placeholder="Search deliverables.."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-8"
@@ -458,7 +458,7 @@ useEffect(() => {
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>Edit Artifact</DialogTitle>
+            <DialogTitle>Edit Deliverable</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             {/* Name field with extension display for documents */}

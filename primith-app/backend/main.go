@@ -809,8 +809,28 @@ func handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if the user has super_admin role
+	var hasSuperAdminRole bool
+	err := db.QueryRow(`
+        SELECT EXISTS(
+            SELECT 1 FROM auth.user_roles ur
+            JOIN auth.roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1 AND r.name = 'super_admin'
+        )
+    `, userID).Scan(&hasSuperAdminRole)
+
+	if err != nil {
+		http.Error(w, "Failed to check user role", http.StatusInternalServerError)
+		return
+	}
+
+	if hasSuperAdminRole {
+		http.Error(w, "Cannot delete a user with super_admin role", http.StatusForbidden)
+		return
+	}
+
 	// Execute the stored procedure
-	_, err := db.Exec(`CALL auth.delete_user($1)`, userID)
+	_, err = db.Exec(`CALL auth.delete_user($1)`, userID)
 	if err != nil {
 		pqErr, ok := err.(*pq.Error)
 		if ok {
@@ -1082,8 +1102,53 @@ func handleUpdateRole(w http.ResponseWriter, r *http.Request) {
 func handleDeleteRole(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	roleID := vars["id"]
+	log.Printf("Attempting to delete role with ID: %s\n", roleID)
 
-	_, err := db.Exec(`CALL auth.delete_role($1)`, roleID)
+	// Check if the role is a super_admin role
+	var roleName string
+	err := db.QueryRow(`
+			SELECT name
+			FROM auth.roles
+			WHERE id = $1
+		`, roleID).Scan(&roleName)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Role not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to check role type", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Prevent deletion of super_admin role
+	if roleName == "super_admin" {
+		http.Error(w, "Cannot delete the super_admin role", http.StatusForbidden)
+		return
+	}
+
+	// Continue with the existing code for other roles...
+	if roleName == "admin" || roleName == "super_admin" {
+		// Count the number of admin/super_admin roles
+		var adminRoleCount int
+		err = db.QueryRow(`
+				SELECT COUNT(*)
+				FROM auth.roles
+				WHERE name IN ('admin', 'super_admin')
+			`).Scan(&adminRoleCount)
+
+		if err != nil {
+			http.Error(w, "Failed to count admin roles", http.StatusInternalServerError)
+			return
+		}
+
+		if adminRoleCount <= 1 {
+			http.Error(w, "Cannot delete the last admin role", http.StatusForbidden)
+			return
+		}
+	}
+
+	_, err = db.Exec(`CALL auth.delete_role($1)`, roleID)
 	if err != nil {
 		http.Error(w, "Failed to delete role", http.StatusInternalServerError)
 		return
@@ -7696,9 +7761,9 @@ func handleAddProjectMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate role
-	validRoles := map[string]bool{"owner": true, "admin": true, "member": true}
+	validRoles := map[string]bool{"owner": true, "admin": true, "member": true, "super_admin": true}
 	if !validRoles[req.Role] {
-		http.Error(w, "Invalid role. Must be 'owner', 'admin', or 'member'", http.StatusBadRequest)
+		http.Error(w, "Invalid role. Must be 'owner', 'admin', 'super_admin', or 'member'", http.StatusBadRequest)
 		return
 	}
 
@@ -7724,7 +7789,7 @@ func handleAddProjectMember(w http.ResponseWriter, r *http.Request) {
         SELECT EXISTS (
             SELECT 1 FROM rdm.projects p
             JOIN rdm.project_members pm ON p.id = pm.project_id
-            WHERE p.id = $1 AND pm.user_id = $2 AND pm.role IN ('owner', 'admin')
+            WHERE p.id = $1 AND pm.user_id = $2 AND pm.role IN ('owner', 'admin', 'super_admin')
         ), p.organization_id
         FROM rdm.projects p
         WHERE p.id = $1
@@ -7840,8 +7905,8 @@ func handleUpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate role
-	if req.Role != "owner" && req.Role != "admin" && req.Role != "member" {
-		http.Error(w, "Invalid role. Must be 'owner', 'admin', or 'member'", http.StatusBadRequest)
+	if req.Role != "owner" && req.Role != "admin" && req.Role != "super_admin" && req.Role != "member" {
+		http.Error(w, "Invalid role. Must be 'owner', 'admin', 'super_admin', or 'member'", http.StatusBadRequest)
 		return
 	}
 
@@ -7894,7 +7959,7 @@ func handleUpdateMemberRole(w http.ResponseWriter, r *http.Request) {
             FROM rdm.project_members pm
             JOIN auth.users u ON pm.user_id = u.id
             WHERE pm.project_id = $1 AND u.email = $2
-            AND pm.role IN ('owner', 'admin')
+            AND pm.role IN ('owner', 'admin', 'super_admin')
         )
     `, projectId, claims.Username).Scan(&hasPermission)
 
@@ -7997,7 +8062,7 @@ func handleRemoveProjectMember(w http.ResponseWriter, r *http.Request) {
             FROM rdm.project_members pm
             JOIN auth.users u ON pm.user_id = u.id
             WHERE pm.project_id = $1 AND u.email = $2
-            AND pm.role IN ('owner', 'admin')
+            AND pm.role IN ('owner', 'admin', 'super_admin')
         )
     `, projectId, claims.Username).Scan(&hasPermission)
 
@@ -8164,7 +8229,7 @@ func handleCreateProjectArtifact(w http.ResponseWriter, r *http.Request) {
 				FROM rdm.project_members pm
 				JOIN auth.users u ON pm.user_id = u.id
 				WHERE pm.project_id = $1 AND u.email = $2
-				AND (pm.role = 'owner' OR pm.role = 'admin' OR pm.role = 'member')
+				AND (pm.role = 'owner' OR pm.role = 'admin' or pm.role = 'super_admin' OR pm.role = 'member')
 			)
 		`, projectId, claims.Username).Scan(&isMember)
 	if err != nil {
@@ -10095,7 +10160,7 @@ func handleToggleMemberStatus(w http.ResponseWriter, r *http.Request) {
             FROM rdm.project_members pm
             JOIN auth.users u ON pm.user_id = u.id
             WHERE pm.project_id = $1 AND u.email = $2
-            AND pm.role IN ('owner', 'admin')
+            AND pm.role IN ('owner', 'admin', 'super_admin')
         )
     `, projectId, claims.Username).Scan(&hasPermission)
 
@@ -11491,54 +11556,64 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetOrganizationUsers(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	organizationId := vars["organizationId"]
-
-	if !isValidUUID(organizationId) {
-		http.Error(w, "Invalid organization ID", http.StatusBadRequest)
-		return
-	}
-
+	w.Header().Set("Content-Type", "application/json")
 	claims := r.Context().Value(claimsKey).(*Claims)
-	if claims == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+
+	// Get the user's organization ID directly from their auth context
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		log.Printf("Failed to get user ID: %v", err)
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
 		return
 	}
 
-	// First verify the user has access to the organization
-	var authorized bool
-	err := db.QueryRow(`
-        SELECT EXISTS (
-            SELECT 1 
-            FROM auth.organization_members om
-            JOIN auth.users u ON u.id = om.user_id
-            WHERE u.email = $1 AND om.organization_id = $2
-        )
-    `, claims.Username, organizationId).Scan(&authorized)
+	// Find the user's organization
+	var organizationId string
+	err = db.QueryRow(`
+        SELECT om.organization_id
+        FROM auth.organization_members om
+        WHERE om.user_id = $1
+        LIMIT 1
+    `, userId).Scan(&organizationId)
 
 	if err != nil {
-		log.Printf("Error checking organization access: %v", err)
-		http.Error(w, "Error checking access", http.StatusInternalServerError)
-		return
+		if err == sql.ErrNoRows {
+			log.Printf("User %s does not belong to any organization", claims.Username)
+			// Return empty array instead of error
+			json.NewEncoder(w).Encode(map[string]interface{}{"users": []interface{}{}})
+			return
+		} else {
+			log.Printf("Failed to get organization ID: %v", err)
+			http.Error(w, "Failed to get organization", http.StatusInternalServerError)
+			return
+		}
 	}
 
-	if !authorized {
-		http.Error(w, "Access denied to organization", http.StatusForbidden)
-		return
-	}
-
-	query := `
-        SELECT DISTINCT u.id, u.first_name, u.last_name, u.email
+	// Get users in the organization
+	rows, err := db.Query(`
+        SELECT 
+            u.id, 
+            u.email, 
+            u.first_name, 
+            u.last_name, 
+            u.is_active,
+            COALESCE((SELECT json_agg(row_to_json(r))
+                FROM (
+                    SELECT r.id, r.name, r.description, r.organization_id
+                    FROM auth.roles r
+                    INNER JOIN auth.user_roles ur ON r.id = ur.role_id
+                    WHERE ur.user_id = u.id AND (r.organization_id = $1 OR r.organization_id IS NULL)
+                ) r), '[]') AS roles
         FROM auth.users u
         JOIN auth.organization_members om ON u.id = om.user_id
-        WHERE om.organization_id = $1 AND u.is_active = true
+        WHERE om.organization_id = $1
         ORDER BY u.first_name, u.last_name
-    `
+    `, organizationId)
 
-	rows, err := db.Query(query, organizationId)
 	if err != nil {
-		log.Printf("Error fetching organization users: %v", err)
-		http.Error(w, "Failed to fetch organization users", http.StatusInternalServerError)
+		log.Printf("Failed to fetch users: %v", err)
+		http.Error(w, "Failed to fetch users", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -11547,28 +11622,50 @@ func handleGetOrganizationUsers(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var user struct {
 			ID        string
+			Email     string
 			FirstName string
 			LastName  string
-			Email     string
+			IsActive  bool
+			Roles     string
 		}
 
-		err := rows.Scan(&user.ID, &user.FirstName, &user.LastName, &user.Email)
-		if err != nil {
+		if err := rows.Scan(
+			&user.ID,
+			&user.Email,
+			&user.FirstName,
+			&user.LastName,
+			&user.IsActive,
+			&user.Roles,
+		); err != nil {
 			log.Printf("Error scanning user row: %v", err)
 			continue
 		}
 
-		users = append(users, map[string]interface{}{
-			"id":    user.ID,
-			"name":  user.FirstName + " " + user.LastName,
-			"email": user.Email,
-		})
+		var roles []map[string]interface{}
+		if err := json.Unmarshal([]byte(user.Roles), &roles); err != nil {
+			log.Printf("Error parsing roles JSON: %v", err)
+			roles = []map[string]interface{}{}
+		}
+
+		userMap := map[string]interface{}{
+			"id":        user.ID,
+			"email":     user.Email,
+			"firstName": user.FirstName,
+			"lastName":  user.LastName,
+			"isActive":  user.IsActive,
+			"roles":     roles,
+		}
+
+		users = append(users, userMap)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"users": users,
-	})
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating users: %v", err)
+		http.Error(w, "Error processing users", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"users": users})
 }
 
 // Handler for getting organization licenses
@@ -12365,7 +12462,7 @@ func handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 				FROM rdm.project_members pm
 				JOIN auth.users u ON pm.user_id = u.id
 				WHERE pm.project_id = $1 AND u.email = $2
-				AND pm.role IN ('owner', 'admin')
+				AND pm.role IN ('owner', 'admin', 'super_admin')
 			)
 		`, projectId, claims.Username).Scan(&isAdmin)
 
@@ -12450,6 +12547,1218 @@ func handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
+// Create a new organization role
+func handleCreateOrganizationRole(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get the user's ID and organization
+	var userId, organizationId string
+	err := db.QueryRow(`
+        SELECT u.id, om.organization_id
+        FROM auth.users u
+        JOIN auth.organization_members om ON u.id = om.user_id
+        WHERE u.email = $1
+        LIMIT 1
+    `, claims.Username).Scan(&userId, &organizationId)
+
+	if err != nil {
+		log.Printf("Failed to get user context: %v", err)
+		http.Error(w, "Failed to get user context", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse request body
+	var requestData struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		IsGlobal    bool   `json:"isGlobal"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Check if user is a super admin
+	isSuperAdmin, err := isSuperAdmin(claims.Username)
+	if err != nil {
+		log.Printf("Failed to check super admin status: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Enforce role creation restrictions
+	if requestData.IsGlobal && !isSuperAdmin {
+		http.Error(w, "Only super admins can create global roles", http.StatusForbidden)
+		return
+	}
+
+	// Set organizationId to null for global roles, otherwise use the user's organization
+	var roleOrgId *string
+	if !requestData.IsGlobal {
+		roleOrgId = &organizationId
+	}
+
+	// Create the role with the is_global flag from the request
+	var roleId string
+	err = db.QueryRow(`
+        INSERT INTO auth.roles (name, description, organization_id, is_global)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+    `, requestData.Name, requestData.Description, roleOrgId, requestData.IsGlobal).Scan(&roleId)
+
+	if err != nil {
+		log.Printf("Failed to create role: %v", err)
+		http.Error(w, "Failed to create role", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the created role
+	role := Role{
+		ID:             roleId,
+		OrganizationID: roleOrgId,
+		Name:           requestData.Name,
+		Description:    requestData.Description,
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"role":     role,
+		"isGlobal": requestData.IsGlobal,
+	})
+}
+
+// Update an organization role
+func handleUpdateOrganizationRole(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	roleId := vars["id"]
+
+	// Get the user's ID and organization
+	var userId, organizationId string
+	err := db.QueryRow(`
+        SELECT u.id, om.organization_id
+        FROM auth.users u
+        JOIN auth.organization_members om ON u.id = om.user_id
+        WHERE u.email = $1
+        LIMIT 1
+    `, claims.Username).Scan(&userId, &organizationId)
+
+	if err != nil {
+		log.Printf("Failed to get user context: %v", err)
+		http.Error(w, "Failed to get user context", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user is an admin in their organization
+	var isAdmin bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM auth.user_roles ur
+            JOIN auth.roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1 
+            AND r.name IN ('super_admin', 'admin', 'owner')
+            AND (r.organization_id = $2 OR r.organization_id IS NULL)
+        )
+    `, userId, organizationId).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Failed to check admin status: %v", err)
+		http.Error(w, "Failed to check permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !isAdmin {
+		http.Error(w, "Unauthorized: Only admins can update roles", http.StatusForbidden)
+		return
+	}
+
+	// Check if the role belongs to this organization
+	var roleOrgId sql.NullString
+	var isGlobal bool
+	var currentRoleName string
+	err = db.QueryRow(`
+        SELECT organization_id, is_global, name
+        FROM auth.roles 
+        WHERE id = $1
+    `, roleId).Scan(&roleOrgId, &isGlobal, &currentRoleName)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Role not found", http.StatusNotFound)
+		return
+	}
+
+	if err != nil {
+		log.Printf("Failed to check role: %v", err)
+		http.Error(w, "Failed to verify role", http.StatusInternalServerError)
+		return
+	}
+
+	// Don't allow editing super_admin roles
+	if currentRoleName == "super_admin" {
+		http.Error(w, "Cannot edit super_admin role", http.StatusForbidden)
+		return
+	}
+
+	// Don't allow editing global roles unless you are a super admin
+	isSuperAdmin, err := isSuperAdmin(claims.Username)
+	if err != nil {
+		log.Printf("Failed to check super admin status: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if isGlobal && !isSuperAdmin {
+		http.Error(w, "Only super admins can edit global roles", http.StatusForbidden)
+		return
+	}
+
+	// Make sure the role belongs to this organization if it has an organization ID
+	if roleOrgId.Valid && roleOrgId.String != organizationId && !isSuperAdmin {
+		http.Error(w, "Role does not belong to your organization", http.StatusForbidden)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		IsGlobal    bool   `json:"isGlobal"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate input
+	if req.Name == "" {
+		http.Error(w, "Role name is required", http.StatusBadRequest)
+		return
+	}
+
+	// Only super admins can change a role's global status
+	if req.IsGlobal != isGlobal && !isSuperAdmin {
+		http.Error(w, "Only super admins can change a role's global status", http.StatusForbidden)
+		return
+	}
+
+	// Check if another role with this name exists
+	var duplicateExists bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM auth.roles
+            WHERE name = $1 AND organization_id = $2 AND id != $3
+        )
+    `, req.Name, organizationId, roleId).Scan(&duplicateExists)
+
+	if err != nil {
+		log.Printf("Failed to check duplicate: %v", err)
+		http.Error(w, "Failed to validate role name", http.StatusInternalServerError)
+		return
+	}
+
+	if duplicateExists {
+		http.Error(w, "Another role with this name already exists", http.StatusConflict)
+		return
+	}
+
+	// Set organizationId to null for global roles, otherwise use the user's organization
+	var newOrgId interface{}
+	if req.IsGlobal {
+		newOrgId = nil
+	} else {
+		newOrgId = organizationId
+	}
+
+	// Update the role
+	_, err = db.Exec(`
+        UPDATE auth.roles 
+        SET name = $1, description = $2, organization_id = $3, is_global = $4
+        WHERE id = $5
+    `, req.Name, req.Description, newOrgId, req.IsGlobal, roleId)
+
+	if err != nil {
+		log.Printf("Failed to update role: %v", err)
+		http.Error(w, "Failed to update role", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Role updated successfully",
+		"role": map[string]interface{}{
+			"id":             roleId,
+			"name":           req.Name,
+			"description":    req.Description,
+			"organizationId": newOrgId,
+			"isGlobal":       req.IsGlobal,
+		},
+	})
+}
+
+// Delete an organization role
+func handleDeleteOrganizationRole(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	roleId := vars["id"]
+
+	log.Printf("DELETE ROLE: Starting role deletion request for roleId: %s by user: %s", roleId, claims.Username)
+
+	// Get the user's ID and organization
+	var userId, organizationId string
+	err := db.QueryRow(`
+        SELECT u.id, om.organization_id
+        FROM auth.users u
+        JOIN auth.organization_members om ON u.id = om.user_id
+        WHERE u.email = $1
+        LIMIT 1
+    `, claims.Username).Scan(&userId, &organizationId)
+
+	if err != nil {
+		log.Printf("DELETE ROLE ERROR: Failed to get user context: %v", err)
+		http.Error(w, "Failed to get user context", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("DELETE ROLE: Found userId: %s, organizationId: %s", userId, organizationId)
+
+	// Check if user is an admin in their organization
+	var isAdmin bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM auth.user_roles ur
+            JOIN auth.roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1 
+            AND r.name IN ('super_admin', 'admin', 'owner')
+            AND (r.organization_id = $2 OR r.organization_id IS NULL)
+        )
+    `, userId, organizationId).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("DELETE ROLE ERROR: Failed to check admin status: %v", err)
+		http.Error(w, "Failed to check permissions", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("DELETE ROLE: User is admin: %v", isAdmin)
+	if !isAdmin {
+		log.Printf("DELETE ROLE ERROR: User %s is not an admin", claims.Username)
+		http.Error(w, "Unauthorized: Only admins can delete roles", http.StatusForbidden)
+		return
+	}
+
+	// Check if the role belongs to this organization and get role details
+	var roleOrgId sql.NullString
+	var roleName string
+	var isGlobal bool
+	err = db.QueryRow(`
+        SELECT organization_id, name, is_global
+        FROM auth.roles 
+        WHERE id = $1
+    `, roleId).Scan(&roleOrgId, &roleName, &isGlobal)
+
+	if err == sql.ErrNoRows {
+		log.Printf("DELETE ROLE ERROR: Role %s not found", roleId)
+		http.Error(w, "Role not found", http.StatusNotFound)
+		return
+	}
+
+	if err != nil {
+		log.Printf("DELETE ROLE ERROR: Failed to check role details: %v", err)
+		http.Error(w, "Failed to verify role", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("DELETE ROLE: Role details - Name: %s, OrgId: %v (Valid: %v), isGlobal: %v",
+		roleName, roleOrgId.String, roleOrgId.Valid, isGlobal)
+
+	// Make sure the role belongs to this organization if it has an organization
+	if roleOrgId.Valid && roleOrgId.String != organizationId {
+		log.Printf("DELETE ROLE ERROR: Role belongs to org %s but user is in org %s",
+			roleOrgId.String, organizationId)
+		http.Error(w, "Role does not belong to your organization", http.StatusForbidden)
+		return
+	}
+
+	// Don't allow deleting super_admin role
+	if roleName == "super_admin" {
+		log.Printf("DELETE ROLE ERROR: Attempted to delete super_admin role")
+		http.Error(w, "Cannot delete super_admin role", http.StatusForbidden)
+		return
+	}
+
+	// Don't allow deleting global admin roles
+	if isGlobal && roleName == "admin" {
+		log.Printf("DELETE ROLE ERROR: Attempted to delete global admin role")
+		http.Error(w, "Cannot delete global admin role", http.StatusForbidden)
+		return
+	}
+
+	// Check if the role is currently assigned to users
+	var isInUse bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM auth.user_roles
+            WHERE role_id = $1
+        )
+    `, roleId).Scan(&isInUse)
+
+	if err != nil {
+		log.Printf("DELETE ROLE ERROR: Failed to check if role is in use: %v", err)
+		http.Error(w, "Failed to check role usage", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("DELETE ROLE: Role is in use: %v", isInUse)
+	if isInUse {
+		log.Printf("DELETE ROLE ERROR: Role %s is assigned to users", roleId)
+		http.Error(w, "Cannot delete role that is assigned to users", http.StatusBadRequest)
+		return
+	}
+
+	// Delete the role
+	log.Printf("DELETE ROLE: Attempting to delete role %s", roleId)
+	result, err := db.Exec(`DELETE FROM auth.roles WHERE id = $1`, roleId)
+
+	if err != nil {
+		log.Printf("DELETE ROLE ERROR: Failed to delete role: %v", err)
+		// Log more details if it's a PostgreSQL error
+		if pqErr, ok := err.(*pq.Error); ok {
+			log.Printf("DELETE ROLE ERROR: PostgreSQL error code: %s, Detail: %s, Message: %s",
+				pqErr.Code, pqErr.Detail, pqErr.Message)
+		}
+		http.Error(w, "Failed to delete role", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("DELETE ROLE ERROR: Couldn't get rows affected: %v", err)
+	} else {
+		log.Printf("DELETE ROLE: Successfully deleted role %s (%d rows affected)", roleId, rowsAffected)
+	}
+
+	// Return success response
+	log.Printf("DELETE ROLE: Sending success response for role deletion")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Role deleted successfully",
+	})
+}
+
+func handleCheckOrganizationAdmin(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get the user's ID
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user has admin role in their organization
+	var isAdmin bool
+	err = db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM auth.user_roles ur
+			JOIN auth.roles r ON ur.role_id = r.id
+			JOIN auth.users u ON ur.user_id = u.id
+			WHERE u.id = $1 
+			AND r.name IN ('super_admin', 'admin' ,'owner')
+		)
+	`, userId).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		http.Error(w, "Failed to check admin status", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"isOrganizationAdmin": isAdmin})
+}
+
+func handleCreateOrganizationUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get current user's ID and organization ID
+	var userId, organizationId string
+	err := db.QueryRow(`
+        SELECT u.id, om.organization_id
+        FROM auth.users u
+        JOIN auth.organization_members om ON u.id = om.user_id
+        WHERE u.email = $1
+        LIMIT 1
+    `, claims.Username).Scan(&userId, &organizationId)
+
+	if err != nil {
+		log.Printf("Failed to get user context: %v", err)
+		http.Error(w, "Failed to get user context", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user is an admin in their organization
+	var isAdmin bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM auth.user_roles ur
+            JOIN auth.roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1 
+            AND r.name IN ('super_admin', 'admin', 'owner')
+            AND (r.organization_id = $2 OR r.organization_id IS NULL)
+        )
+    `, userId, organizationId).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Failed to check admin status: %v", err)
+		http.Error(w, "Failed to check permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !isAdmin {
+		http.Error(w, "Unauthorized: Only admins can create users", http.StatusForbidden)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		FirstName string `json:"firstName"`
+		LastName  string `json:"lastName"`
+		Email     string `json:"email"`
+		Password  string `json:"password"`
+		RoleId    string `json:"roleId"`
+		IsActive  bool   `json:"isActive"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate input
+	if req.Email == "" || req.Password == "" || req.FirstName == "" || req.LastName == "" {
+		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		return
+	}
+
+	// Verify the role belongs to this organization
+	var roleOrganizationId sql.NullString
+	err = db.QueryRow("SELECT organization_id FROM auth.roles WHERE id = $1", req.RoleId).Scan(&roleOrganizationId)
+	if err != nil {
+		log.Printf("Failed to verify role: %v", err)
+		http.Error(w, "Invalid role ID", http.StatusBadRequest)
+		return
+	}
+
+	if roleOrganizationId.Valid && roleOrganizationId.String != organizationId {
+		http.Error(w, "Role does not belong to your organization", http.StatusBadRequest)
+		return
+	}
+
+	// Check if email is already in use
+	var emailExists bool
+	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM auth.users WHERE email = $1)", req.Email).Scan(&emailExists)
+	if err != nil {
+		log.Printf("Failed to check email existence: %v", err)
+		http.Error(w, "Failed to validate email", http.StatusInternalServerError)
+		return
+	}
+
+	if emailExists {
+		http.Error(w, "Email already in use", http.StatusConflict)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Hash the password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("Failed to hash password: %v", err)
+		http.Error(w, "Failed to process password", http.StatusInternalServerError)
+		return
+	}
+
+	// Insert new user
+	var newUserId string
+	err = tx.QueryRow(`
+        INSERT INTO auth.users (
+            email, 
+            password_hash, 
+            first_name, 
+            last_name, 
+            is_active
+        ) VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+    `, req.Email, string(hashedPassword), req.FirstName, req.LastName, req.IsActive).Scan(&newUserId)
+
+	if err != nil {
+		log.Printf("Failed to create user: %v", err)
+		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		return
+	}
+
+	// Add user to organization
+	_, err = tx.Exec(`
+        INSERT INTO auth.organization_members (
+            user_id, 
+            organization_id
+        ) VALUES ($1, $2)
+    `, newUserId, organizationId)
+
+	if err != nil {
+		log.Printf("Failed to add user to organization: %v", err)
+		http.Error(w, "Failed to add user to organization", http.StatusInternalServerError)
+		return
+	}
+
+	// Assign role to user
+	if req.RoleId != "" {
+		_, err = tx.Exec(`
+            INSERT INTO auth.user_roles (
+                user_id, 
+                role_id, 
+                organization_id
+            ) VALUES ($1, $2, $3)
+        `, newUserId, req.RoleId, organizationId)
+
+		if err != nil {
+			log.Printf("Failed to assign role to user: %v", err)
+			http.Error(w, "Failed to assign role", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
+		return
+	}
+
+	// Get the complete user data including roles
+	var id, email, firstName, lastName string
+	var isActive bool
+	var userRoles string
+
+	err = db.QueryRow(`
+        SELECT 
+            u.id, 
+            u.email, 
+            u.first_name, 
+            u.last_name, 
+            u.is_active,
+            COALESCE((SELECT json_agg(row_to_json(r))
+                FROM (
+                    SELECT r.id, r.name, r.description, r.organization_id
+                    FROM auth.roles r
+                    INNER JOIN auth.user_roles ur ON r.id = ur.role_id
+                    WHERE ur.user_id = u.id AND (r.organization_id = $2 OR r.organization_id IS NULL)
+                ) r), '[]') AS roles
+        FROM auth.users u
+        WHERE u.id = $1
+    `, newUserId, organizationId).Scan(&id, &email, &firstName, &lastName, &isActive, &userRoles)
+
+	userData := map[string]interface{}{}
+
+	if err != nil {
+		log.Printf("Failed to fetch created user: %v", err)
+		// If we can't fetch the user details, still respond with basic info
+		userData = map[string]interface{}{
+			"id":        newUserId,
+			"email":     req.Email,
+			"firstName": req.FirstName,
+			"lastName":  req.LastName,
+			"isActive":  req.IsActive,
+			"roles":     []interface{}{},
+		}
+	} else {
+		// Parse roles from JSON
+		var roles []map[string]interface{}
+		if err := json.Unmarshal([]byte(userRoles), &roles); err != nil {
+			roles = []map[string]interface{}{}
+		}
+
+		userData = map[string]interface{}{
+			"id":        id,
+			"email":     email,
+			"firstName": firstName,
+			"lastName":  lastName,
+			"isActive":  isActive,
+			"roles":     roles,
+		}
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "User created successfully",
+		"user":    userData,
+	})
+}
+
+func handleUpdateOrganizationUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	userIdToUpdate := vars["id"]
+
+	// Get current user's ID and organization ID
+	var userId, organizationId string
+	err := db.QueryRow(`
+        SELECT u.id, om.organization_id
+        FROM auth.users u
+        JOIN auth.organization_members om ON u.id = om.user_id
+        WHERE u.email = $1
+        LIMIT 1
+    `, claims.Username).Scan(&userId, &organizationId)
+
+	if err != nil {
+		log.Printf("Failed to get user context: %v", err)
+		http.Error(w, "Failed to get user context", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user to update belongs to the same organization
+	var userExists bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members
+            WHERE user_id = $1 AND organization_id = $2
+        )
+    `, userIdToUpdate, organizationId).Scan(&userExists)
+
+	if err != nil {
+		log.Printf("Failed to check user membership: %v", err)
+		http.Error(w, "Failed to verify user", http.StatusInternalServerError)
+		return
+	}
+
+	if !userExists {
+		http.Error(w, "User not found in your organization", http.StatusNotFound)
+		return
+	}
+
+	// Check if current user is an admin in their organization
+	var isAdmin bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM auth.user_roles ur
+            JOIN auth.roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1 
+            AND r.name IN ('super_admin', 'admin', 'owner')
+            AND (r.organization_id = $2 OR r.organization_id IS NULL)
+        )
+    `, userId, organizationId).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Failed to check admin status: %v", err)
+		http.Error(w, "Failed to check permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !isAdmin {
+		http.Error(w, "Unauthorized: Only admins can update users", http.StatusForbidden)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		FirstName string  `json:"firstName"`
+		LastName  string  `json:"lastName"`
+		Email     string  `json:"email"`
+		Password  *string `json:"password"`
+		RoleId    string  `json:"roleId"`
+		IsActive  bool    `json:"isActive"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Failed to decode request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate input
+	if req.Email == "" || req.FirstName == "" || req.LastName == "" {
+		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		return
+	}
+
+	// If email is being changed, check if it's already in use
+	var currentEmail string
+	err = db.QueryRow("SELECT email FROM auth.users WHERE id = $1", userIdToUpdate).Scan(&currentEmail)
+	if err != nil {
+		log.Printf("Failed to get current email: %v", err)
+		http.Error(w, "Failed to get user details", http.StatusInternalServerError)
+		return
+	}
+
+	if req.Email != currentEmail {
+		var emailExists bool
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM auth.users WHERE email = $1 AND id != $2)",
+			req.Email, userIdToUpdate).Scan(&emailExists)
+
+		if err != nil {
+			log.Printf("Failed to check email existence: %v", err)
+			http.Error(w, "Failed to validate email", http.StatusInternalServerError)
+			return
+		}
+
+		if emailExists {
+			http.Error(w, "Email already in use by another user", http.StatusConflict)
+			return
+		}
+	}
+
+	// Verify the role belongs to this organization
+	if req.RoleId != "" {
+		var roleOrganizationId sql.NullString
+		err = db.QueryRow("SELECT organization_id FROM auth.roles WHERE id = $1", req.RoleId).Scan(&roleOrganizationId)
+		if err != nil {
+			log.Printf("Failed to verify role: %v", err)
+			http.Error(w, "Invalid role ID", http.StatusBadRequest)
+			return
+		}
+
+		if roleOrganizationId.Valid && roleOrganizationId.String != organizationId {
+			http.Error(w, "Role does not belong to your organization", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Update user basic information
+	_, err = tx.Exec(`
+        UPDATE auth.users 
+        SET 
+            first_name = $1, 
+            last_name = $2, 
+            email = $3, 
+            is_active = $4,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $5
+    `, req.FirstName, req.LastName, req.Email, req.IsActive, userIdToUpdate)
+
+	if err != nil {
+		log.Printf("Failed to update user: %v", err)
+		http.Error(w, "Failed to update user", http.StatusInternalServerError)
+		return
+	}
+
+	// Update password if provided
+	if req.Password != nil && *req.Password != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			log.Printf("Failed to hash password: %v", err)
+			http.Error(w, "Failed to process password", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = tx.Exec(`
+            UPDATE auth.users 
+            SET password_hash = $1
+            WHERE id = $2
+        `, string(hashedPassword), userIdToUpdate)
+
+		if err != nil {
+			log.Printf("Failed to update password: %v", err)
+			http.Error(w, "Failed to update password", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Update role if provided
+	if req.RoleId != "" {
+		// First, remove existing roles for this organization
+		_, err = tx.Exec(`
+            DELETE FROM auth.user_roles
+            WHERE user_id = $1 AND organization_id = $2
+        `, userIdToUpdate, organizationId)
+
+		if err != nil {
+			log.Printf("Failed to remove existing roles: %v", err)
+			http.Error(w, "Failed to update roles", http.StatusInternalServerError)
+			return
+		}
+
+		// Then add the new role
+		_, err = tx.Exec(`
+            INSERT INTO auth.user_roles (
+                user_id, 
+                role_id, 
+                organization_id
+            ) VALUES ($1, $2, $3)
+        `, userIdToUpdate, req.RoleId, organizationId)
+
+		if err != nil {
+			log.Printf("Failed to assign new role: %v", err)
+			http.Error(w, "Failed to update roles", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		http.Error(w, "Failed to complete update", http.StatusInternalServerError)
+		return
+	}
+
+	// Get the updated user data
+	var id, email, firstName, lastName string
+	var isActive bool
+	var userRoles string
+
+	err = db.QueryRow(`
+        SELECT 
+            u.id, 
+            u.email, 
+            u.first_name, 
+            u.last_name, 
+            u.is_active,
+            COALESCE((SELECT json_agg(row_to_json(r))
+                FROM (
+                    SELECT r.id, r.name, r.description, r.organization_id
+                    FROM auth.roles r
+                    INNER JOIN auth.user_roles ur ON r.id = ur.role_id
+                    WHERE ur.user_id = u.id AND (r.organization_id = $2 OR r.organization_id IS NULL)
+                ) r), '[]') AS roles
+        FROM auth.users u
+        WHERE u.id = $1
+    `, userIdToUpdate, organizationId).Scan(&id, &email, &firstName, &lastName, &isActive, &userRoles)
+
+	userData := map[string]interface{}{}
+
+	if err != nil {
+		log.Printf("Failed to fetch updated user: %v", err)
+		// Return success even if we couldn't fetch the full user details
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "User updated successfully",
+		})
+		return
+	}
+
+	// Parse roles from JSON
+	var roles []map[string]interface{}
+	if err := json.Unmarshal([]byte(userRoles), &roles); err != nil {
+		roles = []map[string]interface{}{}
+	}
+
+	userData = map[string]interface{}{
+		"id":        id,
+		"email":     email,
+		"firstName": firstName,
+		"lastName":  lastName,
+		"isActive":  isActive,
+		"roles":     roles,
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "User updated successfully",
+		"user":    userData,
+	})
+}
+
+func handleGetOrganizationRoles(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get the user's organization ID
+	var organizationId string
+	err := db.QueryRow(`
+        SELECT om.organization_id
+        FROM auth.organization_members om
+        JOIN auth.users u ON om.user_id = u.id
+        WHERE u.email = $1
+        LIMIT 1
+    `, claims.Username).Scan(&organizationId)
+
+	if err != nil {
+		log.Printf("Failed to get organization ID: %v", err)
+		http.Error(w, "Failed to get organization", http.StatusInternalServerError)
+		return
+	}
+
+	// Get roles that are global or specific to this organization
+	rows, err := db.Query(`
+        SELECT id, name, description, organization_id
+        FROM auth.roles
+        WHERE organization_id = $1 OR organization_id IS NULL
+        ORDER BY name
+    `, organizationId)
+
+	if err != nil {
+		log.Printf("Failed to fetch roles: %v", err)
+		http.Error(w, "Failed to fetch roles", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var roles []map[string]interface{}
+	for rows.Next() {
+		var role struct {
+			ID             string
+			Name           string
+			Description    sql.NullString
+			OrganizationID sql.NullString
+		}
+
+		if err := rows.Scan(&role.ID, &role.Name, &role.Description, &role.OrganizationID); err != nil {
+			log.Printf("Error scanning role row: %v", err)
+			continue
+		}
+
+		roleMap := map[string]interface{}{
+			"id":             role.ID,
+			"name":           role.Name,
+			"description":    role.Description.String,
+			"organizationId": role.OrganizationID.String,
+		}
+
+		roles = append(roles, roleMap)
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating roles: %v", err)
+		http.Error(w, "Error processing roles", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"roles": roles})
+}
+
+func handleDeleteOrganizationUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	userIdToDelete := vars["id"]
+
+	// Get current user's ID and organization ID
+	var userId, organizationId string
+	err := db.QueryRow(`
+        SELECT u.id, om.organization_id
+        FROM auth.users u
+        JOIN auth.organization_members om ON om.user_id = u.id
+        WHERE u.email = $1
+        LIMIT 1
+    `, claims.Username).Scan(&userId, &organizationId)
+
+	if err != nil {
+		log.Printf("Failed to get user context: %v", err)
+		http.Error(w, "Failed to get user context", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user to delete belongs to the same organization
+	var userExists bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members
+            WHERE user_id = $1 AND organization_id = $2
+        )
+    `, userIdToDelete, organizationId).Scan(&userExists)
+
+	if err != nil {
+		log.Printf("Failed to check user membership: %v", err)
+		http.Error(w, "Failed to verify user", http.StatusInternalServerError)
+		return
+	}
+
+	if !userExists {
+		http.Error(w, "User not found in your organization", http.StatusNotFound)
+		return
+	}
+
+	// Check if user has super_admin role
+	var hasSuperAdminRole bool
+	err = db.QueryRow(`
+        SELECT EXISTS(
+            SELECT 1 FROM auth.user_roles ur
+            JOIN auth.roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1 AND r.name = 'super_admin'
+        )
+    `, userIdToDelete).Scan(&hasSuperAdminRole)
+
+	if err != nil {
+		log.Printf("Failed to check super_admin role: %v", err)
+		http.Error(w, "Failed to verify user role", http.StatusInternalServerError)
+		return
+	}
+
+	if hasSuperAdminRole {
+		http.Error(w, "Cannot delete a user with super_admin role", http.StatusForbidden)
+		return
+	}
+
+	// Check if current user is an admin in their organization
+	var isAdmin bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM auth.user_roles ur
+            JOIN auth.roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1 
+            AND r.name IN ('super_admin', 'admin', 'owner')
+            AND (r.organization_id = $2 OR r.organization_id IS NULL)
+        )
+    `, userId, organizationId).Scan(&isAdmin)
+
+	if err != nil {
+		log.Printf("Failed to check admin status: %v", err)
+		http.Error(w, "Failed to check permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !isAdmin {
+		http.Error(w, "Unauthorized: Only admins can delete users", http.StatusForbidden)
+		return
+	}
+
+	// Check if target user is the last admin of the organization
+	var isLastAdmin bool
+	err = db.QueryRow(`
+        WITH org_admins AS (
+            SELECT ur.user_id
+            FROM auth.user_roles ur
+            JOIN auth.roles r ON ur.role_id = r.id
+            WHERE r.name IN ('super_admin', 'admin', 'owner')
+            AND ur.organization_id = $1
+        )
+        SELECT (
+            EXISTS (
+                SELECT 1 FROM org_admins WHERE user_id = $2
+            ) 
+            AND 
+            (SELECT COUNT(*) FROM org_admins) <= 1
+        )
+    `, organizationId, userIdToDelete).Scan(&isLastAdmin)
+
+	if err != nil {
+		log.Printf("Failed to check if last admin: %v", err)
+		http.Error(w, "Failed to verify admin status", http.StatusInternalServerError)
+		return
+	}
+
+	if isLastAdmin {
+		http.Error(w, "Cannot delete the last admin of the organization", http.StatusBadRequest)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Remove user from this organization
+	_, err = tx.Exec(`
+        DELETE FROM auth.organization_members
+        WHERE user_id = $1 AND organization_id = $2
+    `, userIdToDelete, organizationId)
+
+	if err != nil {
+		log.Printf("Failed to remove user from organization: %v", err)
+		http.Error(w, "Failed to remove user from organization", http.StatusInternalServerError)
+		return
+	}
+
+	// Remove user's roles in this organization
+	_, err = tx.Exec(`
+        DELETE FROM auth.user_roles
+        WHERE user_id = $1 AND organization_id = $2
+    `, userIdToDelete, organizationId)
+
+	if err != nil {
+		log.Printf("Failed to remove user roles: %v", err)
+		http.Error(w, "Failed to remove user roles", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user belongs to any other organizations
+	var hasMemberships bool
+	err = tx.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members
+            WHERE user_id = $1
+        )
+    `, userIdToDelete).Scan(&hasMemberships)
+
+	if err != nil {
+		log.Printf("Failed to check other memberships: %v", err)
+		http.Error(w, "Failed to check memberships", http.StatusInternalServerError)
+		return
+	}
+
+	// If user doesn't belong to any organization anymore, we can fully delete them
+	if !hasMemberships {
+		_, err = tx.Exec(`
+            DELETE FROM auth.users
+            WHERE id = $1
+        `, userIdToDelete)
+
+		if err != nil {
+			log.Printf("Failed to delete user account: %v", err)
+			http.Error(w, "Failed to delete user account", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Otherwise just mark them as inactive for this organization
+		_, err = tx.Exec(`
+            UPDATE auth.users
+            SET is_active = false,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+        `, userIdToDelete)
+
+		if err != nil {
+			log.Printf("Failed to deactivate user: %v", err)
+			http.Error(w, "Failed to deactivate user", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		http.Error(w, "Failed to complete deletion", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "User removed from organization successfully",
+	})
+}
+
 // Helper function to convert sql.NullString to a value that works with JSON
 func nullStringValue(ns sql.NullString) interface{} {
 	if ns.Valid {
@@ -12473,7 +13782,6 @@ func nullTimeValue(nt sql.NullTime) interface{} {
 	}
 	return nil
 }
-
 func handleGeneratePDF(w http.ResponseWriter, r *http.Request) {
 	// Parse request
 	var req struct {
@@ -12990,6 +14298,16 @@ func main() {
 	// In your main function, add these routes to your router
 	r.HandleFunc("/organizations/{organizationId}/billing/with-invoice", superAdminMiddleware(handleAddBillingTransactionWithInvoice)).Methods("POST")
 	r.HandleFunc("/organizations/{organizationId}/billing/{transactionId}", superAdminMiddleware(handleDeleteBillingTransaction)).Methods("DELETE")
+	r.HandleFunc("/api/account/permissions", authMiddleware(handleCheckOrganizationAdmin)).Methods("GET")
+	r.HandleFunc("/api/organization/users", authMiddleware(handleGetOrganizationUsers)).Methods("GET")
+	r.HandleFunc("/api/organization/users", authMiddleware(handleCreateOrganizationUser)).Methods("POST")
+	r.HandleFunc("/api/organization/users/{id}", authMiddleware(handleUpdateOrganizationUser)).Methods("PUT")
+	r.HandleFunc("/api/organization/users/{id}", authMiddleware(handleDeleteOrganizationUser)).Methods("DELETE")
+	r.HandleFunc("/api/organization/roles", authMiddleware(handleGetOrganizationRoles)).Methods("GET")
+	r.HandleFunc("/api/organization/roles", authMiddleware(handleGetOrganizationRoles)).Methods("GET")
+	r.HandleFunc("/api/organization/roles", authMiddleware(handleCreateOrganizationRole)).Methods("POST")
+	r.HandleFunc("/api/organization/roles/{id}", authMiddleware(handleUpdateOrganizationRole)).Methods("PUT")
+	r.HandleFunc("/api/organization/roles/{id}", authMiddleware(handleDeleteOrganizationRole)).Methods("DELETE")
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
 
