@@ -71,7 +71,8 @@ export function UsersPage() {
   const handleEditUser = async (userData: Partial<User>) => {
     try {
       if (!editingUser?.id) return
-      const updatedUser = await AuthService.updateUser(editingUser.id, userData)
+      // Use updateOrganizationUser instead of updateUser
+      const updatedUser = await AuthService.updateOrganizationUser(editingUser.id, userData)
       setUsers(prev => prev.map(user => 
         user.id === updatedUser.id ? updatedUser : user
       ))
@@ -91,7 +92,6 @@ export function UsersPage() {
       throw error
     }
   }
-
   const handleDeleteUser = async () => {
     try {
       if (!userToDelete?.id) return
