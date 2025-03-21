@@ -35,7 +35,7 @@ export const menuItems = [
   },
   {
     title: "Collaborators",
-    url: "#",
+    url: "/rdm/collaborators",
     icon: Users,
-  },
+  }
 ]

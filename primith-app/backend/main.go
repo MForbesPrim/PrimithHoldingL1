@@ -68,10 +68,10 @@ type ContactRequest struct {
 }
 
 type UserData struct {
-	ID        string `json:"id"`
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
-	Email     string `json:"email"`
+	ID        string  `json:"id"`
+	FirstName *string `json:"firstName"`
+	LastName  *string `json:"lastName"`
+	Email     string  `json:"email"`
 }
 
 type LoginResponse struct {
@@ -258,6 +258,16 @@ type ProjectVariable struct {
 	Description string    `json:"description,omitempty"`
 	CreatedBy   string    `json:"createdBy"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type CollaboratorResponse struct {
+	ID        string   `json:"id"`
+	Email     string   `json:"email"`
+	FirstName *string  `json:"firstName"`
+	LastName  *string  `json:"lastName"`
+	Role      string   `json:"role"`
+	Projects  []string `json:"projects"`
+	Status    string   `json:"status"`
 }
 
 type License struct {
@@ -521,11 +531,34 @@ func login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var status sql.NullString
+	var err error
+	err = db.QueryRow(`
+		SELECT status FROM auth.users WHERE email = $1
+	`, user.Username).Scan(&status)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Handle case where user doesn't exist
+			http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+			return
+		}
+		// Handle other database errors
+		log.Printf("Database error: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if status.Valid && status.String == "pending" {
+		http.Error(w, "Please accept invitation before logging in", http.StatusUnauthorized)
+		return
+	}
+
 	// Query the database for the user
 	var storedHash string
 	var userData UserData
 	var userID string
-	err := db.QueryRow(`
+	err = db.QueryRow(`
 			SELECT id, password_hash, first_name, last_name, email 
 			FROM auth.users WHERE email = $1`,
 		user.Username).Scan(&userID, &storedHash, &userData.FirstName, &userData.LastName, &userData.Email)
@@ -3331,63 +3364,79 @@ func handleMoveFolderStructure(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	organizationId := r.URL.Query().Get("organizationId")
 	folderId := r.URL.Query().Get("folderId")
 	projectId := r.URL.Query().Get("projectId")
 
 	if organizationId == "" {
+		log.Printf("[handleGetDocuments] Error: Organization ID is required")
 		http.Error(w, "Organization ID is required", http.StatusBadRequest)
 		return
 	}
+	log.Printf("[handleGetDocuments] Requested organizationId: %s", organizationId)
 
-	claims := r.Context().Value(claimsKey).(*Claims)
+	claims, ok := r.Context().Value(claimsKey).(*Claims)
+	if !ok || claims == nil {
+		log.Printf("[handleGetDocuments] Error: No valid claims found in context")
+		http.Error(w, "Unauthorized: Missing authentication", http.StatusUnauthorized)
+		return
+	}
+	log.Printf("[handleGetDocuments] User email from claims: %s", claims.Username)
 
 	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
-			SELECT EXISTS (
-				SELECT 1 
-				FROM auth.organization_members om
-				JOIN auth.users u ON u.id = om.user_id
-				WHERE u.email = $1 AND om.organization_id = $2
-			)
-		`, claims.Username, organizationId).Scan(&authorized)
-
-	if err != nil || !authorized {
+		SELECT EXISTS (
+			SELECT 1 
+			FROM auth.organization_members om
+			JOIN auth.users u ON u.id = om.user_id
+			WHERE u.email = $1 AND om.organization_id = $2
+		)`, claims.Username, organizationId).Scan(&authorized)
+	if err != nil {
+		log.Printf("[handleGetDocuments] Database error checking authorization: %v", err)
+		http.Error(w, "Error checking access", http.StatusInternalServerError)
+		return
+	}
+	if !authorized {
+		log.Printf("[handleGetDocuments] Access denied for user %s to organization %s", claims.Username, organizationId)
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
 		return
 	}
 
-	// Base query
+	// Build query with permission filtering
 	query := `
 		SELECT 
-			d.id, d.name, d.file_type, d.file_size, d.version, d.updated_at, d.folder_id, d.organization_id, d.project_id
+			d.id, d.name, d.file_type, d.file_size, d.version, d.updated_at, d.folder_id, 
+			d.organization_id, d.project_id
 		FROM rdm.documents d
+		LEFT JOIN auth.access_permissions ap ON ap.resource_id = d.id AND ap.resource_type = 'document'
+		LEFT JOIN auth.users u ON ap.user_id = u.id
 		WHERE d.organization_id = $1
 		AND d.deleted_at IS NULL
-		`
-	args := []interface{}{organizationId}
-	paramCount := 1
+		AND (ap.user_id IS NULL OR u.email = $2)
+		AND (ap.permission_level IN ('view', 'edit', 'manage') OR ap.permission_level IS NULL)
+	`
+	args := []interface{}{organizationId, claims.Username}
+	paramCount := 2
 
-	// Add folder filter if provided
 	if folderId != "" {
 		paramCount++
 		query += fmt.Sprintf(" AND d.folder_id = $%d", paramCount)
 		args = append(args, folderId)
+		log.Printf("[handleGetDocuments] Added folderId filter: %s", folderId)
 	}
-
-	// Add project filter if provided
 	if projectId != "" {
 		paramCount++
 		query += fmt.Sprintf(" AND d.project_id = $%d", paramCount)
 		args = append(args, projectId)
+		log.Printf("[handleGetDocuments] Added projectId filter: %s", projectId)
 	}
-
 	query += " ORDER BY d.updated_at DESC"
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
-		log.Printf("Error querying documents: %v", err)
+		log.Printf("[handleGetDocuments] Database query error: %v", err)
 		http.Error(w, "Failed to fetch documents", http.StatusInternalServerError)
 		return
 	}
@@ -3402,36 +3451,22 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt      time.Time `json:"updatedAt"`
 		FolderID       *string   `json:"folderId"`
 		OrganizationID string    `json:"organizationId"`
-		ProjectID      *string   `json:"projectId"` // Added to handle NULL values
+		ProjectID      *string   `json:"projectId"`
 	}
 
 	var documents []Document
-
 	for rows.Next() {
 		var doc Document
-		if err := rows.Scan(
-			&doc.ID,
-			&doc.Name,
-			&doc.FileType,
-			&doc.FileSize,
-			&doc.Version,
-			&doc.UpdatedAt,
-			&doc.FolderID,
-			&doc.OrganizationID,
-			&doc.ProjectID, // Scan the project_id
-		); err != nil {
-			log.Printf("Error scanning document row: %v", err)
+		if err := rows.Scan(&doc.ID, &doc.Name, &doc.FileType, &doc.FileSize, &doc.Version,
+			&doc.UpdatedAt, &doc.FolderID, &doc.OrganizationID, &doc.ProjectID); err != nil {
+			log.Printf("[handleGetDocuments] Error scanning document row: %v", err)
 			continue
 		}
 		documents = append(documents, doc)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(documents); err != nil {
-		log.Printf("Error encoding documents: %v", err)
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		return
-	}
+	log.Printf("[handleGetDocuments] Returning %d documents", len(documents))
+	json.NewEncoder(w).Encode(documents)
 }
 
 func handleUploadDocument(w http.ResponseWriter, r *http.Request) {
@@ -4595,52 +4630,41 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 	// Verify user has access to the organization
 	var authorized bool
 	err := db.QueryRow(`
-			SELECT EXISTS (
-				SELECT 1 
-				FROM auth.organization_members om
-				JOIN auth.users u ON u.id = om.user_id
-				WHERE u.email = $1 AND om.organization_id = $2
-			)
-		`, claims.Username, organizationId).Scan(&authorized)
-
+		SELECT EXISTS (
+			SELECT 1 
+			FROM auth.organization_members om
+			JOIN auth.users u ON u.id = om.user_id
+			WHERE u.email = $1 AND om.organization_id = $2
+		)
+	`, claims.Username, organizationId).Scan(&authorized)
 	if err != nil {
 		log.Printf("[handleGetPages] Database error checking authorization: %v", err)
 		http.Error(w, "Error checking access", http.StatusInternalServerError)
 		return
 	}
-
 	if !authorized {
-		log.Printf("[handleGetPages] Access denied for user %s to organization %s",
-			claims.Username, organizationId)
-
-		// Log additional debugging info
+		log.Printf("[handleGetPages] Access denied for user %s to organization %s", claims.Username, organizationId)
+		// Keep your existing debug logging
 		var userExists bool
-		err := db.QueryRow(`
-				SELECT EXISTS(SELECT 1 FROM auth.users WHERE email = $1)
-			`, claims.Username).Scan(&userExists)
+		err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM auth.users WHERE email = $1)`, claims.Username).Scan(&userExists)
 		if err != nil {
 			log.Printf("[handleGetPages] Error checking user existence: %v", err)
 		} else {
 			log.Printf("[handleGetPages] User exists in database: %v", userExists)
 		}
-
 		var orgExists bool
-		err = db.QueryRow(`
-				SELECT EXISTS(SELECT 1 FROM auth.organizations WHERE id = $1)
-			`, organizationId).Scan(&orgExists)
+		err = db.QueryRow(`SELECT EXISTS(SELECT 1 FROM auth.organizations WHERE id = $1)`, organizationId).Scan(&orgExists)
 		if err != nil {
 			log.Printf("[handleGetPages] Error checking organization existence: %v", err)
 		} else {
 			log.Printf("[handleGetPages] Organization exists in database: %v", orgExists)
 		}
-
-		// Log membership entries
 		rows, err := db.Query(`
-				SELECT om.user_id, u.email, om.organization_id 
-				FROM auth.organization_members om
-				JOIN auth.users u ON om.user_id = u.id
-				WHERE organization_id = $1
-			`, organizationId)
+			SELECT om.user_id, u.email, om.organization_id 
+			FROM auth.organization_members om
+			JOIN auth.users u ON om.user_id = u.id
+			WHERE organization_id = $1
+		`, organizationId)
 		if err != nil {
 			log.Printf("[handleGetPages] Error querying org members: %v", err)
 		} else {
@@ -4652,43 +4676,44 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 					log.Printf("[handleGetPages] Error scanning member row: %v", err)
 					continue
 				}
-				log.Printf("[handleGetPages] Member: userId=%s, email=%s, orgId=%s",
-					userId, email, orgId)
+				log.Printf("[handleGetPages] Member: userId=%s, email=%s, orgId=%s", userId, email, orgId)
 			}
 		}
-
 		http.Error(w, "Access denied to organization", http.StatusForbidden)
 		return
 	}
 
-	log.Printf("[handleGetPages] Access authorized for user %s to organization %s",
-		claims.Username, organizationId)
+	log.Printf("[handleGetPages] Access authorized for user %s to organization %s", claims.Username, organizationId)
 
-	// Build query with parameters
+	// Build query with permission filtering
 	query := `
-			SELECT 
-				pc.id, 
-				pc.parent_id,
-				pc.name,
-				COALESCE(pc.content, '') as content,
-				pc.status,
-				pc.project_id,
-				cb.email as created_by,
-				ub.email as updated_by,
-				db.email as deleted_by,
-				pc.created_at,
-				pc.updated_at,
-				pc.deleted_at
-			FROM pages.pages_content pc
-			LEFT JOIN auth.users cb ON pc.created_by = cb.id
-			LEFT JOIN auth.users ub ON pc.updated_by = ub.id
-			LEFT JOIN auth.users db ON pc.deleted_by = db.id
-			WHERE pc.organization_id = $1
-			AND pc.deleted_at IS NULL
-			AND pc.type = 'page'
-		`
-	args := []interface{}{organizationId}
-	paramCount := 1
+		SELECT 
+			pc.id, 
+			pc.parent_id,
+			pc.name,
+			COALESCE(pc.content, '') as content,
+			pc.status,
+			pc.project_id,
+			cb.email as created_by,
+			ub.email as updated_by,
+			db.email as deleted_by,
+			pc.created_at,
+			pc.updated_at,
+			pc.deleted_at
+		FROM pages.pages_content pc
+		LEFT JOIN auth.access_permissions ap ON ap.resource_id = pc.id AND ap.resource_type = 'page'
+		LEFT JOIN auth.users u ON ap.user_id = u.id
+		LEFT JOIN auth.users cb ON pc.created_by = cb.id
+		LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+		LEFT JOIN auth.users db ON pc.deleted_by = db.id
+		WHERE pc.organization_id = $1
+		AND pc.deleted_at IS NULL
+		AND pc.type = 'page'
+		AND (ap.user_id IS NULL OR u.email = $2)
+		AND (ap.permission_level IN ('view', 'edit', 'manage') OR ap.permission_level IS NULL)
+	`
+	args := []interface{}{organizationId, claims.Username}
+	paramCount := 2
 
 	// Add project filter if provided
 	if projectId != "" {
@@ -4740,7 +4765,7 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 			&page.UpdatedAt,
 			&page.DeletedAt,
 		); err != nil {
-			log.Printf("Error scanning page row: %v", err)
+			log.Printf("[handleGetPages] Error scanning page row: %v", err)
 			continue
 		}
 
@@ -7395,26 +7420,40 @@ func formatTimeValue(t sql.NullTime) interface{} {
 
 // Add handlers
 func handleGetProjects(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
 	organizationId := r.URL.Query().Get("organizationId")
+
 	if organizationId == "" {
-		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		http.Error(w, "organizationId is required", http.StatusBadRequest)
 		return
 	}
 
-	claims := r.Context().Value(claimsKey).(*Claims)
+	// Query that checks project membership first, then falls back to access permissions
+	query := `
+        SELECT DISTINCT p.id, p.name, p.description, p.organization_id, p.status, 
+            p.start_date, p.end_date, p.created_by, p.updated_by, p.created_at, p.updated_at
+        FROM rdm.projects p
+        WHERE p.organization_id = $1
+        AND EXISTS (
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE pm.project_id = p.id AND u.email = $2
+            UNION
+            SELECT 1
+            FROM auth.access_permissions ap
+            JOIN auth.users u ON ap.user_id = u.id
+            WHERE ap.resource_id = p.id 
+            AND ap.resource_type = 'project'
+            AND u.email = $2
+            AND ap.permission_level IN ('view', 'edit', 'manage')
+        )
+    `
 
-	rows, err := db.Query(`
-			SELECT p.id, p.name, p.description, p.organization_id, 
-				p.status, p.start_date, p.end_date,
-				p.created_by, p.updated_by, p.created_at, p.updated_at
-			FROM rdm.projects p
-			JOIN auth.organization_members om ON p.organization_id = om.organization_id 
-			JOIN auth.users u ON om.user_id = u.id
-			WHERE p.organization_id = $1 AND u.email = $2
-			ORDER BY p.created_at DESC
-		`, organizationId, claims.Username)
-
+	rows, err := db.Query(query, organizationId, claims.Username)
 	if err != nil {
+		log.Printf("Error querying projects: %v", err)
 		http.Error(w, "Failed to fetch projects", http.StatusInternalServerError)
 		return
 	}
@@ -7422,20 +7461,29 @@ func handleGetProjects(w http.ResponseWriter, r *http.Request) {
 
 	var projects []Project
 	for rows.Next() {
-		var project Project
-		err := rows.Scan(
-			&project.ID, &project.Name, &project.Description,
-			&project.OrganizationID, &project.Status, &project.StartDate,
-			&project.EndDate, &project.CreatedBy, &project.UpdatedBy,
-			&project.CreatedAt, &project.UpdatedAt,
-		)
+		var p Project
+		err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.OrganizationID, &p.Status, &p.StartDate,
+			&p.EndDate, &p.CreatedBy, &p.UpdatedBy, &p.CreatedAt, &p.UpdatedAt)
 		if err != nil {
+			log.Printf("Error scanning project: %v", err)
 			continue
 		}
-		projects = append(projects, project)
+		projects = append(projects, p)
 	}
 
-	json.NewEncoder(w).Encode(projects)
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating project rows: %v", err)
+		http.Error(w, "Error processing projects", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Found %d projects for user %s in organization %s",
+		len(projects), claims.Username, organizationId)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"projects": projects,
+	})
 }
 
 func handleGetProjectMilestones(w http.ResponseWriter, r *http.Request) {
@@ -14968,6 +15016,1064 @@ func sendPasswordResetEmail(toEmail, resetURL string) error {
 	return nil
 }
 
+// handleGetOrganizationCollaborators retrieves all collaborators for an organization
+func handleGetOrganizationCollaborators(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	orgID := vars["organizationId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	var isMember bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM auth.organization_members 
+			WHERE organization_id = $1 AND user_id = (
+				SELECT id FROM auth.users WHERE email = $2
+			)
+		)`, orgID, claims.Username).Scan(&isMember)
+	if err != nil || !isMember {
+		http.Error(w, "Unauthorized or organization not found", http.StatusForbidden)
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT 
+			u.id, u.email, u.first_name, u.last_name,
+			COALESCE(r.name, 'member') AS role,
+			ARRAY_AGG(p.name) FILTER (WHERE p.name IS NOT NULL) AS projects,
+			u.is_active,
+			COALESCE((
+				SELECT json_agg(json_build_object(
+					'resource_type', ap.resource_type,
+					'resource_id', ap.resource_id,
+					'permission_level', ap.permission_level
+				))
+				FROM auth.access_permissions ap
+				WHERE ap.user_id = u.id
+			), '[]') AS permissions
+		FROM auth.users u
+		JOIN auth.organization_members om ON u.id = om.user_id
+		LEFT JOIN auth.user_roles ur ON u.id = ur.user_id AND ur.organization_id = om.organization_id
+		LEFT JOIN auth.roles r ON ur.role_id = r.id
+		LEFT JOIN rdm.project_members pm ON u.id = pm.user_id
+		LEFT JOIN rdm.projects p ON pm.project_id = p.id AND p.organization_id = om.organization_id
+		WHERE om.organization_id = $1
+		GROUP BY u.id, u.email, u.first_name, u.last_name, r.name, u.is_active
+	`, orgID)
+	if err != nil {
+		log.Printf("Error querying collaborators: %v", err)
+		http.Error(w, "Failed to fetch collaborators", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type CollaboratorWithPermissions struct {
+		CollaboratorResponse
+		Permissions json.RawMessage `json:"permissions"`
+	}
+
+	var collaborators []CollaboratorWithPermissions
+	for rows.Next() {
+		var c CollaboratorWithPermissions
+		var projects pq.StringArray
+		var isActive bool
+		err := rows.Scan(&c.ID, &c.Email, &c.FirstName, &c.LastName, &c.Role, &projects, &isActive, &c.Permissions)
+		if err != nil {
+			log.Printf("Error scanning collaborator: %v", err)
+			continue
+		}
+		c.Projects = projects
+		c.Status = "inactive"
+		if isActive {
+			c.Status = "active"
+		}
+		collaborators = append(collaborators, c)
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":       true,
+		"collaborators": collaborators,
+	})
+}
+
+// handleAddOrganizationCollaborator adds a new collaborator to an organization
+func handleAddOrganizationCollaborator(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	orgID := vars["organizationId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if user is admin
+	isAdmin, err := isOrganizationAdmin(claims.Username, orgID)
+	if err != nil || !isAdmin {
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Email string `json:"email"`
+		Role  string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Find or create user
+	var userID string
+	err = db.QueryRow(`
+		SELECT id FROM auth.users WHERE email = $1
+	`, req.Email).Scan(&userID)
+	if err == sql.ErrNoRows {
+		// Create new user (minimal info, they can update profile later)
+		tempPassword := uuid.New().String() // Temporary password, should trigger reset
+		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(tempPassword), bcrypt.DefaultCost)
+		err = db.QueryRow(`
+			INSERT INTO auth.users (email, password_hash, first_name, last_name)
+			VALUES ($1, $2, 'New', 'Collaborator') RETURNING id
+		`, req.Email, string(hashedPassword)).Scan(&userID)
+		if err != nil {
+			http.Error(w, "Failed to create user", http.StatusInternalServerError)
+			return
+		}
+	} else if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	// Add to organization
+	_, err = db.Exec(`CALL auth.add_organization_member($1, $2)`, userID, orgID)
+	if err != nil {
+		http.Error(w, "Failed to add collaborator", http.StatusInternalServerError)
+		return
+	}
+
+	// Assign role if specified
+	if req.Role != "" && req.Role != "member" {
+		var roleID string
+		err = db.QueryRow(`
+			SELECT id FROM auth.roles WHERE name = $1 AND organization_id = $2
+		`, req.Role, orgID).Scan(&roleID)
+		if err == sql.ErrNoRows {
+			http.Error(w, "Role not found", http.StatusBadRequest)
+			return
+		}
+		_, err = db.Exec(`CALL auth.assign_user_role($1, $2, $3)`, userID, roleID, orgID)
+		if err != nil {
+			http.Error(w, "Failed to assign role", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(Response{Success: true, Message: "Collaborator added successfully"})
+}
+
+// handleUpdateCollaborator updates a collaborator's role in an organization
+func handleUpdateCollaborator(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	orgID := vars["organizationId"]
+	userID := vars["userId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if user is admin
+	isAdmin, err := isOrganizationAdmin(claims.Username, orgID)
+	if err != nil || !isAdmin {
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Update role
+	if req.Role != "" {
+		var roleID string
+		err = db.QueryRow(`
+			SELECT id FROM auth.roles WHERE name = $1 AND organization_id = $2
+		`, req.Role, orgID).Scan(&roleID)
+		if err == sql.ErrNoRows {
+			http.Error(w, "Role not found", http.StatusBadRequest)
+			return
+		}
+		_, err = db.Exec(`
+			DELETE FROM auth.user_roles WHERE user_id = $1 AND organization_id = $2;
+			CALL auth.assign_user_role($1, $3, $2)
+		`, userID, orgID, roleID)
+		if err != nil {
+			http.Error(w, "Failed to update role", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	json.NewEncoder(w).Encode(Response{Success: true, Message: "Collaborator updated successfully"})
+}
+
+// handleRemoveCollaborator removes a collaborator from an organization
+func handleRemoveCollaborator(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	orgID := vars["organizationId"]
+	userID := vars["userId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if user is admin
+	isAdmin, err := isOrganizationAdmin(claims.Username, orgID)
+	if err != nil || !isAdmin {
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	_, err = db.Exec(`CALL auth.remove_organization_member($1, $2)`, userID, orgID)
+	if err != nil {
+		http.Error(w, "Failed to remove collaborator", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(Response{Success: true, Message: "Collaborator removed successfully"})
+}
+
+// handleGetProjectCollaborators retrieves all collaborators for a project
+func handleGetProjectCollaborators(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	projectID := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the project
+	var orgID string
+	err := db.QueryRow(`
+		SELECT organization_id FROM rdm.projects WHERE id = $1
+	`, projectID).Scan(&orgID)
+	if err != nil {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	isMember, err := isProjectMember(claims.Username, projectID)
+	if err != nil || !isMember {
+		http.Error(w, "Unauthorized or project not found", http.StatusForbidden)
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT 
+			u.id, u.email, u.first_name, u.last_name,
+			pm.role,
+			ARRAY_AGG(p.name) FILTER (WHERE p.name IS NOT NULL) AS projects,
+			u.is_active
+		FROM auth.users u
+		JOIN rdm.project_members pm ON u.id = pm.user_id
+		JOIN rdm.projects p ON pm.project_id = p.id
+		WHERE pm.project_id = $1
+		GROUP BY u.id, u.email, u.first_name, u.last_name, pm.role, u.is_active
+	`, projectID)
+	if err != nil {
+		log.Printf("Error querying project collaborators: %v", err)
+		http.Error(w, "Failed to fetch collaborators", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var collaborators []CollaboratorResponse
+	for rows.Next() {
+		var c CollaboratorResponse
+		var projects pq.StringArray
+		var isActive bool // Temporary variable to hold the boolean value
+		err := rows.Scan(&c.ID, &c.Email, &c.FirstName, &c.LastName, &c.Role, &projects, &isActive)
+		if err != nil {
+			log.Printf("Error scanning collaborator: %v", err)
+			continue
+		}
+		c.Projects = projects
+		if isActive {
+			c.Status = "active"
+		} else {
+			c.Status = "inactive"
+		}
+		collaborators = append(collaborators, c)
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":       true,
+		"collaborators": collaborators,
+	})
+}
+
+// handleAddProjectCollaborator adds a new collaborator to a project
+func handleAddProjectCollaborator(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	projectID := vars["projectId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if user has permission (e.g., project admin)
+	isAdmin, err := isProjectAdmin(claims.Username, projectID)
+	if err != nil || !isAdmin {
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Email string `json:"email"`
+		Role  string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Find user
+	var userID string
+	err = db.QueryRow(`
+		SELECT id FROM auth.users WHERE email = $1
+	`, req.Email).Scan(&userID)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	// Add to project
+	_, err = db.Exec(`CALL rdm.add_project_member($1, $2, $3)`, projectID, userID, req.Role)
+	if err != nil {
+		http.Error(w, "Failed to add collaborator", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(Response{Success: true, Message: "Collaborator added successfully"})
+}
+
+// handleUpdateProjectCollaborator updates a collaborator's role in a project
+func handleUpdateProjectCollaborator(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	projectID := vars["projectId"]
+	userID := vars["userId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if user has permission
+	isAdmin, err := isProjectAdmin(claims.Username, projectID)
+	if err != nil || !isAdmin {
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	_, err = db.Exec(`
+		UPDATE rdm.project_members 
+		SET role = $1, updated_at = CURRENT_TIMESTAMP 
+		WHERE project_id = $2 AND user_id = $3
+	`, req.Role, projectID, userID)
+	if err != nil {
+		http.Error(w, "Failed to update collaborator", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(Response{Success: true, Message: "Collaborator updated successfully"})
+}
+
+// handleRemoveProjectCollaborator removes a collaborator from a project
+func handleRemoveProjectCollaborator(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	projectID := vars["projectId"]
+	userID := vars["userId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if user has permission
+	isAdmin, err := isProjectAdmin(claims.Username, projectID)
+	if err != nil || !isAdmin {
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	_, err = db.Exec(`
+		DELETE FROM rdm.project_members 
+		WHERE project_id = $1 AND user_id = $2
+	`, projectID, userID)
+	if err != nil {
+		http.Error(w, "Failed to remove collaborator", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(Response{Success: true, Message: "Collaborator removed successfully"})
+}
+
+// isOrganizationAdmin checks if a user is an admin in an organization
+func isOrganizationAdmin(email, orgID string) (bool, error) {
+	var isAdmin bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM auth.user_roles ur
+			JOIN auth.roles r ON ur.role_id = r.id
+			JOIN auth.users u ON ur.user_id = u.id
+			WHERE u.email = $1 
+			AND r.name IN ('admin', 'super_admin', 'owner')
+			AND ur.organization_id = $2
+		)`, email, orgID).Scan(&isAdmin)
+	return isAdmin, err
+}
+
+// isProjectMember checks if a user is a member of a project
+func isProjectMember(email, projectID string) (bool, error) {
+	var isMember bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM rdm.project_members pm
+			JOIN auth.users u ON pm.user_id = u.id
+			WHERE u.email = $1 AND pm.project_id = $2
+		)`, email, projectID).Scan(&isMember)
+	return isMember, err
+}
+
+func getCurrentUserId(r *http.Request) string {
+	claims, ok := r.Context().Value(claimsKey).(*Claims)
+	if !ok || claims == nil {
+		// Return empty string or handle error case
+		return ""
+	}
+
+	// Get user ID from email in claims
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		// Log error and return empty string
+		log.Printf("Failed to get user ID for email %s: %v", claims.Username, err)
+		return ""
+	}
+
+	return userId
+}
+
+func handleInviteUser(w http.ResponseWriter, r *http.Request) {
+	log.Println("Starting handleInviteUser function")
+
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	log.Printf("Organization ID: %s", organizationId)
+
+	var req struct {
+		Email             string          `json:"email"`
+		FirstName         string          `json:"firstName"`
+		LastName          string          `json:"lastName"`
+		Role              string          `json:"role"`
+		AccessPermissions json.RawMessage `json:"accessPermissions"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("Request data - Email: %s, FirstName: %s, LastName: %s, Role: %s",
+		req.Email, req.FirstName, req.LastName, req.Role)
+
+	// Validate email and role
+	if req.Email == "" {
+		log.Println("Error: Email is required")
+		http.Error(w, "Email is required", http.StatusBadRequest)
+		return
+	}
+
+	// Generate temporary password and invitation token
+	tempPassword := uuid.New().String()
+	token := uuid.New().String()
+	expiresAt := time.Now().Add(24 * time.Hour)
+	log.Printf("Generated token: %s, expiry: %v", token, expiresAt)
+
+	// Begin transaction
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	log.Println("Transaction started")
+	defer func() {
+		if tx != nil {
+			log.Println("Rolling back transaction")
+			tx.Rollback()
+		}
+	}()
+
+	// Hash temporary password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(tempPassword), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("Failed to hash password: %v", err)
+		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+		return
+	}
+	log.Println("Password hashed successfully")
+
+	// Insert user with pending status
+	var userId string
+	err = tx.QueryRow(`
+		INSERT INTO auth.users (email, password_hash, first_name, last_name, status)
+		VALUES ($1, $2, $3, $4, 'pending')
+		RETURNING id
+	`, req.Email, string(hashedPassword), req.FirstName, req.LastName).Scan(&userId)
+	if err != nil {
+		log.Printf("Failed to create user: %v", err)
+		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("User created with ID: %s", userId)
+
+	// Add user to organization
+	_, err = tx.Exec(`
+        INSERT INTO auth.organization_members (user_id, organization_id)
+        VALUES ($1, $2)
+    `, userId, organizationId)
+	if err != nil {
+		log.Printf("Failed to add user to organization: %v", err)
+		http.Error(w, "Failed to add user to organization", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("User added to organization %s", organizationId)
+
+	// Assign role if specified
+	if req.Role != "" {
+		log.Printf("Attempting to assign role: %s", req.Role)
+		var roleId string
+		err = tx.QueryRow(`
+            SELECT id FROM auth.roles 
+            WHERE name = $1 AND organization_id = $2
+        `, req.Role, organizationId).Scan(&roleId)
+		if err == nil {
+			log.Printf("Found role ID: %s", roleId)
+			_, err = tx.Exec(`
+                INSERT INTO auth.user_roles (user_id, role_id, organization_id)
+                VALUES ($1, $2, $3)
+            `, userId, roleId, organizationId)
+			if err != nil {
+				log.Printf("Failed to assign role: %v", err)
+				http.Error(w, "Failed to assign role", http.StatusInternalServerError)
+				return
+			}
+			log.Println("Role assigned successfully")
+		} else {
+			log.Printf("Role not found: %v", err)
+		}
+	} else {
+		log.Println("No role specified")
+	}
+
+	// Validate and insert access permissions if provided
+	if len(req.AccessPermissions) > 0 {
+		log.Printf("Access permissions provided: %s", string(req.AccessPermissions))
+		var permissions []struct {
+			ResourceType    string `json:"resource_type"`
+			ResourceID      string `json:"resource_id"`
+			PermissionLevel string `json:"access_level"`
+		}
+		if err := json.Unmarshal(req.AccessPermissions, &permissions); err != nil {
+			log.Printf("Error unmarshaling access permissions: %v", err)
+			http.Error(w, "Invalid access permissions format", http.StatusBadRequest)
+			return
+		}
+		log.Printf("Number of permissions: %d", len(permissions))
+
+		for i, perm := range permissions {
+			log.Printf("Permission %d - ResourceType: %s, ResourceID: %s, PermissionLevel: %s",
+				i, perm.ResourceType, perm.ResourceID, perm.PermissionLevel)
+
+			if !isValidResourceType(perm.ResourceType) || !isValidPermissionLevel(perm.PermissionLevel) || !isValidUUID(perm.ResourceID) {
+				log.Printf("Invalid permission - ResourceType valid: %v, PermissionLevel valid: %v, ResourceID valid: %v",
+					isValidResourceType(perm.ResourceType), isValidPermissionLevel(perm.PermissionLevel), isValidUUID(perm.ResourceID))
+				http.Error(w, "Invalid resource type, permission level, or resource ID", http.StatusBadRequest)
+				return
+			}
+
+			// Insert each permission into the access_permissions table
+			currentUserId := getCurrentUserId(r)
+			_, err = tx.Exec(`
+				INSERT INTO auth.access_permissions 
+				(user_id, resource_type, resource_id, permission_level, granted_by)
+				VALUES ($1, $2, $3, $4, $5)
+			`, userId, perm.ResourceType, perm.ResourceID, perm.PermissionLevel, currentUserId)
+
+			if err != nil {
+				log.Printf("Failed to add permission: %v", err)
+				http.Error(w, "Failed to add permission", http.StatusInternalServerError)
+				return
+			}
+			log.Printf("Permission added for resource %s", perm.ResourceID)
+		}
+	} else {
+		log.Println("No access permissions provided")
+	}
+
+	// Create invitation token with access permissions
+	_, err = tx.Exec(`
+        INSERT INTO auth.invitation_tokens 
+        (user_id, token, temporary_password, expires_at, access_permissions)
+        VALUES ($1, $2, $3, $4, $5)
+    `, userId, token, tempPassword, expiresAt, req.AccessPermissions)
+	if err != nil {
+		log.Printf("Failed to create invitation token: %v", err)
+		http.Error(w, "Failed to create invitation token", http.StatusInternalServerError)
+		return
+	}
+	log.Println("Invitation token created successfully")
+
+	// Send invitation email
+	inviteLink := fmt.Sprintf("%s/accept-invite?token=%s", getClientBaseURL(), token)
+	log.Printf("Invitation link: %s", inviteLink)
+	err = sendInvitationEmail(req.Email, inviteLink)
+	if err != nil {
+		log.Printf("Failed to send invitation email: %v", err)
+		http.Error(w, "Failed to send invitation email", http.StatusInternalServerError)
+		return
+	}
+	log.Println("Invitation email sent successfully")
+
+	if err = tx.Commit(); err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		http.Error(w, "Failed to complete invitation", http.StatusInternalServerError)
+		return
+	}
+	log.Println("Transaction committed successfully")
+
+	// Set tx to nil to prevent rollback in deferred function
+	tx = nil
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Invitation sent successfully",
+	})
+	log.Println("handleInviteUser function completed successfully")
+}
+
+// Helper functions
+func isValidResourceType(resourceType string) bool {
+	validTypes := map[string]bool{"project": true, "document": true, "page": true, "folder": true}
+	return validTypes[resourceType]
+}
+
+func isValidPermissionLevel(permissionLevel string) bool {
+	validLevels := map[string]bool{"view": true, "edit": true, "manage": true}
+	return validLevels[permissionLevel]
+}
+
+func sendInvitationEmail(toEmail, inviteLink string) error {
+	apiKey := os.Getenv("SENDGRID_API_KEY")
+	if apiKey == "" {
+		config, err := loadConfigIfDev()
+		if err != nil {
+			return err
+		}
+		apiKey = config.SendGrid.APIKey
+	}
+
+	from := mail.NewEmail("Primith", "noreply@primith.com")
+	to := mail.NewEmail("", toEmail)
+	subject := "Welcome to Primith - Complete Your Account Setup"
+
+	plainTextContent := fmt.Sprintf(`
+Welcome to Primith!
+
+You've been invited to join a Primith organization. To complete your account setup, please click the link below:
+
+%s
+
+This invitation link will expire in 24 hours.
+
+If you didn't expect this invitation, please ignore this email.
+
+Best regards,
+The Primith Team
+    `, inviteLink)
+
+	htmlContent := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<body>
+    <h2>Welcome to Primith!</h2>
+    
+    <p>You've been invited to join a Primith organization. To complete your account setup, please click the button below:</p>
+    
+    <p style="margin: 30px 0;">
+        <a href="%s" 
+           style="background-color: #3B82F6; 
+                  color: white; 
+                  padding: 12px 24px; 
+                  text-decoration: none; 
+                  border-radius: 4px; 
+                  display: inline-block;">
+            Complete Account Setup
+        </a>
+    </p>
+    
+    <p style="color: #666; font-size: 14px;">This invitation link will expire in 24 hours.</p>
+    
+    <p style="color: #666; font-size: 14px;">If you didn't expect this invitation, please ignore this email.</p>
+    
+    <p>Best regards,<br>The Primith Team</p>
+</body>
+</html>
+    `, inviteLink)
+
+	message := mail.NewSingleEmail(from, subject, to, plainTextContent, htmlContent)
+	client := sendgrid.NewSendClient(apiKey)
+
+	response, err := client.Send(message)
+	if err != nil {
+		return err
+	}
+
+	if response.StatusCode >= 400 {
+		return fmt.Errorf("failed to send email: %v", response.Body)
+	}
+
+	return nil
+}
+
+func handleAcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token       string  `json:"token"`
+		FirstName   string  `json:"firstName"`
+		LastName    string  `json:"lastName"`
+		NewPassword *string `json:"newPassword"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Token == "" || req.FirstName == "" || req.LastName == "" || req.NewPassword == nil || len(*req.NewPassword) < 8 {
+		http.Error(w, "All fields are required and password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Verify token and get access permissions - WITH ROW LOCKING
+	var userId string
+	var expiresAt time.Time
+	var accessPermissions json.RawMessage
+	err = tx.QueryRow(`
+        SELECT user_id, expires_at, access_permissions 
+        FROM auth.invitation_tokens 
+        WHERE token = $1
+        FOR UPDATE  -- This locks the row
+    `, req.Token).Scan(&userId, &expiresAt, &accessPermissions)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Invalid invitation token", http.StatusBadRequest)
+		return
+	} else if err != nil {
+		http.Error(w, "Failed to verify token", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if token has expired
+	if time.Now().After(expiresAt) {
+		http.Error(w, "Invitation has expired", http.StatusBadRequest)
+		return
+	}
+
+	// IMMEDIATELY delete the token to prevent reuse
+	_, err = tx.Exec(`
+        DELETE FROM auth.invitation_tokens 
+        WHERE token = $1
+    `, req.Token)
+
+	if err != nil {
+		http.Error(w, "Failed to process invitation", http.StatusInternalServerError)
+		return
+	}
+
+	// Continue with the rest of the function...
+	// Update user, apply permissions, etc.
+
+	// Hash the new password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(*req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+		return
+	}
+
+	result, err := tx.Exec(`
+    UPDATE auth.users 
+    SET status = 'active', 
+        password_hash = $1, 
+        first_name = $2, 
+        last_name = $3 
+    WHERE id = $4
+	`, string(hashedPassword), req.FirstName, req.LastName, userId)
+
+	if err != nil {
+		http.Error(w, "Failed to update user information", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		http.Error(w, "Failed to update user", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to complete invitation acceptance", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Account setup completed successfully",
+	})
+}
+
+func handleGetDocumentFolders(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	organizationId := r.URL.Query().Get("organizationId")
+	if organizationId == "" {
+		log.Printf("[handleGetDocumentFolders] Error: organizationId is required")
+		http.Error(w, "organizationId is required", http.StatusBadRequest)
+		return
+	}
+	log.Printf("[handleGetDocumentFolders] Requested organizationId: %s", organizationId)
+
+	claims, ok := r.Context().Value(claimsKey).(*Claims)
+	if !ok || claims == nil {
+		log.Printf("[handleGetDocumentFolders] Error: No valid claims found in context")
+		http.Error(w, "Unauthorized: Missing authentication", http.StatusUnauthorized)
+		return
+	}
+	log.Printf("[handleGetDocumentFolders] User email from claims: %s", claims.Username)
+
+	// Verify organization membership
+	var authorized bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 
+			FROM auth.organization_members om
+			JOIN auth.users u ON u.id = om.user_id
+			WHERE u.email = $1 AND om.organization_id = $2
+		)`, claims.Username, organizationId).Scan(&authorized)
+	if err != nil {
+		log.Printf("[handleGetDocumentFolders] Database error checking authorization: %v", err)
+		http.Error(w, "Error checking access", http.StatusInternalServerError)
+		return
+	}
+	if !authorized {
+		log.Printf("[handleGetDocumentFolders] Access denied for user %s to organization %s", claims.Username, organizationId)
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	query := `
+		SELECT f.id, f.name
+		FROM rdm.folders f
+		LEFT JOIN auth.access_permissions ap ON ap.resource_id = f.id AND ap.resource_type = 'folder'
+		LEFT JOIN auth.users u ON ap.user_id = u.id
+		WHERE f.organization_id = $1 
+		AND f.deleted_at IS NULL
+		AND (ap.user_id IS NULL OR u.email = $2)
+		AND (ap.permission_level IN ('view', 'edit', 'manage') OR ap.permission_level IS NULL)
+	`
+	rows, err := db.Query(query, organizationId, claims.Username)
+	if err != nil {
+		log.Printf("[handleGetDocumentFolders] Database query error: %v", err)
+		http.Error(w, "Failed to fetch document folders", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var folders []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	for rows.Next() {
+		var f struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := rows.Scan(&f.ID, &f.Name); err != nil {
+			log.Printf("[handleGetDocumentFolders] Scan error: %v", err)
+			continue
+		}
+		folders = append(folders, f)
+	}
+
+	log.Printf("[handleGetDocumentFolders] Returning %d document folders", len(folders))
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"folders": folders,
+	})
+}
+
+func handleGetPageFolders(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	organizationId := r.URL.Query().Get("organizationId")
+	if organizationId == "" {
+		log.Printf("[handleGetPageFolders] Error: Missing organizationId in request")
+		http.Error(w, "organizationId is required", http.StatusBadRequest)
+		return
+	}
+	log.Printf("[handleGetPageFolders] Requested organizationId: %s", organizationId)
+
+	// Get claims from context
+	claims, ok := r.Context().Value(claimsKey).(*Claims)
+	if !ok || claims == nil {
+		log.Printf("[handleGetPageFolders] Error: No valid claims found in context")
+		http.Error(w, "Unauthorized: Missing authentication", http.StatusUnauthorized)
+		return
+	}
+	log.Printf("[handleGetPageFolders] User email from claims: %s", claims.Username)
+
+	// Verify organization membership (optional, depending on your permission model)
+	var authorized bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 
+			FROM auth.organization_members om
+			JOIN auth.users u ON u.id = om.user_id
+			WHERE u.email = $1 AND om.organization_id = $2
+		)`, claims.Username, organizationId).Scan(&authorized)
+	if err != nil {
+		log.Printf("[handleGetPageFolders] Database error checking authorization: %v", err)
+		http.Error(w, "Error checking access", http.StatusInternalServerError)
+		return
+	}
+	if !authorized {
+		log.Printf("[handleGetPageFolders] Access denied for user %s to organization %s", claims.Username, organizationId)
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	// Query with permission filtering
+	query := `
+		SELECT pc.id, pc.name
+		FROM pages.pages_content pc
+		LEFT JOIN auth.access_permissions ap ON ap.resource_id = pc.id AND ap.resource_type = 'folder'
+		LEFT JOIN auth.users u ON ap.user_id = u.id
+		WHERE pc.organization_id = $1 
+		AND pc.type = 'folder' 
+		AND pc.deleted_at IS NULL
+		AND (ap.user_id IS NULL OR u.email = $2)
+		AND (ap.permission_level IN ('view', 'edit', 'manage') OR ap.permission_level IS NULL)
+	`
+	rows, err := db.Query(query, organizationId, claims.Username)
+	if err != nil {
+		log.Printf("[handleGetPageFolders] Database query error: %v", err)
+		http.Error(w, "Failed to fetch page folders", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var folders []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	for rows.Next() {
+		var f struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := rows.Scan(&f.ID, &f.Name); err != nil {
+			log.Printf("[handleGetPageFolders] Scan error: %v", err)
+			continue
+		}
+		folders = append(folders, f)
+	}
+
+	log.Printf("[handleGetPageFolders] Returning %d page folders", len(folders))
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"folders": folders,
+	})
+}
+
+// isProjectAdmin checks if a user is an admin of a project
+func isProjectAdmin(email, projectID string) (bool, error) {
+	var isAdmin bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM rdm.project_members pm
+			JOIN auth.users u ON pm.user_id = u.id
+			WHERE u.email = $1 
+			AND pm.project_id = $2 
+			AND pm.role IN ('super_admin', 'admin', 'owner')
+		)`, email, projectID).Scan(&isAdmin)
+	return isAdmin, err
+}
+
+func handleValidateInvitationToken(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token string `json:"token"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Token == "" {
+		http.Error(w, "Token is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify token exists and hasn't expired
+	var expiresAt time.Time
+	err := db.QueryRow(`
+        SELECT expires_at
+        FROM auth.invitation_tokens 
+        WHERE token = $1
+    `, req.Token).Scan(&expiresAt)
+
+	if err == sql.ErrNoRows {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"valid":  false,
+			"reason": "This invitation link has already been used or is invalid",
+		}) // Added comma after last key-value pair
+		return
+	} else if err != nil {
+		http.Error(w, "Failed to verify token", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if token has expired
+	if time.Now().After(expiresAt) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"valid":  false,
+			"reason": "This invitation link has expired",
+		}) // Added comma after last key-value pair
+		return
+	}
+
+	// Token is valid
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"valid": true,
+	}) // Added comma after last key-value pair
+}
+
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -15146,6 +16252,7 @@ func main() {
 	r.HandleFunc("/folders/{id}/restore", authMiddleware(handleRestoreFolder)).Methods("PUT")
 	r.HandleFunc("/trash", authMiddleware(handleGetTrashItems)).Methods("GET")
 	r.HandleFunc("/trash/{type}/{id}", authMiddleware(handlePermanentDelete)).Methods("DELETE")
+	r.HandleFunc("/document-folders", authMiddleware(handleGetDocumentFolders)).Methods("GET")
 
 	// Pages routes
 	r.HandleFunc("/pages", authMiddleware(handleGetPages)).Methods("GET")
@@ -15169,6 +16276,7 @@ func main() {
 	r.HandleFunc("/pages/templates/{id}", authMiddleware(handleUpdateTemplate)).Methods("PUT")
 	r.HandleFunc("/pages/{id}/project", authMiddleware(handleAssociatePageWithProject)).Methods("PUT")
 	r.HandleFunc("/pages/{id}/export-pdf", authMiddleware(handleGeneratePDF)).Methods("POST")
+	r.HandleFunc("/page-folders", authMiddleware(handleGetPageFolders)).Methods("GET")
 
 	// Projects
 	r.HandleFunc("/projects", authMiddleware(handleGetProjects)).Methods("GET")
@@ -15245,6 +16353,23 @@ func main() {
 	r.HandleFunc("/rdm/notifications", authMiddleware(handleGetNotifications)).Methods("GET")
 	r.HandleFunc("/rdm/notifications/{id}/read", authMiddleware(handleMarkNotificationRead)).Methods("PUT")
 	r.HandleFunc("/rdm/notifications/mark-all-read", authMiddleware(handleMarkAllNotificationsRead)).Methods("PUT")
+
+	// Organization collaborators routes
+	r.HandleFunc("/api/organizations/{organizationId}/collaborators", authMiddleware(handleGetOrganizationCollaborators)).Methods("GET")
+	r.HandleFunc("/api/organizations/{organizationId}/collaborators", authMiddleware(handleAddOrganizationCollaborator)).Methods("POST")
+	r.HandleFunc("/api/organizations/{organizationId}/collaborators/{userId}", authMiddleware(handleUpdateCollaborator)).Methods("PUT")
+	r.HandleFunc("/api/organizations/{organizationId}/collaborators/{userId}", authMiddleware(handleRemoveCollaborator)).Methods("DELETE")
+
+	// Project-specific collaborator routes
+	r.HandleFunc("/api/projects/{projectId}/collaborators", authMiddleware(handleGetProjectCollaborators)).Methods("GET")
+	r.HandleFunc("/api/projects/{projectId}/collaborators", authMiddleware(handleAddProjectCollaborator)).Methods("POST")
+	r.HandleFunc("/api/projects/{projectId}/collaborators/{userId}", authMiddleware(handleUpdateProjectCollaborator)).Methods("PUT")
+	r.HandleFunc("/api/projects/{projectId}/collaborators/{userId}", authMiddleware(handleRemoveProjectCollaborator)).Methods("DELETE")
+
+	// Invitation routes
+	r.HandleFunc("/api/organizations/{organizationId}/invite", authMiddleware(handleInviteUser)).Methods("POST")
+	r.HandleFunc("/api/accept-invitation", handleAcceptInvitation).Methods("POST")
+	r.HandleFunc("/api/validate-invitation-token", handleValidateInvitationToken).Methods("POST")
 
 	// Rest Pasword
 	r.HandleFunc("/api/request-password-reset", handleRequestPasswordReset).Methods("POST")

@@ -42,6 +42,9 @@ import { AccountPage } from "@/components/pages/account/AccountPage"
 import { AdminSettingsLayout } from "@/components/pages/admin/settings/AdminSettingsLayout"
 import { ForgotPasswordPage } from "@/components/pages/forgotPasswordPage";
 import { ResetPasswordPage } from "@/components/pages/resetPasswordPage";
+import { CollaboratorsPage } from "@/components/pages/rdm/collaborators/collaboratorsPage"
+import { AcceptInvitePage } from "@/components/pages/acceptInvitePage"
+
 
 function App() {
   useTokenRefresh();
@@ -89,12 +92,14 @@ function App() {
                     <Route path="/rdm/pages" element={<PagesDashboard />} />
                     <Route path="/rdm/pages/templates" element={<PagesDashboard />} />
                     <Route path="/rdm/document-management" element={<DocumentManagementPage />} />
+                    <Route path="/rdm/collaborators" element={<CollaboratorsPage />} />
                     <Route path="/rdm/create-template" element={<CreateTemplate />} />
                     <Route path="/rdm/pages/templates/edit/:id" element={<EditTemplate />} />
                   </Route>
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/forgot-password" element={<ForgotPasswordPage />} />
                   <Route path="/reset-password" element={<ResetPasswordPage />} />
+                  <Route path="/accept-invite" element={<AcceptInvitePage />} />
                   <Route path="/auth-redirect" element={<AuthRedirect />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </>
@@ -104,6 +109,7 @@ function App() {
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/forgot-password" element={<ForgotPasswordPage />} />
                   <Route path="/reset-password" element={<ResetPasswordPage />} />
+                  <Route path="/accept-invite" element={<AcceptInvitePage />} />
                   <Route path="/contact" element={<ContactPage />} />
                   <Route path="/privacy-policy" element={<PrivacyPage />} />
                   <Route path="/terms-of-service" element={<TermsPage />} />
