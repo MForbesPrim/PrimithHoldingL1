@@ -202,6 +202,18 @@ type Service struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
+type Notification struct {
+	ID        string          `json:"id"`
+	UserID    string          `json:"userId"`
+	Title     string          `json:"title"`
+	Message   string          `json:"message"`
+	Type      string          `json:"type"`
+	Read      bool            `json:"read"`
+	Link      string          `json:"link,omitempty"`
+	Metadata  json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt time.Time       `json:"createdAt"`
+}
+
 type ChatRequest struct {
 	Message string `json:"message"`
 }
@@ -5080,7 +5092,7 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 		Description *string `json:"description"`
 		DocumentId  *string `json:"documentId"`
 		PageId      *string `json:"pageId"`
-		AssignedTo  *string `json:"assignedTo"` // Add assignedTo field
+		AssignedTo  *string `json:"assignedTo"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
 		log.Printf("[handleUpdateArtifact] Invalid request body: %v", err)
@@ -5093,9 +5105,14 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 	// Verify artifact exists and get project ID and related IDs
 	var projectId string
 	var documentId, pageId sql.NullString
+	var currentAssignedTo sql.NullString
+	var artifactType string
+
 	err := db.QueryRow(`
-			SELECT project_id, document_id, page_id FROM rdm.project_artifacts WHERE id = $1
-		`, artifactId).Scan(&projectId, &documentId, &pageId)
+			SELECT project_id, document_id, page_id, assigned_to, type 
+			FROM rdm.project_artifacts 
+			WHERE id = $1
+		`, artifactId).Scan(&projectId, &documentId, &pageId, &currentAssignedTo, &artifactType)
 	if err == sql.ErrNoRows {
 		log.Printf("[handleUpdateArtifact] Artifact %s not found - returning 404", artifactId)
 		http.Error(w, "Artifact not found", http.StatusNotFound)
@@ -5106,6 +5123,9 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to check artifact", http.StatusInternalServerError)
 		return
 	}
+
+	log.Printf("[handleUpdateArtifact] Current assignment: %v, New assignment: %v, Type: %s",
+		currentAssignedTo, updateData.AssignedTo, artifactType)
 
 	// Check if user is a super admin or a project member
 	var isSuperAdmin bool
@@ -5268,11 +5288,103 @@ func handleUpdateArtifact(w http.ResponseWriter, r *http.Request) {
 		// Continue even if activity logging fails
 	}
 
-	// Commit the transaction
-	if err := tx.Commit(); err != nil {
-		log.Printf("[handleUpdateArtifact] Failed to commit transaction: %v", err)
-		http.Error(w, "Failed to update artifact", http.StatusInternalServerError)
-		return
+	// Check if assignment has changed
+	assignmentChanged := false
+	if assignedToUUID != nil {
+		if !currentAssignedTo.Valid {
+			// Assigned to someone when previously unassigned
+			assignmentChanged = true
+			log.Printf("[handleUpdateArtifact] New assignment detected: was unassigned, now assigned to %s", *assignedToUUID)
+		} else if *assignedToUUID != currentAssignedTo.String {
+			// Assigned to someone different
+			assignmentChanged = true
+			log.Printf("[handleUpdateArtifact] Assignment change detected: from %s to %s",
+				currentAssignedTo.String, *assignedToUUID)
+		}
+	}
+
+	// If assignment changed, send notification to the newly assigned user
+	if assignmentChanged && assignedToUUID != nil && *assignedToUUID != "" {
+		log.Printf("[handleUpdateArtifact] Sending notification for assignment change to user %s", *assignedToUUID)
+
+		// Verify if assignee exists
+		var assigneeExists bool
+		err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM auth.users WHERE id = $1)", *assignedToUUID).Scan(&assigneeExists)
+		if err != nil {
+			log.Printf("[handleUpdateArtifact] Error checking if assignee exists: %v", err)
+		} else if !assigneeExists {
+			log.Printf("[handleUpdateArtifact] WARNING - AssignedTo user ID %s does not exist in users table", *assignedToUUID)
+		} else {
+			log.Printf("[handleUpdateArtifact] Assignee exists in database")
+
+			// Get project name for the notification
+			var projectName string
+			err = tx.QueryRow("SELECT name FROM rdm.projects WHERE id = $1", projectId).Scan(&projectName)
+			if err != nil {
+				log.Printf("[handleUpdateArtifact] Error getting project name: %v", err)
+				projectName = "a project" // Fallback if project name can't be retrieved
+			}
+
+			// Get assigner's name
+			var assignerName string
+			err = tx.QueryRow("SELECT CONCAT(first_name, ' ', last_name) FROM auth.users WHERE id = $1", userId).Scan(&assignerName)
+			if err != nil {
+				log.Printf("[handleUpdateArtifact] Error getting assigner name: %v", err)
+				assignerName = "Someone" // Fallback if assigner name can't be retrieved
+			}
+
+			// Create notification title and message
+			title := fmt.Sprintf("%s Assigned to You", strings.Title(artifactType))
+			message := fmt.Sprintf("You've been assigned the %s '%s' in project '%s' by %s",
+				artifactType, updateData.Name, projectName, assignerName)
+
+			// Prepare metadata for the notification
+			metadata := map[string]interface{}{
+				"projectId":  projectId,
+				"artifactId": artifactId,
+				"type":       artifactType,
+				"assignedBy": userId,
+			}
+
+			// Create link to the artifact
+			link := fmt.Sprintf("/projects/%s/artifacts/%s", projectId, artifactId)
+
+			// Attempt to commit the transaction before sending notification
+			if err := tx.Commit(); err != nil {
+				log.Printf("[handleUpdateArtifact] Failed to commit transaction: %v", err)
+				http.Error(w, "Failed to update artifact", http.StatusInternalServerError)
+				return
+			}
+
+			// Send the notification (outside the transaction since createNotification may use its own transaction)
+			log.Printf("[handleUpdateArtifact] Calling createNotification for user %s", *assignedToUUID)
+			notificationId, err := createNotification(
+				*assignedToUUID,
+				title,
+				message,
+				"deliverable_assignment",
+				link,
+				metadata,
+			)
+
+			if err != nil {
+				log.Printf("[handleUpdateArtifact] ERROR creating notification: %v", err)
+				// Log detailed info to help debug the issue
+				log.Printf("[handleUpdateArtifact] Notification failed with params: userId=%s, title=%s, type=%s",
+					*assignedToUUID, title, "deliverable_assignment")
+				// Continue despite notification error
+			} else {
+				log.Printf("[handleUpdateArtifact] Successfully created notification %s for user %s assigned to artifact %s",
+					notificationId, *assignedToUUID, artifactId)
+			}
+		}
+	} else {
+		// No notification needed, commit the transaction
+		if err := tx.Commit(); err != nil {
+			log.Printf("[handleUpdateArtifact] Failed to commit transaction: %v", err)
+			http.Error(w, "Failed to update artifact", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Return updated artifact data
@@ -7785,15 +7897,16 @@ func handleAddProjectMember(w http.ResponseWriter, r *http.Request) {
 	// Check if the project exists and the user has permission to add members
 	var projectExists bool
 	var organizationId string
+	var projectName string // Added to get project name for notification
 	err = db.QueryRow(`
         SELECT EXISTS (
             SELECT 1 FROM rdm.projects p
             JOIN rdm.project_members pm ON p.id = pm.project_id
             WHERE p.id = $1 AND pm.user_id = $2 AND pm.role IN ('owner', 'admin', 'super_admin')
-        ), p.organization_id
+        ), p.organization_id, p.name
         FROM rdm.projects p
         WHERE p.id = $1
-    `, projectId, creatorId).Scan(&projectExists, &organizationId)
+    `, projectId, creatorId).Scan(&projectExists, &organizationId, &projectName)
 
 	if err != nil {
 		log.Printf("Error checking project access: %v", err)
@@ -7881,6 +7994,59 @@ func handleAddProjectMember(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error fetching new member details: %v", err)
 		http.Error(w, "Member added but failed to fetch details", http.StatusInternalServerError)
 		return
+	}
+
+	// Create a notification for the added user
+	var notificationTitle string
+	var notificationMessage string
+
+	// Create different notification based on role
+	switch req.Role {
+	case "owner":
+		notificationTitle = "Project Ownership Granted"
+		notificationMessage = fmt.Sprintf("You have been made an owner of the project: %s", projectName)
+	case "admin":
+		notificationTitle = "Project Admin Access Granted"
+		notificationMessage = fmt.Sprintf("You have been made an admin of the project: %s", projectName)
+	default:
+		notificationTitle = "Added to Project"
+		notificationMessage = fmt.Sprintf("You have been added to the project: %s", projectName)
+	}
+
+	// Who added the user
+	var adderName string
+	err = db.QueryRow(`
+		SELECT CONCAT(first_name, ' ', last_name) 
+		FROM auth.users 
+		WHERE id = $1
+	`, creatorId).Scan(&adderName)
+	if err == nil {
+		notificationMessage = fmt.Sprintf("%s by %s", notificationMessage, adderName)
+	}
+
+	// Prepare metadata for the notification
+	metadata := map[string]interface{}{
+		"projectId": projectId,
+		"role":      req.Role,
+		"addedBy":   creatorId,
+	}
+
+	// Use the createNotification helper function
+	notificationId, err := createNotification(
+		req.UserID,
+		notificationTitle,
+		notificationMessage,
+		"info",
+		fmt.Sprintf("/projects/%s", projectId), // Link to the project
+		metadata,
+	)
+
+	if err != nil {
+		// Log but don't fail the entire request
+		log.Printf("Failed to create project addition notification: %v", err)
+	} else {
+		log.Printf("Created notification for user %s joining project %s: %s",
+			req.UserID, projectId, notificationId)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -8221,7 +8387,11 @@ func handleCreateProjectArtifact(w http.ResponseWriter, r *http.Request) {
 	projectId := vars["projectId"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
+	log.Printf("handleCreateProjectArtifact: Starting artifact creation for projectId: %s by user: %s",
+		projectId, claims.Username)
+
 	// Verify user is a member of the project with appropriate permissions
+	log.Printf("handleCreateProjectArtifact: Verifying project membership for user: %s", claims.Username)
 	var isMember bool
 	err := db.QueryRow(`
 			SELECT EXISTS (
@@ -8233,14 +8403,17 @@ func handleCreateProjectArtifact(w http.ResponseWriter, r *http.Request) {
 			)
 		`, projectId, claims.Username).Scan(&isMember)
 	if err != nil {
-		log.Printf("Error checking project membership: %v", err)
+		log.Printf("handleCreateProjectArtifact: Error checking project membership: %v", err)
 		http.Error(w, "Failed to check project membership", http.StatusInternalServerError)
 		return
 	}
 	if !isMember {
+		log.Printf("handleCreateProjectArtifact: Access denied - user %s is not a member of project %s",
+			claims.Username, projectId)
 		http.Error(w, "Access denied to create artifacts", http.StatusForbidden)
 		return
 	}
+	log.Printf("handleCreateProjectArtifact: Membership verification successful - user is a member of the project")
 
 	var req struct {
 		Name        string  `json:"name"`
@@ -8252,13 +8425,25 @@ func handleCreateProjectArtifact(w http.ResponseWriter, r *http.Request) {
 		PageId      *string `json:"pageId"`      // Optional, UUID of page
 		DueDate     *string `json:"dueDate"`     // Optional, ISO date string
 	}
+
+	log.Printf("handleCreateProjectArtifact: Decoding request body")
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("handleCreateProjectArtifact: Error decoding request body: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
+	}
+	log.Printf("handleCreateProjectArtifact: Request decoded - Name: %s, Type: %s, Status: %s",
+		req.Name, req.Type, req.Status)
+
+	if req.AssignedTo != nil {
+		log.Printf("handleCreateProjectArtifact: AssignedTo: %s", *req.AssignedTo)
+	} else {
+		log.Printf("handleCreateProjectArtifact: AssignedTo: nil")
 	}
 
 	// Validate required fields
 	if req.Name == "" || req.Type == "" || req.Status == "" {
+		log.Printf("handleCreateProjectArtifact: Validation failed - missing required fields")
 		http.Error(w, "Name, type, and status are required", http.StatusBadRequest)
 		return
 	}
@@ -8266,53 +8451,155 @@ func handleCreateProjectArtifact(w http.ResponseWriter, r *http.Request) {
 	// Validate type and status against allowed values
 	validTypes := []string{"document", "task", "page", "image", "video", "file", "other"}
 	validStatuses := []string{"draft", "in_review", "approved", "rejected"}
+
+	log.Printf("handleCreateProjectArtifact: Validating type: %s and status: %s", req.Type, req.Status)
 	if !contains(validTypes, req.Type) {
+		log.Printf("handleCreateProjectArtifact: Invalid artifact type: %s", req.Type)
 		http.Error(w, "Invalid artifact type", http.StatusBadRequest)
 		return
 	}
 	if !contains(validStatuses, req.Status) {
+		log.Printf("handleCreateProjectArtifact: Invalid artifact status: %s", req.Status)
 		http.Error(w, "Invalid artifact status", http.StatusBadRequest)
 		return
 	}
+	log.Printf("handleCreateProjectArtifact: Type and status validation successful")
 
 	// Get user ID for created_by and updated_by
+	log.Printf("handleCreateProjectArtifact: Getting user ID for email: %s", claims.Username)
 	var userId string
 	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
 	if err != nil {
+		log.Printf("handleCreateProjectArtifact: Error getting user ID: %v", err)
 		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("handleCreateProjectArtifact: User ID retrieved: %s", userId)
 
 	// Prepare due_date (convert string to time if provided)
 	var dueDate *time.Time
 	if req.DueDate != nil {
-		parsedDate, err := time.Parse("2006-01-02", *req.DueDate) // Assuming ISO date format YYYY-MM-DD
+		log.Printf("handleCreateProjectArtifact: Parsing due date: %s", *req.DueDate)
+		parsedDate, err := time.Parse("2006-01-02", *req.DueDate)
 		if err != nil {
+			log.Printf("handleCreateProjectArtifact: Error parsing due date: %v", err)
 			http.Error(w, "Invalid due date format. Use YYYY-MM-DD", http.StatusBadRequest)
 			return
 		}
 		dueDate = &parsedDate
+		log.Printf("handleCreateProjectArtifact: Due date parsed successfully: %v", *dueDate)
+	} else {
+		log.Printf("handleCreateProjectArtifact: No due date provided")
 	}
 
+	// Generate a new artifact ID
+	artifactId := uuid.New().String()
+	log.Printf("handleCreateProjectArtifact: Generated artifact ID: %s", artifactId)
+
 	// Insert into project_artifacts
+	log.Printf("handleCreateProjectArtifact: Inserting artifact into database")
 	_, err = db.Exec(`
 			INSERT INTO rdm.project_artifacts (
 				id, project_id, name, description, type, status, assigned_to, document_id, 
 				page_id, due_date, created_by, updated_by, created_at, updated_at
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-		`, uuid.New(), projectId, req.Name, req.Description, req.Type, req.Status,
+		`, artifactId, projectId, req.Name, req.Description, req.Type, req.Status,
 		req.AssignedTo, req.DocumentId, req.PageId, dueDate, userId, userId)
 	if err != nil {
-		log.Printf("Failed to create artifact: %v", err)
+		log.Printf("handleCreateProjectArtifact: Error creating artifact: %v", err)
 		http.Error(w, "Failed to create artifact", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("handleCreateProjectArtifact: Artifact created successfully in database")
 
+	// Send notification if artifact is assigned to someone
+	if req.AssignedTo != nil && *req.AssignedTo != "" {
+		log.Printf("handleCreateProjectArtifact: Artifact is assigned to user: %s, creating notification", *req.AssignedTo)
+
+		// Verify if assignee exists
+		var assigneeExists bool
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM auth.users WHERE id = $1)", *req.AssignedTo).Scan(&assigneeExists)
+		if err != nil {
+			log.Printf("handleCreateProjectArtifact: Error checking if assignee exists: %v", err)
+		} else if !assigneeExists {
+			log.Printf("handleCreateProjectArtifact: WARNING - AssignedTo user ID %s does not exist in users table", *req.AssignedTo)
+		} else {
+			log.Printf("handleCreateProjectArtifact: Assignee exists in database")
+		}
+
+		// Get project name for the notification
+		var projectName string
+		log.Printf("handleCreateProjectArtifact: Getting project name for projectId: %s", projectId)
+		err = db.QueryRow("SELECT name FROM rdm.projects WHERE id = $1", projectId).Scan(&projectName)
+		if err != nil {
+			log.Printf("handleCreateProjectArtifact: Error getting project name: %v", err)
+			projectName = "a project" // Fallback if project name can't be retrieved
+		}
+		log.Printf("handleCreateProjectArtifact: Project name retrieved: %s", projectName)
+
+		// Get assigner's name
+		var assignerName string
+		log.Printf("handleCreateProjectArtifact: Getting assigner name for userId: %s", userId)
+		err = db.QueryRow("SELECT CONCAT(first_name, ' ', last_name) FROM auth.users WHERE id = $1", userId).Scan(&assignerName)
+		if err != nil {
+			log.Printf("handleCreateProjectArtifact: Error getting assigner name: %v", err)
+			assignerName = "Someone" // Fallback if assigner name can't be retrieved
+		}
+		log.Printf("handleCreateProjectArtifact: Assigner name retrieved: %s", assignerName)
+
+		// Create notification title and message
+		title := fmt.Sprintf("New %s Assigned to You", req.Type)
+		message := fmt.Sprintf("You've been assigned the %s '%s' in project '%s' by %s",
+			req.Type, req.Name, projectName, assignerName)
+		log.Printf("handleCreateProjectArtifact: Notification title: %s", title)
+		log.Printf("handleCreateProjectArtifact: Notification message: %s", message)
+
+		// Prepare metadata for the notification
+		metadata := map[string]interface{}{
+			"projectId":  projectId,
+			"artifactId": artifactId,
+			"type":       req.Type,
+			"assignedBy": userId,
+		}
+		metadataBytes, _ := json.Marshal(metadata)
+		log.Printf("handleCreateProjectArtifact: Notification metadata: %s", string(metadataBytes))
+
+		// Create link to the artifact based on type
+		link := fmt.Sprintf("/projects/%s/artifacts/%s", projectId, artifactId)
+		log.Printf("handleCreateProjectArtifact: Notification link: %s", link)
+
+		// Send the notification
+		log.Printf("handleCreateProjectArtifact: Calling createNotification for user %s", *req.AssignedTo)
+		notificationId, err := createNotification(
+			*req.AssignedTo,
+			title,
+			message,
+			"deliverable_assignment",
+			link,
+			metadata,
+		)
+
+		if err != nil {
+			log.Printf("handleCreateProjectArtifact: ERROR creating notification: %v", err)
+			// Log detailed info to help debug the issue
+			log.Printf("handleCreateProjectArtifact: Notification failed with params: userId=%s, title=%s, type=%s",
+				*req.AssignedTo, title, "deliverable_assignment")
+		} else {
+			log.Printf("handleCreateProjectArtifact: Successfully created notification %s for user %s assigned to artifact %s",
+				notificationId, *req.AssignedTo, artifactId)
+		}
+	} else {
+		log.Printf("handleCreateProjectArtifact: Artifact not assigned to anyone, skipping notification")
+	}
+
+	log.Printf("handleCreateProjectArtifact: Sending success response")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Artifact created successfully",
+		"id":      artifactId,
 	})
+	log.Printf("handleCreateProjectArtifact: Request completed successfully for artifact %s", artifactId)
 }
 
 // Helper function to check if a slice contains a string
@@ -11436,6 +11723,8 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("Task data received: %+v", taskData)
+
 	// Validate required fields
 	if taskData.Name == "" {
 		log.Printf("Error: Task name is required")
@@ -11470,9 +11759,11 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var userId string
 	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
 	if err != nil {
+		log.Printf("Error getting user ID: %v", err)
 		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Retrieved user ID: %s", userId)
 
 	// Start transaction
 	tx, err := db.Begin()
@@ -11516,6 +11807,7 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	log.Printf("Created task with ID: %s", taskId)
 
 	// Create activity log
 	_, err = tx.Exec(`
@@ -11531,11 +11823,98 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error creating activity log", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Created activity log for task %s", taskId)
 
-	if err = tx.Commit(); err != nil {
-		log.Printf("Error committing transaction: %v", err)
-		http.Error(w, "Error committing transaction", http.StatusInternalServerError)
-		return
+	// Send notification if task is assigned to someone
+	if taskData.AssignedTo != nil && *taskData.AssignedTo != "" {
+		log.Printf("Task is assigned to user: %s, preparing notification", *taskData.AssignedTo)
+
+		// Verify if assignee exists
+		var assigneeExists bool
+		err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM auth.users WHERE id = $1)", *taskData.AssignedTo).Scan(&assigneeExists)
+		if err != nil {
+			log.Printf("Error checking if assignee exists: %v", err)
+		} else if !assigneeExists {
+			log.Printf("WARNING - AssignedTo user ID %s does not exist in users table", *taskData.AssignedTo)
+		} else {
+			log.Printf("Verified assignee exists in database")
+
+			// Commit transaction before sending notification
+			if err = tx.Commit(); err != nil {
+				log.Printf("Error committing transaction: %v", err)
+				http.Error(w, "Error committing transaction", http.StatusInternalServerError)
+				return
+			}
+			log.Printf("Transaction committed successfully")
+
+			// Get project name for the notification
+			var projectName string
+			err = db.QueryRow("SELECT name FROM rdm.projects WHERE id = $1", projectId).Scan(&projectName)
+			if err != nil {
+				log.Printf("Error getting project name: %v", err)
+				projectName = "a project" // Fallback if project name can't be retrieved
+			}
+			log.Printf("Retrieved project name: %s", projectName)
+
+			// Get assigner's name
+			var assignerName string
+			err = db.QueryRow("SELECT CONCAT(first_name, ' ', last_name) FROM auth.users WHERE id = $1", userId).Scan(&assignerName)
+			if err != nil {
+				log.Printf("Error getting assigner name: %v", err)
+				assignerName = "Someone" // Fallback if assigner name can't be retrieved
+			}
+			log.Printf("Retrieved assigner name: %s", assignerName)
+
+			// Create notification title and message
+			title := "Task Assigned to You"
+			message := fmt.Sprintf("You've been assigned the task '%s' in project '%s' by %s",
+				taskData.Name, projectName, assignerName)
+			log.Printf("Notification title: %s", title)
+			log.Printf("Notification message: %s", message)
+
+			// Prepare metadata for the notification
+			metadata := map[string]interface{}{
+				"projectId":  projectId,
+				"taskId":     taskId,
+				"assignedBy": userId,
+			}
+			metadataBytes, _ := json.Marshal(metadata)
+			log.Printf("Notification metadata: %s", string(metadataBytes))
+
+			// Create link to the task
+			link := fmt.Sprintf("/projects/%s/tasks/%s", projectId, taskId)
+			log.Printf("Notification link: %s", link)
+
+			// Send the notification
+			log.Printf("Calling createNotification for user %s", *taskData.AssignedTo)
+			notificationId, err := createNotification(
+				*taskData.AssignedTo,
+				title,
+				message,
+				"task_assignment",
+				link,
+				metadata,
+			)
+
+			if err != nil {
+				log.Printf("ERROR creating notification: %v", err)
+				log.Printf("Notification failed with params: userId=%s, title=%s, type=%s",
+					*taskData.AssignedTo, title, "task_assignment")
+				// Continue despite notification error
+			} else {
+				log.Printf("Successfully created notification %s for user %s assigned to task %s",
+					notificationId, *taskData.AssignedTo, taskId)
+			}
+		}
+	} else {
+		log.Printf("Task not assigned to anyone, skipping notification")
+		// Commit the transaction if we didn't already
+		if err = tx.Commit(); err != nil {
+			log.Printf("Error committing transaction: %v", err)
+			http.Error(w, "Error committing transaction", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Transaction committed successfully")
 	}
 
 	// Return success response with the created task ID
@@ -11553,6 +11932,7 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error encoding response", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Task creation completed successfully for task ID: %s", taskId)
 }
 
 func handleGetOrganizationUsers(w http.ResponseWriter, r *http.Request) {
@@ -12253,23 +12633,26 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("handleUpdateTask: Decoded request: %+v", req)
 
-	// Get current values for activity logging
+	// Get current values for activity logging and to check for changes in assignment
 	var currentValuesBytes []byte
+	var currentAssignedTo sql.NullString
+	var taskName string
 	log.Printf("handleUpdateTask: Fetching current task values for taskId: %s", taskId)
 	err = db.QueryRow(`
-			SELECT row_to_json(t) FROM (
+			SELECT row_to_json(t), t.assigned_to, t.name FROM (
 				SELECT name, description, status, priority, assigned_to,
 					due_date, estimated_hours, actual_hours, tags, parent_id
 				FROM rdm.project_tasks
 				WHERE id = $1
 			) t
-		`, taskId).Scan(&currentValuesBytes)
+		`, taskId).Scan(&currentValuesBytes, &currentAssignedTo, &taskName)
 	if err != nil {
 		log.Printf("handleUpdateTask: Error fetching current values: %v", err)
 		http.Error(w, "Failed to get current task values", http.StatusInternalServerError)
 		return
 	}
 	log.Printf("handleUpdateTask: Successfully fetched currentValuesBytes: %s", string(currentValuesBytes))
+	log.Printf("handleUpdateTask: Current assignedTo: %v", currentAssignedTo)
 
 	// Get user ID
 	var userId string
@@ -12382,6 +12765,7 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
 		return
 	}
+	defer tx.Rollback()
 	log.Printf("handleUpdateTask: Transaction started successfully")
 
 	// Execute update
@@ -12425,6 +12809,115 @@ func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("handleUpdateTask: Activity logged successfully")
+
+	var assignedToStr string
+	if req.AssignedTo != nil {
+		assignedToStr = *req.AssignedTo
+	} else {
+		assignedToStr = "nil"
+	}
+
+	var currentAssignedToStr string
+	if currentAssignedTo.Valid {
+		currentAssignedToStr = currentAssignedTo.String
+	} else {
+		currentAssignedToStr = "invalid"
+	}
+
+	log.Printf("handleUpdateTask: Checking assignment change conditions - req.AssignedTo: %v, currentAssignedTo.Valid: %v, currentAssignedTo.String: %v",
+		assignedToStr, currentAssignedTo.Valid, currentAssignedToStr)
+
+	if req.AssignedTo != nil &&
+		(!currentAssignedTo.Valid || *req.AssignedTo != currentAssignedTo.String) &&
+		*req.AssignedTo != "" {
+
+		log.Printf("handleUpdateTask: Assignment change detected. Old: %v, New: %s",
+			currentAssignedToStr, *req.AssignedTo)
+
+		// Verify the user ID is valid by trying to get the user's details
+		log.Printf("handleUpdateTask: Checking if user ID %s exists in the database...", *req.AssignedTo)
+		var assigneeExists bool
+		err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM auth.users WHERE id = $1)`, *req.AssignedTo).Scan(&assigneeExists)
+
+		if err != nil {
+			log.Printf("handleUpdateTask: Error checking if assignee exists: %v", err)
+		} else {
+			log.Printf("handleUpdateTask: User exists check result: %v", assigneeExists)
+
+			if !assigneeExists {
+				log.Printf("handleUpdateTask: Assignee with ID %s does not exist in auth.users table", *req.AssignedTo)
+
+				// Try logging the raw assigned value to see what it is
+				log.Printf("handleUpdateTask: Raw AssignedTo value: '%s'", *req.AssignedTo)
+
+				// Check if it's a valid UUID
+				_, uuidErr := uuid.Parse(*req.AssignedTo)
+				log.Printf("handleUpdateTask: Is valid UUID: %v", uuidErr == nil)
+			} else {
+				// Get task name if it was updated
+				var notificationTaskName string
+				if req.Name != nil {
+					notificationTaskName = *req.Name
+				} else {
+					notificationTaskName = taskName
+				}
+				log.Printf("handleUpdateTask: Using task name: %s", notificationTaskName)
+
+				// Get project name for the notification
+				var projectName string
+				err = tx.QueryRow("SELECT name FROM rdm.projects WHERE id = $1", projectId).Scan(&projectName)
+				if err != nil {
+					log.Printf("handleUpdateTask: Error getting project name: %v", err)
+					projectName = "a project" // Default if we can't get the name
+				}
+				log.Printf("handleUpdateTask: Using project name: %s", projectName)
+
+				// Create the notification title and message
+				title := "Task Assigned to You"
+				message := fmt.Sprintf("You've been assigned the task '%s' in project '%s'",
+					notificationTaskName, projectName)
+				log.Printf("handleUpdateTask: Notification message: %s", message)
+
+				// Prepare metadata
+				metadata := map[string]interface{}{
+					"projectId":  projectId,
+					"taskId":     taskId,
+					"assignedBy": userId,
+				}
+				log.Printf("handleUpdateTask: Notification metadata: %+v", metadata)
+
+				// Create link to the task
+				link := fmt.Sprintf("/projects/%s/tasks/%s", projectId, taskId)
+				log.Printf("handleUpdateTask: Notification link: %s", link)
+
+				// Log before creating notification
+				log.Printf("handleUpdateTask: About to create notification for user %s with title '%s'",
+					*req.AssignedTo, title)
+
+				// Create the notification
+				notificationId, notifyErr := createNotification(
+					*req.AssignedTo, // This should be a valid user ID
+					title,
+					message,
+					"task_assignment",
+					link,
+					metadata,
+				)
+
+				if notifyErr != nil {
+					// Log the error but continue with the update
+					log.Printf("handleUpdateTask: ERROR creating notification: %v", notifyErr)
+
+					// Additional logging to check the stored procedure
+					log.Printf("handleUpdateTask: Notification creation failed with params: userId=%s, title=%s, type=%s",
+						*req.AssignedTo, title, "task_assignment")
+				} else {
+					log.Printf("handleUpdateTask: Successfully created notification %s for user %s",
+						notificationId, *req.AssignedTo)
+				}
+			}
+		}
+	}
 
 	// Commit transaction
 	log.Printf("handleUpdateTask: Committing transaction")
@@ -13759,6 +14252,228 @@ func handleDeleteOrganizationUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// NotificationResponse represents the response from the notifications API
+type NotificationResponse struct {
+	Notifications []Notification `json:"notifications"`
+	UnreadCount   int            `json:"unreadCount"`
+	Pagination    struct {
+		Total  int `json:"total"`
+		Limit  int `json:"limit"`
+		Offset int `json:"offset"`
+	} `json:"pagination"`
+}
+
+// Handler to get notifications for the current user
+func handleGetNotifications(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get pagination parameters from query string
+	limit := 10 // Default
+	if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
+		if parsedLimit, err := strconv.Atoi(limitParam); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	offset := 0
+	if offsetParam := r.URL.Query().Get("offset"); offsetParam != "" {
+		if parsedOffset, err := strconv.Atoi(offsetParam); err == nil && parsedOffset >= 0 {
+			offset = parsedOffset
+		}
+	}
+
+	// Get user ID from claims
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		log.Printf("Error getting user ID: %v", err)
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch notifications
+	rows, err := db.Query(`
+        SELECT id, user_id, title, message, type, read, link, metadata, created_at
+        FROM auth.notifications
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        LIMIT $2 OFFSET $3
+    `, userId, limit, offset)
+
+	if err != nil {
+		log.Printf("Error fetching notifications: %v", err)
+		http.Error(w, "Failed to fetch notifications", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var notifications []Notification
+	for rows.Next() {
+		var n Notification
+		var metadata sql.NullString
+		var link sql.NullString
+
+		err := rows.Scan(
+			&n.ID, &n.UserID, &n.Title, &n.Message, &n.Type, &n.Read,
+			&link, &metadata, &n.CreatedAt,
+		)
+		if err != nil {
+			log.Printf("Error scanning notification row: %v", err)
+			continue
+		}
+
+		if link.Valid {
+			n.Link = link.String
+		}
+
+		if metadata.Valid {
+			n.Metadata = json.RawMessage(metadata.String)
+		}
+
+		notifications = append(notifications, n)
+	}
+
+	// Get unread count
+	var unreadCount int
+	err = db.QueryRow(`
+        SELECT COUNT(*) 
+        FROM auth.notifications
+        WHERE user_id = $1 AND read = false
+    `, userId).Scan(&unreadCount)
+
+	if err != nil {
+		log.Printf("Error counting unread notifications: %v", err)
+		unreadCount = 0 // Default to 0 on error
+	}
+
+	// Get total count for pagination
+	var totalCount int
+	err = db.QueryRow(`
+        SELECT COUNT(*) 
+        FROM auth.notifications
+        WHERE user_id = $1
+    `, userId).Scan(&totalCount)
+
+	if err != nil {
+		log.Printf("Error counting total notifications: %v", err)
+		totalCount = 0 // Default to 0 on error
+	}
+
+	// Build response
+	response := NotificationResponse{
+		Notifications: notifications,
+		UnreadCount:   unreadCount,
+		Pagination: struct {
+			Total  int `json:"total"`
+			Limit  int `json:"limit"`
+			Offset int `json:"offset"`
+		}{
+			Total:  totalCount,
+			Limit:  limit,
+			Offset: offset,
+		},
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+// Handler to mark a notification as read
+func handleMarkNotificationRead(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+	vars := mux.Vars(r)
+	notificationId := vars["id"]
+
+	// Get user ID from claims
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		log.Printf("Error getting user ID: %v", err)
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Mark notification as read
+	_, err = db.Exec(`CALL auth.mark_notification_read($1, $2)`, notificationId, userId)
+	if err != nil {
+		log.Printf("Error marking notification as read: %v", err)
+		http.Error(w, "Failed to mark notification as read", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// Handler to mark all notifications as read
+func handleMarkAllNotificationsRead(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get user ID from claims
+	var userId string
+	err := db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userId)
+	if err != nil {
+		log.Printf("Error getting user ID: %v", err)
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Mark all notifications as read
+	_, err = db.Exec(`CALL auth.mark_all_notifications_read($1)`, userId)
+	if err != nil {
+		log.Printf("Error marking all notifications as read: %v", err)
+		http.Error(w, "Failed to mark all notifications as read", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// Helper function to create a notification
+func createNotification(userId, title, message, notificationType, link string, metadata map[string]interface{}) (string, error) {
+	var metadataJSON []byte
+	var err error
+
+	if metadata != nil {
+		metadataJSON, err = json.Marshal(metadata)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	// Start a transaction
+	tx, err := db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
+	// Insert the notification directly using INSERT instead of CALL
+	query := `
+        INSERT INTO auth.notifications (
+            user_id, title, message, type, link, metadata
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6
+        ) RETURNING id
+    `
+
+	var notificationId string
+	err = tx.QueryRow(query,
+		userId, title, message, notificationType, link, metadataJSON).Scan(&notificationId)
+
+	if err != nil {
+		return "", err
+	}
+
+	// Commit the transaction
+	if err = tx.Commit(); err != nil {
+		return "", err
+	}
+
+	return notificationId, nil
+}
+
 // Helper function to convert sql.NullString to a value that works with JSON
 func nullStringValue(ns sql.NullString) interface{} {
 	if ns.Valid {
@@ -14308,6 +15023,11 @@ func main() {
 	r.HandleFunc("/api/organization/roles", authMiddleware(handleCreateOrganizationRole)).Methods("POST")
 	r.HandleFunc("/api/organization/roles/{id}", authMiddleware(handleUpdateOrganizationRole)).Methods("PUT")
 	r.HandleFunc("/api/organization/roles/{id}", authMiddleware(handleDeleteOrganizationRole)).Methods("DELETE")
+
+	// Notification Routes
+	r.HandleFunc("/rdm/notifications", authMiddleware(handleGetNotifications)).Methods("GET")
+	r.HandleFunc("/rdm/notifications/{id}/read", authMiddleware(handleMarkNotificationRead)).Methods("PUT")
+	r.HandleFunc("/rdm/notifications/mark-all-read", authMiddleware(handleMarkAllNotificationsRead)).Methods("PUT")
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
 

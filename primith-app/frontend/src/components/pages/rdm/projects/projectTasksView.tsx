@@ -188,11 +188,10 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
       console.log("Sending task to server:", taskToUpdate); // Debug log before API call
       const response = await projectService.updateTask(currentTask.id, taskToUpdate);
       console.log("Server response after update:", response); // Debug log after API call
-      setFilteredTasks((prev) =>
-        prev.map((task) =>
-          task.id === currentTask.id ? { ...task, ...taskToUpdate } : task
-        )
-      );
+      
+      // Reload tasks after successful update
+      await loadTasks();
+      
       setShowEditDialog(false);
       toast({ title: "Success", description: "Task updated successfully" });
     } catch (err) {
