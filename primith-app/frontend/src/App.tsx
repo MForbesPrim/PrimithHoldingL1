@@ -40,6 +40,8 @@ import { ConsultingPage } from "@/components/pages/consultingPage"
 import { ProServicesPage } from "@/components/pages/proServicesPage"
 import { AccountPage } from "@/components/pages/account/AccountPage"
 import { AdminSettingsLayout } from "@/components/pages/admin/settings/AdminSettingsLayout"
+import { ForgotPasswordPage } from "@/components/pages/forgotPasswordPage";
+import { ResetPasswordPage } from "@/components/pages/resetPasswordPage";
 
 function App() {
   useTokenRefresh();
@@ -91,6 +93,8 @@ function App() {
                     <Route path="/rdm/pages/templates/edit/:id" element={<EditTemplate />} />
                   </Route>
                   <Route path="/login" element={<LoginPage />} />
+                  <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                  <Route path="/reset-password" element={<ResetPasswordPage />} />
                   <Route path="/auth-redirect" element={<AuthRedirect />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </>
@@ -98,6 +102,8 @@ function App() {
                 <>
                   <Route path="/" element={<HomePage />} />
                   <Route path="/login" element={<LoginPage />} />
+                  <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                  <Route path="/reset-password" element={<ResetPasswordPage />} />
                   <Route path="/contact" element={<ContactPage />} />
                   <Route path="/privacy-policy" element={<PrivacyPage />} />
                   <Route path="/terms-of-service" element={<TermsPage />} />

@@ -1252,6 +1252,41 @@ static async deleteOrganizationRole(roleId: string): Promise<void> {
   }
 }
 
+// Add to AuthService.ts
+static async requestPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/request-password-reset`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email }),
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error requesting password reset:', error);
+    throw error;
+  }
+}
+
+static async resetPassword(token: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/reset-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ token, newPassword }),
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error resetting password:', error);
+    throw error;
+  }
+}
+
 }
 
 export default AuthService;

@@ -6,6 +6,7 @@ import { SidebarProvider } from "@/components/ui/sidebar"
 import { BrowserRouter } from "react-router-dom"
 import { OrganizationProvider } from '@/components/pages/rdm/context/organizationContext'
 import { ProjectProvider } from '@/components/pages/rdm/context/projectContext';
+import { NotificationProvider } from "@/components/pages/rdm/context/notificationContext"
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -13,7 +14,9 @@ createRoot(document.getElementById('root')!).render(
         <BrowserRouter>
         <OrganizationProvider>
           <ProjectProvider>
-          <App />
+            <NotificationProvider>
+              <App />
+            </NotificationProvider>
           </ProjectProvider>
         </OrganizationProvider>
         </BrowserRouter>

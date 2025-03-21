@@ -14751,6 +14751,223 @@ func extractText(n *html.Node, builder *strings.Builder) {
 	}
 }
 
+// RequestPasswordReset initiates the password reset process
+func handleRequestPasswordReset(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Check if user exists
+	var userId string
+	var userEmail string
+	err := db.QueryRow("SELECT id, email FROM auth.users WHERE email = $1", req.Email).Scan(&userId, &userEmail)
+	if err == sql.ErrNoRows {
+		// Don't reveal that the email doesn't exist (security best practice)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(Response{
+			Success: true,
+			Message: "If your email is registered, you will receive password reset instructions",
+		})
+		return
+	} else if err != nil {
+		log.Printf("Database error: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate a secure token
+	token := uuid.New().String()
+
+	// Set expiration time (e.g., 1 hour from now)
+	expiresAt := time.Now().Add(time.Hour)
+
+	// Store token in database
+	_, err = db.Exec(
+		"INSERT INTO auth.password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)",
+		userId, token, expiresAt,
+	)
+	if err != nil {
+		log.Printf("Failed to store reset token: %v", err)
+		http.Error(w, "Failed to initiate password reset", http.StatusInternalServerError)
+		return
+	}
+
+	// Create reset URL
+	resetURL := fmt.Sprintf("%s/reset-password?token=%s", getClientBaseURL(), token)
+
+	// Send email
+	emailErr := sendPasswordResetEmail(userEmail, resetURL)
+	if emailErr != nil {
+		log.Printf("Failed to send reset email: %v", emailErr)
+		// Continue despite email error
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(Response{
+		Success: true,
+		Message: "If your email is registered, you will receive password reset instructions",
+	})
+}
+
+// Reset password using a valid token
+func handleResetPassword(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		Token       string `json:"token"`
+		NewPassword string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate token and get user ID
+	var userId string
+	var expiresAt time.Time
+	err := db.QueryRow(
+		"SELECT user_id, expires_at FROM auth.password_reset_tokens WHERE token = $1",
+		req.Token,
+	).Scan(&userId, &expiresAt)
+
+	if err == sql.ErrNoRows {
+		http.Error(w, "Invalid or expired token", http.StatusBadRequest)
+		return
+	} else if err != nil {
+		log.Printf("Database error: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if token has expired
+	if time.Now().After(expiresAt) {
+		http.Error(w, "Token has expired", http.StatusBadRequest)
+		return
+	}
+
+	// Hash the new password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, "Failed to process password", http.StatusInternalServerError)
+		return
+	}
+
+	// Start transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Update user's password
+	_, err = tx.Exec(
+		"UPDATE auth.users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+		string(hashedPassword), userId,
+	)
+	if err != nil {
+		log.Printf("Failed to update password: %v", err)
+		http.Error(w, "Failed to update password", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete all password reset tokens for this user
+	_, err = tx.Exec(
+		"DELETE FROM auth.password_reset_tokens WHERE user_id = $1",
+		userId,
+	)
+	if err != nil {
+		log.Printf("Failed to delete used tokens: %v", err)
+		http.Error(w, "Failed to update password", http.StatusInternalServerError)
+		return
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to complete password reset", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(Response{
+		Success: true,
+		Message: "Password has been reset successfully",
+	})
+}
+
+// Helper function to get client base URL
+func getClientBaseURL() string {
+	if os.Getenv("ENVIRONMENT") == "production" {
+		return "https://primith.com"
+	}
+	return "http://localhost:5173"
+}
+
+// Helper function to send password reset email
+func sendPasswordResetEmail(toEmail, resetURL string) error {
+	apiKey := os.Getenv("SENDGRID_API_KEY")
+	if apiKey == "" {
+		config, err := loadConfigIfDev()
+		if err != nil {
+			return err
+		}
+		apiKey = config.SendGrid.APIKey
+	}
+
+	from := mail.NewEmail("Primith", "noreply@primith.com")
+	to := mail.NewEmail("", toEmail)
+	subject := "Reset Your Primith Password"
+
+	plainTextContent := fmt.Sprintf(`
+	Hello,
+	
+	You requested a password reset for your Primith account. Please click the link below to reset your password:
+	
+	%s
+	
+	This link will expire in 1 hour.
+	
+	If you didn't request a password reset, please ignore this email.
+	
+	Thanks,
+	Primith Team
+	`, resetURL)
+
+	htmlContent := fmt.Sprintf(`
+	<p>Hello,</p>
+	
+	<p>You requested a password reset for your Primith account. Please click the link below to reset your password:</p>
+	
+	<p><a href="%s">Reset Password</a></p>
+	
+	<p>This link will expire in 1 hour.</p>
+	
+	<p>If you didn't request a password reset, please ignore this email.</p>
+	
+	<p>Thanks,<br>Primith Team</p>
+	`, resetURL)
+
+	message := mail.NewSingleEmail(from, subject, to, plainTextContent, htmlContent)
+	client := sendgrid.NewSendClient(apiKey)
+
+	response, err := client.Send(message)
+	if err != nil {
+		return err
+	}
+
+	if response.StatusCode >= 400 {
+		return fmt.Errorf("failed to send email: %v", response.Body)
+	}
+
+	return nil
+}
+
 func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -15028,6 +15245,11 @@ func main() {
 	r.HandleFunc("/rdm/notifications", authMiddleware(handleGetNotifications)).Methods("GET")
 	r.HandleFunc("/rdm/notifications/{id}/read", authMiddleware(handleMarkNotificationRead)).Methods("PUT")
 	r.HandleFunc("/rdm/notifications/mark-all-read", authMiddleware(handleMarkAllNotificationsRead)).Methods("PUT")
+
+	// Rest Pasword
+	r.HandleFunc("/api/request-password-reset", handleRequestPasswordReset).Methods("POST")
+	r.HandleFunc("/api/reset-password", handleResetPassword).Methods("POST")
+
 	// Protected routes
 	r.HandleFunc("/protected", authMiddleware(protected)).Methods("GET")
 
