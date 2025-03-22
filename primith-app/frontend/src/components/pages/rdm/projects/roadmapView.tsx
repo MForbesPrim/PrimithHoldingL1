@@ -509,14 +509,6 @@ const renderListView = () => {
 
     return (
       <div className="space-y-6">
-        {safeItems.length > 0 && (
-          <div className="flex justify-end mb-2">
-            <Button onClick={handleAddClick}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Item
-            </Button>
-          </div>
-        )}
         {safeItems.length > 0 ? (
           <div className="border rounded-md overflow-hidden">
             <table className="min-w-full divide-y divide-gray-200">
@@ -1071,14 +1063,6 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
     const { quarters, year } = groupedByQuarter;
     return (
       <div className="space-y-1">
-        {safeItems.length > 0 && (
-          <div className="flex justify-end mb-2">
-            <Button onClick={handleAddClick}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Item
-            </Button>
-          </div>
-        )}
         {safeItems.length > 0 ? (
           <div>
             {Object.entries(quarters).map(([quarter, items]) => (
@@ -1200,72 +1184,68 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
   return (
     <div className="space-y-6 mt-4">
       <div className="min-w-[100vh]">
-      <Tabs value={view} onValueChange={(v) => setView(v as any)}>
-        <TabsList>         
-            <TabsTrigger value="timeline">Timeline</TabsTrigger>
-            <TabsTrigger value="status">By Status</TabsTrigger>
-            <TabsTrigger value="category">By Category</TabsTrigger>
-            <TabsTrigger value="gantt">Gantt Chart</TabsTrigger>
-            <TabsTrigger value="list">List</TabsTrigger>
-        </TabsList>
-        <TabsContent value="list" className="mt-0">
-          {safeItems.length > 0 ? (
-            renderListView()
-          ) : (
-            <div className="flex items-center justify-center min-h-[50vh] w-full">
-              <EmptyState message="No roadmap items exist yet. Create your first item to get started." />
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="timeline" className="mt-0">
-          {safeItems.length > 0 ? (
-            renderTimelineView()
-          ) : (
-            <div className="flex items-center justify-center min-h-[50vh] w-full">
-              <EmptyState message="Your project timeline is empty. Add items to visualize your roadmap." />
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="status" className="mt-0">
-          {safeItems.length > 0 ? (
-            renderStatusView()
-          ) : (
-            <div className="flex items-center justify-center min-h-[50vh] w-full">
-              <EmptyState message="Create roadmap items to organize them by status (Planned, In Progress, Completed, Delayed)." />
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="category" className="mt-0">
-          {safeItems.length > 0 ? (
-            renderCategoryView()
-          ) : (
-            <div className="flex items-center justify-center min-h-[50vh] w-full">
-              <EmptyState message="Categorize your roadmap items to better organize your project priorities." />
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="gantt" className="mt-0">
-          {safeItems.length > 0 ? (
-            <GanttChart items={items} onItemClick={handleEditClick} />
-          ) : (
-            <div className="flex items-center justify-center min-h-[50vh] w-full">
-              <EmptyState message="Add roadmap items with dates to visualize your project timeline in a Gantt chart." />
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
-      {safeItems.length === 0 && (
-        <div className="flex justify-end">
-          <Button onClick={handleAddClick}>
+        <div className="flex justify-between items-start mb-4">
+          <div className="flex-1">
+            <Tabs value={view} onValueChange={(v) => setView(v as any)}>
+              <TabsList className="mb-3">         
+                <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                <TabsTrigger value="status">By Status</TabsTrigger>
+                <TabsTrigger value="category">By Category</TabsTrigger>
+                <TabsTrigger value="gantt">Gantt Chart</TabsTrigger>
+                <TabsTrigger value="list">List</TabsTrigger>
+              </TabsList>
+              <TabsContent value="list" className="mt-0">
+                {safeItems.length > 0 ? (
+                  renderListView()
+                ) : (
+                  <div className="flex items-center justify-center min-h-[50vh] w-full">
+                    <EmptyState message="No roadmap items exist yet. Create your first item to get started." />
+                  </div>
+                )}
+              </TabsContent>
+              <TabsContent value="timeline" className="mt-0">
+                {safeItems.length > 0 ? (
+                  renderTimelineView()
+                ) : (
+                  <div className="flex items-center justify-center min-h-[50vh] w-full">
+                    <EmptyState message="Your project timeline is empty. Add items to visualize your roadmap." />
+                  </div>
+                )}
+              </TabsContent>
+              <TabsContent value="status" className="mt-0">
+                {safeItems.length > 0 ? (
+                  renderStatusView()
+                ) : (
+                  <div className="flex items-center justify-center min-h-[50vh] w-full">
+                    <EmptyState message="Create roadmap items to organize them by status (Planned, In Progress, Completed, Delayed)." />
+                  </div>
+                )}
+              </TabsContent>
+              <TabsContent value="category" className="mt-0">
+                {safeItems.length > 0 ? (
+                  renderCategoryView()
+                ) : (
+                  <div className="flex items-center justify-center min-h-[50vh] w-full">
+                    <EmptyState message="Categorize your roadmap items to better organize your project priorities." />
+                  </div>
+                )}
+              </TabsContent>
+              <TabsContent value="gantt" className="mt-0">
+                {safeItems.length > 0 ? (
+                  <GanttChart items={items} onItemClick={handleEditClick} />
+                ) : (
+                  <div className="flex items-center justify-center min-h-[50vh] w-full">
+                    <EmptyState message="Add roadmap items with dates to visualize your project timeline in a Gantt chart." />
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </div>
+          <Button onClick={handleAddClick} variant="default" className="ml-4">
             <Plus className="h-4 w-4 mr-2" />
             Add Item
           </Button>
         </div>
-      )}
       </div>
 
       {/* Add Modal */}

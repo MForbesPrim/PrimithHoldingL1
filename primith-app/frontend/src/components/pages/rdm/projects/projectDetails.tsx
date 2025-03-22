@@ -578,7 +578,7 @@ export function ProjectDetailPage() {
 
   if (!project) {
     return (
-      <div className="container h-full overflow-y-auto pl-4">
+      <div className="container h-full overflow-y-auto pl-4 pt-4">
         <div className="flex items-center space-x-2 mb-6">
           <Button variant="ghost" size="sm" onClick={handleBackClick}>
             <ChevronLeft className="h-4 w-4 mr-1" />

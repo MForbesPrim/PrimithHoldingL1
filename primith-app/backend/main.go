@@ -2798,7 +2798,8 @@ func handleGetFolders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := db.Query(`
+	// Build query with the permission check for external users
+	query := `
 		WITH RECURSIVE folder_tree AS (
 			SELECT 
 				f.id, 
@@ -2816,6 +2817,28 @@ func handleGetFolders(w http.ResponseWriter, r *http.Request) {
 			WHERE f.parent_id IS NULL 
 			AND f.organization_id = $1
 			AND f.deleted_at IS NULL
+			AND (
+				-- Check if user is not external to the organization
+				EXISTS (
+					SELECT 1 
+					FROM auth.users u
+					JOIN auth.organization_members om ON u.id = om.user_id
+					WHERE u.email = $2 
+					AND om.organization_id = $1
+					AND u.is_external = false
+				)
+				OR 
+				-- Check for explicit permissions if the user is external
+				EXISTS (
+					SELECT 1
+					FROM auth.access_permissions ap
+					JOIN auth.users u ON ap.user_id = u.id
+					WHERE ap.resource_id = f.id 
+					AND ap.resource_type = 'folder'
+					AND u.email = $2
+					AND ap.permission_level IN ('view', 'edit', 'manage')
+				)
+			)
 			
 			UNION ALL
 			
@@ -2834,8 +2857,9 @@ func handleGetFolders(w http.ResponseWriter, r *http.Request) {
 		SELECT id, name, parent_id, organization_id, updated_at, file_count, last_updated_by
 		FROM folder_tree
 		ORDER BY path;
-		`, organizationId)
+	`
 
+	rows, err := db.Query(query, organizationId, claims.Username)
 	if err != nil {
 		log.Printf("Error fetching folders: %v", err)
 		http.Error(w, "Failed to fetch folders", http.StatusInternalServerError)
@@ -3384,15 +3408,15 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[handleGetDocuments] User email from claims: %s", claims.Username)
 
-	// Verify user has access to the organization
+	// Verify organization membership
 	var authorized bool
 	err := db.QueryRow(`
-		SELECT EXISTS (
-			SELECT 1 
-			FROM auth.organization_members om
-			JOIN auth.users u ON u.id = om.user_id
-			WHERE u.email = $1 AND om.organization_id = $2
-		)`, claims.Username, organizationId).Scan(&authorized)
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )`, claims.Username, organizationId).Scan(&authorized)
 	if err != nil {
 		log.Printf("[handleGetDocuments] Database error checking authorization: %v", err)
 		http.Error(w, "Error checking access", http.StatusInternalServerError)
@@ -3404,22 +3428,36 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build query with permission filtering
+	// Base query with improved access control
 	query := `
-		SELECT 
-			d.id, d.name, d.file_type, d.file_size, d.version, d.updated_at, d.folder_id, 
-			d.organization_id, d.project_id
-		FROM rdm.documents d
-		LEFT JOIN auth.access_permissions ap ON ap.resource_id = d.id AND ap.resource_type = 'document'
-		LEFT JOIN auth.users u ON ap.user_id = u.id
-		WHERE d.organization_id = $1
-		AND d.deleted_at IS NULL
-		AND (ap.user_id IS NULL OR u.email = $2)
-		AND (ap.permission_level IN ('view', 'edit', 'manage') OR ap.permission_level IS NULL)
-	`
+        SELECT DISTINCT 
+            d.id, d.name, d.file_type, d.file_size, d.version, d.updated_at, d.folder_id, 
+            d.organization_id, d.project_id
+        FROM rdm.documents d
+        WHERE d.organization_id = $1
+        AND d.deleted_at IS NULL
+        AND EXISTS (
+            -- Check if user has project access (if document is in a project)
+            SELECT 1 
+            FROM rdm.project_members pm
+            JOIN auth.users u ON pm.user_id = u.id
+            WHERE d.project_id = pm.project_id 
+            AND u.email = $2
+            UNION
+            -- Check if user has direct document permissions
+            SELECT 1
+            FROM auth.access_permissions ap
+            JOIN auth.users u ON ap.user_id = u.id
+            WHERE ap.resource_id = d.id 
+            AND ap.resource_type = 'document'
+            AND u.email = $2
+            AND ap.permission_level IN ('view', 'edit', 'manage')
+        )
+    `
 	args := []interface{}{organizationId, claims.Username}
 	paramCount := 2
 
+	// Add optional filters
 	if folderId != "" {
 		paramCount++
 		query += fmt.Sprintf(" AND d.folder_id = $%d", paramCount)
@@ -3434,6 +3472,7 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 	}
 	query += " ORDER BY d.updated_at DESC"
 
+	// Execute query and handle results
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		log.Printf("[handleGetDocuments] Database query error: %v", err)
@@ -3442,6 +3481,7 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
+	// Rest of the function remains the same...
 	type Document struct {
 		ID             string    `json:"id"`
 		Name           string    `json:"name"`
@@ -3463,6 +3503,12 @@ func handleGetDocuments(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		documents = append(documents, doc)
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("[handleGetDocuments] Error iterating document rows: %v", err)
+		http.Error(w, "Error processing documents", http.StatusInternalServerError)
+		return
 	}
 
 	log.Printf("[handleGetDocuments] Returning %d documents", len(documents))
@@ -3980,7 +4026,7 @@ func handleDownloadDocument(w http.ResponseWriter, r *http.Request) {
 
 	claims := r.Context().Value(claimsKey).(*Claims)
 
-	// Get document info and verify access
+	// Get document info
 	var organizationId string
 	var blobUrl string
 	var fileName string
@@ -3988,24 +4034,69 @@ func handleDownloadDocument(w http.ResponseWriter, r *http.Request) {
 			SELECT organization_id, file_path, name
 			FROM rdm.documents
 			WHERE id = $1
+			AND deleted_at IS NULL
 		`, documentId).Scan(&organizationId, &blobUrl, &fileName)
 
 	if err == sql.ErrNoRows {
 		http.Error(w, "Document not found", http.StatusNotFound)
 		return
 	}
+	if err != nil {
+		log.Printf("Error fetching document: %v", err)
+		http.Error(w, "Failed to fetch document information", http.StatusInternalServerError)
+		return
+	}
 
+	// Check permission with the enhanced access control logic
 	var authorized bool
 	err = db.QueryRow(`
 			SELECT EXISTS (
 				SELECT 1
-				FROM auth.organization_members om
-				JOIN auth.users u ON om.user_id = u.id
-				WHERE u.email = $1 AND om.organization_id = $2
+				FROM rdm.documents d
+				WHERE d.id = $1
+				AND d.organization_id = $2
+				AND d.deleted_at IS NULL
+				AND (
+					-- Check if user is not external to the organization
+					EXISTS (
+						SELECT 1 
+						FROM auth.users u
+						JOIN auth.organization_members om ON u.id = om.user_id
+						WHERE u.email = $3 
+						AND om.organization_id = $2
+						AND u.is_external = false
+					)
+					OR 
+					-- Check if user has project access
+					EXISTS (
+						SELECT 1 
+						FROM rdm.project_members pm
+						JOIN auth.users u ON pm.user_id = u.id
+						WHERE d.project_id = pm.project_id 
+						AND u.email = $3
+					)
+					OR 
+					-- Check for explicit permissions
+					EXISTS (
+						SELECT 1
+						FROM auth.access_permissions ap
+						JOIN auth.users u ON ap.user_id = u.id
+						WHERE ap.resource_id = d.id 
+						AND ap.resource_type = 'document'
+						AND u.email = $3
+						AND ap.permission_level IN ('view', 'edit', 'manage')
+					)
+				)
 			)
-		`, claims.Username, organizationId).Scan(&authorized)
+		`, documentId, organizationId, claims.Username).Scan(&authorized)
 
-	if err != nil || !authorized {
+	if err != nil {
+		log.Printf("Error checking document access: %v", err)
+		http.Error(w, "Failed to check document access", http.StatusInternalServerError)
+		return
+	}
+
+	if !authorized {
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
@@ -4686,31 +4777,50 @@ func handleGetPages(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[handleGetPages] Access authorized for user %s to organization %s", claims.Username, organizationId)
 
 	// Build query with permission filtering
+	// Build query with permission filtering
 	query := `
-		SELECT 
-			pc.id, 
-			pc.parent_id,
-			pc.name,
-			COALESCE(pc.content, '') as content,
-			pc.status,
-			pc.project_id,
-			cb.email as created_by,
-			ub.email as updated_by,
-			db.email as deleted_by,
-			pc.created_at,
-			pc.updated_at,
-			pc.deleted_at
-		FROM pages.pages_content pc
-		LEFT JOIN auth.access_permissions ap ON ap.resource_id = pc.id AND ap.resource_type = 'page'
-		LEFT JOIN auth.users u ON ap.user_id = u.id
-		LEFT JOIN auth.users cb ON pc.created_by = cb.id
-		LEFT JOIN auth.users ub ON pc.updated_by = ub.id
-		LEFT JOIN auth.users db ON pc.deleted_by = db.id
-		WHERE pc.organization_id = $1
-		AND pc.deleted_at IS NULL
-		AND pc.type = 'page'
-		AND (ap.user_id IS NULL OR u.email = $2)
-		AND (ap.permission_level IN ('view', 'edit', 'manage') OR ap.permission_level IS NULL)
+    SELECT 
+        pc.id, 
+        pc.parent_id,
+        pc.name,
+        COALESCE(pc.content, '') as content,
+        pc.status,
+        pc.project_id,
+        cb.email as created_by,
+        ub.email as updated_by,
+        db.email as deleted_by,
+        pc.created_at,
+        pc.updated_at,
+        pc.deleted_at
+    FROM pages.pages_content pc
+    LEFT JOIN auth.users cb ON pc.created_by = cb.id
+    LEFT JOIN auth.users ub ON pc.updated_by = ub.id
+    LEFT JOIN auth.users db ON pc.deleted_by = db.id
+    WHERE pc.organization_id = $1
+    AND pc.deleted_at IS NULL
+    AND pc.type = 'page'
+    AND (
+        -- Check if user is not external to the organization
+        EXISTS (
+            SELECT 1 
+            FROM auth.users u
+            JOIN auth.organization_members om ON u.id = om.user_id
+            WHERE u.email = $2 
+            AND om.organization_id = $1
+            AND u.is_external = false
+        )
+        OR 
+        -- Check for explicit permissions if the user is external
+        EXISTS (
+            SELECT 1
+            FROM auth.access_permissions ap
+            JOIN auth.users u ON ap.user_id = u.id
+            WHERE ap.resource_id = pc.id 
+            AND ap.resource_type = 'page'
+            AND u.email = $2
+            AND ap.permission_level IN ('view', 'edit', 'manage')
+        )
+    )
 	`
 	args := []interface{}{organizationId, claims.Username}
 	paramCount := 2
@@ -6593,17 +6703,44 @@ func handleGetPagesFolders(w http.ResponseWriter, r *http.Request) {
 	organizationId := r.URL.Query().Get("organizationId")
 	log.Printf("Fetching folders for organizationId: %s", organizationId)
 
+	// Get user from context
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to the organization
+	var authorized bool
+	err := db.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 
+				FROM auth.organization_members om
+				JOIN auth.users u ON u.id = om.user_id
+				WHERE u.email = $1 AND om.organization_id = $2
+			)
+		`, claims.Username, organizationId).Scan(&authorized)
+
+	if err != nil {
+		log.Printf("Error checking organization membership: %v", err)
+		http.Error(w, "Failed to check access", http.StatusInternalServerError)
+		return
+	}
+
+	if !authorized {
+		log.Printf("Access denied for user %s to organization %s", claims.Username, organizationId)
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	// Query with permission filtering
 	rows, err := db.Query(`
 			SELECT 
 				pc.id, 
-				pc.name,
-				pc.parent_id,
-				pc.organization_id,
-				pc.created_at,
-				pc.updated_at,
-				pc.deleted_at,
-				cb.email as created_by,
-				ub.email as updated_by,
+				pc.name, 
+				pc.parent_id, 
+				pc.organization_id, 
+				pc.created_at, 
+				pc.updated_at, 
+				pc.deleted_at, 
+				cb.email as created_by, 
+				ub.email as updated_by, 
 				db.email as deleted_by
 			FROM pages.pages_content pc
 			LEFT JOIN auth.users cb ON pc.created_by = cb.id
@@ -6612,8 +6749,30 @@ func handleGetPagesFolders(w http.ResponseWriter, r *http.Request) {
 			WHERE pc.organization_id = $1
 			AND pc.type = 'folder'
 			AND pc.deleted_at IS NULL
+			AND (
+				-- Check if user is not external to the organization
+				EXISTS (
+					SELECT 1 
+					FROM auth.users u
+					JOIN auth.organization_members om ON u.id = om.user_id
+					WHERE u.email = $2 
+					AND om.organization_id = $1
+					AND u.is_external = false
+				)
+				OR 
+				-- Check for explicit permissions if the user is external
+				EXISTS (
+					SELECT 1
+					FROM auth.access_permissions ap
+					JOIN auth.users u ON ap.user_id = u.id
+					WHERE ap.resource_id = pc.id 
+					AND ap.resource_type = 'folder'
+					AND u.email = $2
+					AND ap.permission_level IN ('view', 'edit', 'manage')
+				)
+			)
 			ORDER BY pc.created_at DESC
-		`, organizationId)
+		`, organizationId, claims.Username)
 
 	if err != nil {
 		log.Printf("Error in folder query: %v", err)
@@ -7748,16 +7907,66 @@ func handleGetProject(w http.ResponseWriter, r *http.Request) {
 	projectId := vars["id"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
-	var project Project
+	// First check if user has access to the project
+	var authorized bool
 	err := db.QueryRow(`
-			SELECT p.id, p.name, p.description, p.organization_id, 
-				p.status, p.start_date, p.end_date,
-				p.created_by, p.updated_by, p.created_at, p.updated_at
+		SELECT EXISTS (
+			SELECT 1 
 			FROM rdm.projects p
-			JOIN auth.organization_members om ON p.organization_id = om.organization_id 
-			JOIN auth.users u ON om.user_id = u.id
-			WHERE p.id = $1 AND u.email = $2
-		`, projectId, claims.Username).Scan(
+			WHERE p.id = $1
+			AND (
+				-- User is a member of the organization
+				EXISTS (
+					SELECT 1 
+					FROM auth.organization_members om
+					JOIN auth.users u ON u.id = om.user_id
+					WHERE om.organization_id = p.organization_id
+					AND u.email = $2
+					AND u.is_external = false
+				)
+				OR 
+				-- User is a project member
+				EXISTS (
+					SELECT 1 
+					FROM rdm.project_members pm
+					JOIN auth.users u ON pm.user_id = u.id
+					WHERE pm.project_id = p.id
+					AND u.email = $2
+				)
+				OR 
+				-- User has explicit permission
+				EXISTS (
+					SELECT 1
+					FROM auth.access_permissions ap
+					JOIN auth.users u ON ap.user_id = u.id
+					WHERE ap.resource_id = p.id 
+					AND ap.resource_type = 'project'
+					AND u.email = $2
+					AND ap.permission_level IN ('view', 'edit', 'manage')
+				)
+			)
+		)
+	`, projectId, claims.Username).Scan(&authorized)
+
+	if err != nil {
+		http.Error(w, "Failed to check project access", http.StatusInternalServerError)
+		return
+	}
+
+	if !authorized {
+		http.Error(w, "Project not found or access denied", http.StatusNotFound)
+		return
+	}
+
+	// If authorized, fetch the project details
+	var project Project
+	err = db.QueryRow(`
+		SELECT p.id, p.name, p.description, p.organization_id, 
+			p.status, p.start_date, p.end_date,
+			p.created_by, p.updated_by, p.created_at, p.updated_at
+		FROM rdm.projects p
+		WHERE p.id = $1
+	`, projectId).Scan(
 		&project.ID, &project.Name, &project.Description,
 		&project.OrganizationID, &project.Status, &project.StartDate,
 		&project.EndDate, &project.CreatedBy, &project.UpdatedBy,
@@ -15523,8 +15732,8 @@ func handleInviteUser(w http.ResponseWriter, r *http.Request) {
 	// Insert user with pending status
 	var userId string
 	err = tx.QueryRow(`
-		INSERT INTO auth.users (email, password_hash, first_name, last_name, status)
-		VALUES ($1, $2, $3, $4, 'pending')
+		INSERT INTO auth.users (email, password_hash, first_name, last_name, status, is_external)
+		VALUES ($1, $2, $3, $4, 'pending', true)
 		RETURNING id
 	`, req.Email, string(hashedPassword), req.FirstName, req.LastName).Scan(&userId)
 	if err != nil {
@@ -15890,12 +16099,30 @@ func handleGetDocumentFolders(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT f.id, f.name
 		FROM rdm.folders f
-		LEFT JOIN auth.access_permissions ap ON ap.resource_id = f.id AND ap.resource_type = 'folder'
-		LEFT JOIN auth.users u ON ap.user_id = u.id
 		WHERE f.organization_id = $1 
 		AND f.deleted_at IS NULL
-		AND (ap.user_id IS NULL OR u.email = $2)
-		AND (ap.permission_level IN ('view', 'edit', 'manage') OR ap.permission_level IS NULL)
+		AND (
+			-- Check if user is not external to the organization
+			EXISTS (
+				SELECT 1 
+				FROM auth.users u
+				JOIN auth.organization_members om ON u.id = om.user_id
+				WHERE u.email = $2 
+				AND om.organization_id = $1
+				AND u.is_external = false
+			)
+			OR 
+			-- Check for explicit permissions if the user is external
+			EXISTS (
+				SELECT 1
+				FROM auth.access_permissions ap
+				JOIN auth.users u ON ap.user_id = u.id
+				WHERE ap.resource_id = f.id 
+				AND ap.resource_type = 'folder'
+				AND u.email = $2
+				AND ap.permission_level IN ('view', 'edit', 'manage')
+			)
+		)
 	`
 	rows, err := db.Query(query, organizationId, claims.Username)
 	if err != nil {
@@ -15946,7 +16173,7 @@ func handleGetPageFolders(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[handleGetPageFolders] User email from claims: %s", claims.Username)
 
-	// Verify organization membership (optional, depending on your permission model)
+	// Verify organization membership
 	var authorized bool
 	err := db.QueryRow(`
 		SELECT EXISTS (
@@ -15966,17 +16193,35 @@ func handleGetPageFolders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Query with permission filtering
+	// Query with consistent permission filtering
 	query := `
 		SELECT pc.id, pc.name
 		FROM pages.pages_content pc
-		LEFT JOIN auth.access_permissions ap ON ap.resource_id = pc.id AND ap.resource_type = 'folder'
-		LEFT JOIN auth.users u ON ap.user_id = u.id
 		WHERE pc.organization_id = $1 
 		AND pc.type = 'folder' 
 		AND pc.deleted_at IS NULL
-		AND (ap.user_id IS NULL OR u.email = $2)
-		AND (ap.permission_level IN ('view', 'edit', 'manage') OR ap.permission_level IS NULL)
+		AND (
+			-- Check if user is not external to the organization
+			EXISTS (
+				SELECT 1 
+				FROM auth.users u
+				JOIN auth.organization_members om ON u.id = om.user_id
+				WHERE u.email = $2 
+				AND om.organization_id = $1
+				AND u.is_external = false
+			)
+			OR 
+			-- Check for explicit permissions if the user is external
+			EXISTS (
+				SELECT 1
+				FROM auth.access_permissions ap
+				JOIN auth.users u ON ap.user_id = u.id
+				WHERE ap.resource_id = pc.id 
+				AND ap.resource_type = 'folder'
+				AND u.email = $2
+				AND ap.permission_level IN ('view', 'edit', 'manage')
+			)
+		)
 	`
 	rows, err := db.Query(query, organizationId, claims.Username)
 	if err != nil {

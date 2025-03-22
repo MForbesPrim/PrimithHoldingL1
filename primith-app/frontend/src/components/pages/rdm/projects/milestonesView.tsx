@@ -269,6 +269,10 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
   };
 
   const filterMilestones = () => {
+    if (!milestones) {
+      setFilteredMilestones([]);
+      return;
+    }
     let filtered = [...milestones];
 
     // Search filter
@@ -381,6 +385,7 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
 
   // Calculate progress percentage
   const calculateProgress = () => {
+    if (!milestones) return 0;
     const total = milestones.length;
     if (total === 0) return 0;
     const completed = milestones.filter(m => m.status === 'completed').length;
@@ -582,7 +587,7 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
   );
   if (error) return <div className="text-red-500 p-4">{error}</div>;
 
-  const hasNoMilestones = milestones.length === 0;
+  const hasNoMilestones = !milestones || milestones.length === 0;
 
   return (
     <div className="space-y-6 p-4">

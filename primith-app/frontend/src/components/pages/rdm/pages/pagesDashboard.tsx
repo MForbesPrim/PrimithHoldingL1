@@ -604,7 +604,7 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
                   </div>
                 </div>
                 <PagesTable
-                  pages={pages.filter(p => p.status !== 'template')}
+                  pages={(pages || []).filter(p => p.status !== 'template')}
                   folders={folders}
                   onFolderClick={handleFolderClick}
                   currentFolderId={currentFolderId}
