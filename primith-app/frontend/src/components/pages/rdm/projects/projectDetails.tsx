@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ProjectSettings } from "@/components/pages/rdm/projects/projectSettings";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import AuthService from '@/services/auth'; 
 import {
   Table,
   TableBody,
@@ -151,6 +152,7 @@ export function ProjectDetailPage() {
   const [showAddArtifactDialog, setShowAddArtifactDialog] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isProjectMember, setIsProjectMember] = useState(false);
   const [newArtifact, setNewArtifact] = useState({
     name: "",
     type: "document" as "document" | "image" | "video" | "audio" | "file" | "other",
@@ -187,10 +189,32 @@ export function ProjectDetailPage() {
     { value: "other", label: "Other" },
   ];
 
+  const checkProjectMembership = async () => {
+    try {
+      // Get current user ID from AuthService
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.user?.id) {
+        setIsProjectMember(false);
+        return;
+      }
+      
+      const currentUserId = rdmAuth.user.id;
+      
+      // Get project members and check if current user is a member
+      const members = await projectService.getProjectMembers(projectId || "");
+      const isMember = members.some(member => member.userId === currentUserId);
+      setIsProjectMember(isMember);
+    } catch (error) {
+      console.error("Failed to check project membership:", error);
+      setIsProjectMember(false);
+    }
+  };
+
   useEffect(() => {
     if (projectId) {
       loadProjectData();
       loadArtifactStatuses();
+      checkProjectMembership();
     }
   }, [projectId]);
 
@@ -737,7 +761,7 @@ export function ProjectDetailPage() {
             <Button variant="outline" onClick={() => setShowAddArtifactDialog(false)} disabled={isUploading}>
               Cancel
             </Button>
-            <Button onClick={handleCreateArtifact} disabled={!newArtifact.file || isUploading}>
+            <Button onClick={handleCreateArtifact} disabled={!newArtifact.file || isUploading || !isProjectMember}>
               {isUploading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -757,14 +781,18 @@ export function ProjectDetailPage() {
             Back to Projects
           </Button>
           <div className="flex space-x-2">
+          {isProjectMember && (
             <Button variant="outline" size="sm" onClick={() => setEditingProject(true)}>
               <Edit className="h-4 w-4 mr-1" />
               Edit
             </Button>
+            )}
+            {isProjectMember && (
             <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>
               <Settings className="h-4 w-4 mr-1" />
               Settings
             </Button>
+            )}
           </div>
         </div>
         <div>
@@ -846,10 +874,12 @@ export function ProjectDetailPage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-base font-medium">Recent Deliverables</CardTitle>
-                <Button variant="outline" size="sm" onClick={handleAddArtifactClick}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add File
-                </Button>
+                {isProjectMember && (
+                  <Button variant="outline" size="sm" onClick={handleAddArtifactClick}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add File
+                  </Button>
+                )}
               </CardHeader>
               <CardContent>
                 {artifacts.length > 0 ? (
@@ -937,10 +967,12 @@ export function ProjectDetailPage() {
           <div className="space-y-4 mt-4">
             <div className="flex justify-between items-center">
               <h2 className="text-md font-semibold">All Deliverables</h2>
-              <Button size="sm" onClick={handleAddArtifactClick}>
-                <Plus className="h-4 w-4 mr-1" />
-                Add File
-              </Button>
+              {isProjectMember && (
+                <Button size="sm" onClick={handleAddArtifactClick}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add File
+                </Button>
+              )}
             </div>
               <ArtifactsPage
                 artifacts={artifacts}

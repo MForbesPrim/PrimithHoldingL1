@@ -8,6 +8,7 @@ export interface User {
   firstName: string;
   lastName: string;
   email: string;
+  membershipType?: boolean;
   password?: string;
   isActive?: boolean;
   roles?: Role[];
@@ -112,6 +113,7 @@ class AuthService {
   private static readonly REFRESH_TOKEN_KEY = 'refreshToken';
   private static readonly USER_KEY = 'user';
   private static readonly ADMIN_STATUS_KEY = 'isAdmin';
+  private static readonly USER_MEMBERSHIP_TYPE_KEY = 'user_membership_type';
   private static readonly RDM_ACCESS_TOKEN_KEY = 'rdm_access_token'
   private static readonly RDM_REFRESH_TOKEN_KEY = 'rdm_refresh_token'
   private static readonly RDM_USER_KEY = 'rdm_user'
@@ -123,6 +125,15 @@ class AuthService {
     if (!token || !refreshToken) return null;
     
     return { token, refreshToken };
+  }
+
+  static setMembershipType(isExternal: boolean) {
+    localStorage.setItem(this.USER_MEMBERSHIP_TYPE_KEY, JSON.stringify(isExternal));
+  }
+
+  static getMembershipType(): boolean | null {
+    const membershipType = localStorage.getItem(this.USER_MEMBERSHIP_TYPE_KEY);
+    return membershipType ? JSON.parse(membershipType) : null;
   }
 
   static setTokens(tokens: AuthTokens) {
@@ -137,6 +148,9 @@ class AuthService {
 
   static setUser(user: User) {
     localStorage.setItem(this.USER_KEY, JSON.stringify(user));
+    if (user.membershipType !== undefined) {
+      this.setMembershipType(user.membershipType === false);
+    }
   }
 
   static clearAll() {

@@ -127,12 +127,12 @@ export function RdmHomePage() {
         setTeamMembers(uniqueMembers.size)
 
         // Fetch all documents from rdm.documents table
-        const documents = await documentService.getDocuments(null, selectedOrgId)
-        setTotalDocuments(documents.length)
+        const documents = await documentService.getDocuments(null, selectedOrgId) || [];
+        setTotalDocuments(documents.length || 0);
         
         // Get total pages from pages.pages_content table
-        const pages = await pagesService.getPages(selectedOrgId)
-        setTotalPages(pages.length)
+        const pages = await pagesService.getPages(selectedOrgId) || [];
+        setTotalPages(pages.length || 0);
 
         setIsLoading(false)
       } catch (err) {
@@ -151,7 +151,7 @@ export function RdmHomePage() {
     
     async function updateDocumentStats() {
       try {
-        const documents = await documentService.getDocuments(null, selectedOrgId)
+        const documents = await documentService.getDocuments(null, selectedOrgId) || [];
         
         let stats: SetStateAction<{ name: string; documents: number }[]> = []
         if (documentInterval === 'month') {

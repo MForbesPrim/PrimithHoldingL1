@@ -18,6 +18,7 @@ import {
   getFilteredRowModel,
 } from "@tanstack/react-table"
 import { ChevronsUpDown, ChevronUp, ChevronDown, Edit, X, Search, Eye, Download } from "lucide-react"
+import AuthService from '@/services/auth';
 
 interface ArtifactsPageProps {
   artifacts: ProjectArtifact[];
@@ -44,6 +45,7 @@ export function ArtifactsPage({
   const [artifactStatuses, setArtifactStatuses] = useState<ArtifactStatus[]>([]);
   const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isProjectMember, setIsProjectMember] = useState(false);
 
   // Custom filter function to search across multiple fields
   const fuzzyFilter = (row: any, _columnId: string, value: string) => {
@@ -78,6 +80,27 @@ export function ArtifactsPage({
     assignedTo: ""
   });
   
+  const checkProjectMembership = async () => {
+    try {
+      // Get current user ID from AuthService
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.user?.id) {
+        setIsProjectMember(false);
+        return;
+      }
+      
+      const currentUserId = rdmAuth.user.id;
+      
+      // Get project members and check if current user is a member
+      const members = await projectService.getProjectMembers(projectId);
+      const isMember = members.some((member: any) => member.userId === currentUserId);
+      setIsProjectMember(isMember);
+    } catch (error) {
+      console.error("Failed to check project membership:", error);
+      setIsProjectMember(false);
+    }
+  };
+
   // Fetch artifact statuses when component mounts
 useEffect(() => {
   const fetchStatuses = async () => {
@@ -100,6 +123,7 @@ useEffect(() => {
   };
   
   fetchStatuses();
+  checkProjectMembership();
 }, [projectId, projectService, artifactStatuses]);
 
 useEffect(() => {
@@ -131,6 +155,8 @@ useEffect(() => {
   
   // Function to handle opening the edit dialog
   const handleEditClick = (artifact: ProjectArtifact) => {
+    if (!isProjectMember) return; 
+
     setSelectedArtifact(artifact);
     
     // Find the statusId that corresponds to the artifact's status
@@ -160,6 +186,8 @@ useEffect(() => {
   };
   // Function to handle form submission
   const handleSubmit = () => {
+    if (!isProjectMember) return; 
+
     if (selectedArtifact && onUpdateArtifact) {
       // Preserve file extension for documents
       let finalName = formValues.name;
@@ -349,13 +377,15 @@ useEffect(() => {
         const artifact = row.original;
         return (
           <div className="flex gap-2">
-            <Button 
-              variant="ghost" 
-              size="sm"
-              onClick={() => handleEditClick(artifact)}
-            >
-              <Edit className="h-4 w-4" />
-            </Button>
+            {isProjectMember && (
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => handleEditClick(artifact)}
+              >
+                <Edit className="h-4 w-4" />
+              </Button>
+            )}
             <Button 
               variant="ghost" 
               size="sm"
@@ -563,7 +593,7 @@ useEffect(() => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSubmit} disabled={loading}>Save changes</Button>
+            <Button onClick={handleSubmit} disabled={loading || !isProjectMember}>Save changes</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -57,6 +57,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import AuthService from '@/services/auth';
 
 interface TasksViewProps {
   projectId: string;
@@ -80,6 +81,7 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
   const [projectMembers, setProjectMembers] = useState<{ id: string; userName: string }[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isEditSaving, setIsEditSaving] = useState(false);
+  const [isProjectMember, setIsProjectMember] = useState(false);
   const [newTask, setNewTask] = useState<Partial<ProjectTask>>({
     name: "",
     description: "",
@@ -99,6 +101,7 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
   useEffect(() => {
     loadTasks();
     loadProjectMembers();
+    checkProjectMembership(); 
   }, [projectId]);
 
   useEffect(() => {
@@ -119,6 +122,27 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
       setFilteredTasks([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkProjectMembership = async () => {
+    try {
+      // Get current user ID from AuthService
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.user?.id) {
+        setIsProjectMember(false);
+        return;
+      }
+      
+      const currentUserId = rdmAuth.user.id;
+      
+      // Get project members and check if current user is a member
+      const members = await projectService.getProjectMembers(projectId);
+      const isMember = members.some(member => member.userId === currentUserId);
+      setIsProjectMember(isMember);
+    } catch (error) {
+      console.error("Failed to check project membership:", error);
+      setIsProjectMember(false);
     }
   };
 
@@ -536,10 +560,12 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
           </Popover>
         </div>
 
-        <Button onClick={() => setShowAddDialog(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Task
-        </Button>
+        {isProjectMember && (
+          <Button onClick={() => setShowAddDialog(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Task
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -557,10 +583,12 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
           <p className="text-gray-500 mb-2 text-sm">
             {allTasks.length === 0 ? "No tasks found for this project." : "No tasks match the current filters."}
           </p>
-          <Button variant="outline" onClick={() => setShowAddDialog(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            {allTasks.length === 0 ? "Create Your First Task" : "Add New Task"}
-          </Button>
+          {isProjectMember && (
+            <Button variant="outline" onClick={() => setShowAddDialog(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              {allTasks.length === 0 ? "Create Your First Task" : "Add New Task"}
+            </Button>
+          )}
         </div>
       ) : (
           <div className="rounded-md border mb-4">
@@ -709,6 +737,7 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                         )}
                       </TableCell>
                       <TableCell>
+                      {isProjectMember ? (
                         <div className="flex space-x-2">
                           <Button
                             variant="ghost"
@@ -728,11 +757,14 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                    {expandedTasks[task.id] && task.children && (
-                      <>
-                        {task.children.map((childTask) => (
+                      ) : (
+                        <div></div> // Empty div to maintain table layout
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  {expandedTasks[task.id] && task.children && (
+                    <>
+                      {task.children.map((childTask) => (
                           <TableRow key={childTask.id} className="bg-gray-50">
                             <TableCell></TableCell>
                             <TableCell>
@@ -784,6 +816,7 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                               )}
                             </TableCell>
                             <TableCell>
+                            {isProjectMember ? (
                               <div className="flex space-x-2">
                                 <Button
                                   variant="ghost"
@@ -803,7 +836,10 @@ export function TasksView({ projectId, projectService }: TasksViewProps) {
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>
-                            </TableCell>
+                            ) : (
+                              <div></div> // Empty div to maintain table layout
+                            )}
+                          </TableCell>
                           </TableRow>
                         ))}
                       </>

@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import AuthService from '@/services/auth';
 import {
   Table,
   TableBody,
@@ -59,16 +60,16 @@ import {
 interface MilestonesViewProps {
     projectId: string;
     projectService: ProjectService;
-  }
+}
   
-  // Define a type for the form data
-  interface MilestoneFormData {
+// Define a type for the form data
+interface MilestoneFormData {
     name: string;
     description?: string;
     status: string;
     dueDate?: string;
     statusId?: string;
-  }
+}
 
 const formatDate = (dateString: string | undefined | null) => {
     if (!dateString) return 'Not set';
@@ -89,7 +90,7 @@ const formatDate = (dateString: string | undefined | null) => {
         return 'Invalid date';
       }
     }
-  };
+};
 
 export function MilestonesView({ projectId, projectService }: MilestonesViewProps) {
   const { toast } = useToast();
@@ -106,6 +107,7 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
   const [milestoneStatuses, setMilestoneStatuses] = useState<MilestoneStatus[]>([]);
   const [viewMode, setViewMode] = useState<'grid' | 'timeline' | 'list'>('list');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isProjectMember, setIsProjectMember] = useState(false);
   // Add table state
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -135,6 +137,7 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
   useEffect(() => {
     loadMilestones();
     fetchMilestoneStatuses();
+    checkProjectMembership();
   }, [projectId]);
 
   useEffect(() => {
@@ -146,6 +149,27 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
       fetchMilestoneStatuses();
     }
   }, [showCreateDialog, showEditDialog, projectId]);
+
+  const checkProjectMembership = async () => {
+    try {
+      // Get current user ID from AuthService
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.user?.id) {
+        setIsProjectMember(false);
+        return;
+      }
+      
+      const currentUserId = rdmAuth.user.id;
+      
+      // Get project members and check if current user is a member
+      const members = await projectService.getProjectMembers(projectId);
+      const isMember = members.some(member => member.userId === currentUserId);
+      setIsProjectMember(isMember);
+    } catch (error) {
+      console.error("Failed to check project membership:", error);
+      setIsProjectMember(false);
+    }
+  };
 
   const loadMilestones = async () => {
     try {
@@ -392,164 +416,175 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
     return (completed / total) * 100;
   };
 
-  // Add table columns definition and configuration
-  const columns: ColumnDef<ProjectMilestone>[] = [
-    {
-      id: "status",
-      accessorKey: "status",
-      header: ({ column }) => (
-        <div className="flex items-center">
-          Status
-          <Button
-            variant="ghost"
-            onClick={() => {
-              if (column.getIsSorted() === "asc") {
-                column.toggleSorting(true); // Set to desc
-              } else if (column.getIsSorted() === "desc") {
-                column.clearSorting(); // Clear sorting
-              } else {
-                column.toggleSorting(false); // Set to asc
-              }
-            }}
-            className="ml-2 h-8 w-8 p-0"
-          >
-            {column.getIsSorted() === "asc" ? (
-              <ChevronUp className="h-4 w-4" />
-            ) : column.getIsSorted() === "desc" ? (
-              <ChevronDown className="h-4 w-4" />
-            ) : (
-              <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
-            )}
-          </Button>
-        </div>
-      ),
-      cell: ({ row }) => {
-        const status = row.original.status || "unknown"; // Add default value
-        
-        return (
-          <div className="flex items-center gap-2">
-            {getStatusIcon(status)}
-            <Badge
-              variant={getStatusVariant(status)}
-              className="text-xs capitalize"
+  // Define columns with conditional actions based on project membership
+  const getColumns = () => {
+    const baseColumns: ColumnDef<ProjectMilestone>[] = [
+      {
+        id: "status",
+        accessorKey: "status",
+        header: ({ column }) => (
+          <div className="flex items-center">
+            Status
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (column.getIsSorted() === "asc") {
+                  column.toggleSorting(true); // Set to desc
+                } else if (column.getIsSorted() === "desc") {
+                  column.clearSorting(); // Clear sorting
+                } else {
+                  column.toggleSorting(false); // Set to asc
+                }
+              }}
+              className="ml-2 h-8 w-8 p-0"
             >
-              {status
-                .split('_')
-                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                .join(' ')}
-            </Badge>
+              {column.getIsSorted() === "asc" ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : column.getIsSorted() === "desc" ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+              )}
+            </Button>
           </div>
-        );
+        ),
+        cell: ({ row }) => {
+          const status = row.original.status || "unknown"; // Add default value
+          
+          return (
+            <div className="flex items-center gap-2">
+              {getStatusIcon(status)}
+              <Badge
+                variant={getStatusVariant(status)}
+                className="text-xs capitalize"
+              >
+                {status
+                  .split('_')
+                  .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                  .join(' ')}
+              </Badge>
+            </div>
+          );
+        },
       },
-    },
-    {
-      accessorKey: "name",
-      header: ({ column }) => (
-        <div className="flex items-center">
-          Name
-          <Button
-            variant="ghost"
-            onClick={() => {
-              if (column.getIsSorted() === "asc") {
-                column.toggleSorting(true); // Set to desc
-              } else if (column.getIsSorted() === "desc") {
-                column.clearSorting(); // Clear sorting
-              } else {
-                column.toggleSorting(false); // Set to asc
-              }
-            }}
-            className="ml-2 h-8 w-8 p-0"
-          >
-            {column.getIsSorted() === "asc" ? (
-              <ChevronUp className="h-4 w-4" />
-            ) : column.getIsSorted() === "desc" ? (
-              <ChevronDown className="h-4 w-4" />
-            ) : (
-              <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
-            )}
-          </Button>
-        </div>
-      ),
-    },
-    {
-      accessorKey: "dueDate",
-      header: ({ column }) => (
-        <div className="flex items-center">
-          Due Date
-          <Button
-            variant="ghost"
-            onClick={() => {
-              if (column.getIsSorted() === "asc") {
-                column.toggleSorting(true);
-              } else if (column.getIsSorted() === "desc") {
-                column.clearSorting();
-              } else {
-                column.toggleSorting(false);
-              }
-            }}
-            className="ml-2 h-8 w-8 p-0"
-          >
-            {column.getIsSorted() === "asc" ? (
-              <ChevronUp className="h-4 w-4" />
-            ) : column.getIsSorted() === "desc" ? (
-              <ChevronDown className="h-4 w-4" />
-            ) : (
-              <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
-            )}
-          </Button>
-        </div>
-      ),
-      cell: ({ row }) => (
-        <div className="flex items-center gap-2">
-          <Calendar className="h-4 w-4" />
-          {formatDate(row.original.dueDate)}
-        </div>
-      ),
-    },
-    {
-      accessorKey: "description",
-      header: "Description",
-      cell: ({ row }) => (
-        <div className="max-w-[500px]">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <p className="text-sm text-gray-600 truncate cursor-default">
-                {row.original.description || ""}
-              </p>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="text-sm">{row.original.description || ""}</p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      ),
-    },
-    {
-      id: "actions",
-      cell: ({ row }) => (
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => handleEditMilestone(row.original)}
-            className="hover:bg-gray-100"
-          >
-            <Edit className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => {
-              setSelectedMilestone(row.original);
-              setShowDeleteConfirm(true);
-            }}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-      ),
-    },
-  ];
+      {
+        accessorKey: "name",
+        header: ({ column }) => (
+          <div className="flex items-center">
+            Name
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (column.getIsSorted() === "asc") {
+                  column.toggleSorting(true); // Set to desc
+                } else if (column.getIsSorted() === "desc") {
+                  column.clearSorting(); // Clear sorting
+                } else {
+                  column.toggleSorting(false); // Set to asc
+                }
+              }}
+              className="ml-2 h-8 w-8 p-0"
+            >
+              {column.getIsSorted() === "asc" ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : column.getIsSorted() === "desc" ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+              )}
+            </Button>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "dueDate",
+        header: ({ column }) => (
+          <div className="flex items-center">
+            Due Date
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (column.getIsSorted() === "asc") {
+                  column.toggleSorting(true);
+                } else if (column.getIsSorted() === "desc") {
+                  column.clearSorting();
+                } else {
+                  column.toggleSorting(false);
+                }
+              }}
+              className="ml-2 h-8 w-8 p-0"
+            >
+              {column.getIsSorted() === "asc" ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : column.getIsSorted() === "desc" ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+              )}
+            </Button>
+          </div>
+        ),
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2">
+            <Calendar className="h-4 w-4" />
+            {formatDate(row.original.dueDate)}
+          </div>
+        ),
+      },
+      {
+        accessorKey: "description",
+        header: "Description",
+        cell: ({ row }) => (
+          <div className="max-w-[500px]">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <p className="text-sm text-gray-600 truncate cursor-default">
+                  {row.original.description || ""}
+                </p>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-sm">{row.original.description || ""}</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        ),
+      }
+    ];
+    
+    // Only add actions column if user is a project member
+    if (isProjectMember) {
+      baseColumns.push({
+        id: "actions",
+        cell: ({ row }) => (
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => handleEditMilestone(row.original)}
+              className="hover:bg-gray-100"
+            >
+              <Edit className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                setSelectedMilestone(row.original);
+                setShowDeleteConfirm(true);
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        ),
+      });
+    }
+    
+    return baseColumns;
+  };
+
+  // Use the function to get columns
+  const columns = getColumns();
 
   // Add table configuration
   const table = useReactTable({
@@ -718,13 +753,16 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-            <Button 
-              onClick={() => setShowCreateDialog(true)} 
-              className="bg-white hover:bg-gray-50 text-gray-700 border border-gray-200"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Milestone
-            </Button>
+            {/* Only show Add Milestone button if user is a project member */}
+            {isProjectMember && (
+              <Button 
+                onClick={() => setShowCreateDialog(true)} 
+                className="bg-white hover:bg-gray-50 text-gray-700 border border-gray-200"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Milestone
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -734,14 +772,16 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
         <div className="text-center p-8 bg-white rounded-lg border border-dashed transition-all duration-300">
           <Flag className="h-6 w-6 text-gray-400 mx-auto mb-3" />
           <p className="text-gray-600 font-medium">No milestones found</p>
-          <p className="text-gray-500 mt-1">Create your first milestone to start tracking progress!</p>
-          <Button
-            onClick={() => setShowCreateDialog(true)}
-            className="mt-4 bg-white hover:bg-gray-50 text-gray-700 transition-colors duration-300 border border-gray-200"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add First Milestone
-          </Button>
+          {/* Only show Add First Milestone button if user is a project member */}
+          {isProjectMember && (
+            <Button
+              onClick={() => setShowCreateDialog(true)}
+              className="mt-4 bg-white hover:bg-gray-50 text-gray-700 transition-colors duration-300 border border-gray-200"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add First Milestone
+            </Button>
+          )}
         </div>
       )}
 
@@ -809,26 +849,29 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
                       {milestone.description && (
                         <p className="text-sm text-gray-600 line-clamp-2">{milestone.description}</p>
                       )}
+                      {/* Only show edit/delete buttons if user is a project member */}
+                      {isProjectMember && (
                         <div className="flex justify-end gap-2 mt-4">
-                            <Button
+                          <Button
                             variant="ghost"
                             size="icon"
                             onClick={() => handleEditMilestone(milestone)}
                             className="hover:bg-gray-100"
-                            >
+                          >
                             <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
+                          </Button>
+                          <Button
                             variant="ghost"
                             size="icon"
                             onClick={() => {
-                                setSelectedMilestone(milestone);
-                                setShowDeleteConfirm(true);
+                              setSelectedMilestone(milestone);
+                              setShowDeleteConfirm(true);
                             }}
-                            >
+                          >
                             <Trash2 className="h-4 w-4" />
-                            </Button>
+                          </Button>
                         </div>
+                      )}
                     </CardContent>
                   </Card>
                 </div>
@@ -875,26 +918,29 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
                       {milestone.description && (
                         <p className="text-sm text-gray-600 mt-2">{milestone.description}</p>
                       )}
-                      <div className="flex justify-end gap-2 mt-3">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleEditMilestone(milestone)}
-                          className="hover:bg-gray-100"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            setSelectedMilestone(milestone);
-                            setShowDeleteConfirm(true);
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+                      {/* Only show edit/delete buttons if user is a project member */}
+                      {isProjectMember && (
+                        <div className="flex justify-end gap-2 mt-3">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleEditMilestone(milestone)}
+                            className="hover:bg-gray-100"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              setSelectedMilestone(milestone);
+                              setShowDeleteConfirm(true);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </div>
@@ -956,66 +1002,66 @@ export function MilestonesView({ projectId, projectService }: MilestonesViewProp
       )}
 
       {/* Delete Confirmation Dialog */}
-        <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <DialogContent>
-            <DialogHeader>
+          <DialogHeader>
             <DialogTitle>Confirm Deletion</DialogTitle>
             <DialogDescription>
-                Are you sure you want to delete the milestone "{selectedMilestone?.name}"? 
-                This action cannot be undone.
+              Are you sure you want to delete the milestone "{selectedMilestone?.name}"? 
+              This action cannot be undone.
             </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
+          </DialogHeader>
+          <DialogFooter>
             <Button 
-                variant="outline" 
-                onClick={() => setShowDeleteConfirm(false)}
-                disabled={isDeleting}
+              variant="outline" 
+              onClick={() => setShowDeleteConfirm(false)}
+              disabled={isDeleting}
             >
-                Cancel
+              Cancel
             </Button>
             <Button 
-                variant="destructive" 
-                onClick={() => {
+              variant="destructive" 
+              onClick={() => {
                 if (selectedMilestone) {
-                    handleDeleteMilestone(selectedMilestone.id);
+                  handleDeleteMilestone(selectedMilestone.id);
                 }
-                }}
-                disabled={isDeleting}
+              }}
+              disabled={isDeleting}
             >
-                {isDeleting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  "Delete"
-                )}
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
             </Button>
-            </DialogFooter>
+          </DialogFooter>
         </DialogContent>
-        </Dialog>
+      </Dialog>
 
       {/* Create Milestone Dialog */}
-        <CreateMilestoneDialog
+      <CreateMilestoneDialog
         open={showCreateDialog}
         onClose={() => setShowCreateDialog(false)}
         onCreate={handleCreateMilestone}
         isCreating={isCreating}
         statuses={milestoneStatuses}
-        />
+      />
 
-        {selectedMilestone && (
+      {selectedMilestone && (
         <MilestoneDialog
-            open={showEditDialog}
-            onClose={() => setShowEditDialog(false)}
-            onUpdate={handleUpdateMilestone}
-            milestone={selectedMilestone}
-            isUpdating={isUpdating}
-            statuses={milestoneStatuses}
-            formData={formData}
-            setFormData={setFormData}
+          open={showEditDialog}
+          onClose={() => setShowEditDialog(false)}
+          onUpdate={handleUpdateMilestone}
+          milestone={selectedMilestone}
+          isUpdating={isUpdating}
+          statuses={milestoneStatuses}
+          formData={formData}
+          setFormData={setFormData}
         />
-        )}
+      )}
 
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes fade-in-up {

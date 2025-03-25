@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Plus, Trash2, Edit, Loader2, Save, X } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import AuthService from '@/services/auth'; // Import AuthService
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,11 +31,13 @@ export function ProjectVariablesPanel({ projectId, projectService }: ProjectVari
   const [deleting, setDeleting] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [variableToDelete, setVariableToDelete] = useState<ProjectVariable | null>(null);
+  const [isProjectMember, setIsProjectMember] = useState(false);
   const { toast } = useToast();
 
-  // Load variables when component mounts
+  // Load variables and check membership when component mounts
   useEffect(() => {
     loadVariables();
+    checkProjectMembership();
   }, [projectId]);
 
   const loadVariables = async () => {
@@ -51,6 +54,28 @@ export function ProjectVariablesPanel({ projectId, projectService }: ProjectVari
       });
     } finally {
       setLoading(false);
+    }
+  };
+  
+  // Function to check if current user is a project member
+  const checkProjectMembership = async () => {
+    try {
+      // Get current user ID from AuthService
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.user?.id) {
+        setIsProjectMember(false);
+        return;
+      }
+      
+      const currentUserId = rdmAuth.user.id;
+      
+      // Get project members and check if current user is a member
+      const members = await projectService.getProjectMembers(projectId);
+      const isMember = members.some((member: any) => member.userId === currentUserId);
+      setIsProjectMember(isMember);
+    } catch (error) {
+      console.error("Failed to check project membership:", error);
+      setIsProjectMember(false);
     }
   };
 
@@ -185,46 +210,50 @@ export function ProjectVariablesPanel({ projectId, projectService }: ProjectVari
         </AlertDialogContent>
       </AlertDialog>
 
-      <div className="flex items-center gap-4">
-        <Input
-          placeholder="Variable name"
-          value={newVariable.key}
-          onChange={(e) => setNewVariable({ ...newVariable, key: e.target.value })}
-        />
-        <Input
-          placeholder="Value"
-          value={newVariable.value}
-          onChange={(e) => setNewVariable({ ...newVariable, value: e.target.value })}
-        />
-        <Button 
-          onClick={handleAddVariable} 
-          disabled={!newVariable.key || !newVariable.value || adding}
-        >
-          {adding ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Adding...
-            </>
-          ) : (
-            <>
-              <Plus className="h-4 w-4 mr-2" />
-              Add
-            </>
-          )}
-        </Button>
-      </div>
-      
-      <Input
-        placeholder="Description (optional)"
-        value={newVariable.description}
-        onChange={(e) => setNewVariable({ ...newVariable, description: e.target.value })}
-        className="mt-2"
-      />
+      {/* Only show the variable addition form if the user is a project member */}
+      {isProjectMember && (
+        <>
+          <div className="flex items-center gap-4">
+            <Input
+              placeholder="Variable name"
+              value={newVariable.key}
+              onChange={(e) => setNewVariable({ ...newVariable, key: e.target.value })}
+            />
+            <Input
+              placeholder="Value"
+              value={newVariable.value}
+              onChange={(e) => setNewVariable({ ...newVariable, value: e.target.value })}
+            />
+            <Button 
+              onClick={handleAddVariable} 
+              disabled={!newVariable.key || !newVariable.value || adding}
+            >
+              {adding ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add
+                </>
+              )}
+            </Button>
+          </div>
+          
+          <Input
+            placeholder="Description (optional)"
+            value={newVariable.description}
+            onChange={(e) => setNewVariable({ ...newVariable, description: e.target.value })}
+            className="mt-2"
+          />
+        </>
+      )}
 
       {variables.length === 0 ? (
         <div className="text-center p-8 border rounded-md bg-gray-50">
           <p className="text-gray-500 mb-2">No variables defined for this project yet.</p>
-          <p className="text-gray-400 text-sm">Add variables to store configuration values.</p>
         </div>
       ) : (
         <div className="space-y-2 mt-4">
@@ -249,52 +278,55 @@ export function ProjectVariablesPanel({ projectId, projectService }: ProjectVari
                   <p className="text-xs text-gray-500 mt-1">{variable.description}</p>
                 )}
               </div>
-              <div className="flex space-x-1">
-                {editingVariable === variable.id ? (
-                  <>
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => handleSaveEdit(variable)}
-                      className="h-8 w-8 p-0"
-                    >
-                      <Save className="h-4 w-4 text-green-500" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => setEditingVariable(null)}
-                      className="h-8 w-8 p-0"
-                    >
-                      <X className="h-4 w-4 text-gray-500" />
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => handleEditVariable(variable.id, variable.value)}
-                      className="h-8 w-8 p-0"
-                    >
-                      <Edit className="h-4 w-4 text-gray-500 hover:text-blue-500" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => confirmDelete(variable)}
-                      disabled={deleting === variable.id}
-                      className="h-8 w-8 p-0"
-                    >
-                      {deleting === variable.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4 text-gray-500 hover:text-red-500" />
-                      )}
-                    </Button>
-                  </>
-                )}
-              </div>
+              {/* Only show edit/delete buttons if the user is a project member */}
+              {isProjectMember && (
+                <div className="flex space-x-1">
+                  {editingVariable === variable.id ? (
+                    <>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => handleSaveEdit(variable)}
+                        className="h-8 w-8 p-0"
+                      >
+                        <Save className="h-4 w-4 text-green-500" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => setEditingVariable(null)}
+                        className="h-8 w-8 p-0"
+                      >
+                        <X className="h-4 w-4 text-gray-500" />
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => handleEditVariable(variable.id, variable.value)}
+                        className="h-8 w-8 p-0"
+                      >
+                        <Edit className="h-4 w-4 text-gray-500 hover:text-blue-500" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => confirmDelete(variable)}
+                        disabled={deleting === variable.id}
+                        className="h-8 w-8 p-0"
+                      >
+                        {deleting === variable.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4 text-gray-500 hover:text-red-500" />
+                        )}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

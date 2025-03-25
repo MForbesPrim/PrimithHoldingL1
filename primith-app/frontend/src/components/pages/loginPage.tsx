@@ -10,6 +10,7 @@ interface User {
   firstName: string
   lastName: string
   email: string
+  isExternal: boolean
 }
 
 interface LoginResponse {
@@ -63,6 +64,7 @@ export function LoginPage() {
         
         if (data.user) {
           AuthService.setUser(data.user);
+          AuthService.setMembershipType(data.user.isExternal);
           // Add admin status check after setting user data
           await AuthService.isSuperAdmin();
         }

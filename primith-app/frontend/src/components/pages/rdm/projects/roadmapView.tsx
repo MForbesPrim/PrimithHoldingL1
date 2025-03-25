@@ -59,6 +59,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import AuthService from '@/services/auth'; 
 
 // Helper function to capitalize the first letter of each word
 const capitalizeWords = (str: string) => {
@@ -112,6 +113,7 @@ export function RoadmapView({
   const [endDate, setEndDate] = useState<Date | undefined>(undefined)
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isProjectMember, setIsProjectMember] = useState(false) 
   const categorySelectRef = useRef<HTMLButtonElement>(null)
   const parentSelectRef = useRef<HTMLButtonElement>(null)
   const projectsService = new ProjectService()
@@ -144,6 +146,31 @@ export function RoadmapView({
       setMilestoneStatuses(formattedStatuses);
     } catch (error) {
       console.error("Failed to fetch milestone statuses:", error);
+    }
+  };
+
+  useEffect(() => {
+    checkProjectMembership();
+  }, [projectId]);
+
+  const checkProjectMembership = async () => {
+    try {
+      // Get current user ID from AuthService
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.user?.id) {
+        setIsProjectMember(false);
+        return;
+      }
+      
+      const currentUserId = rdmAuth.user.id;
+      
+      // Get project members and check if current user is a member
+      const members = await projectsService.getProjectMembers(projectId);
+      const isMember = members.some(member => member.userId === currentUserId);
+      setIsProjectMember(isMember);
+    } catch (error) {
+      console.error("Failed to check project membership:", error);
+      setIsProjectMember(false);
     }
   };
 
@@ -397,19 +424,26 @@ const handleAddSubmit = async () => {
   const EmptyState = ({ message, actionLabel = "Add your first item" }: { 
     message: string; 
     actionLabel?: string 
-  }) => (
-    <div className="text-center p-8 border border-dashed rounded-md">
-      <p className="text-gray-500 mb-4 text-sm">{message}</p>
-      <Button
-        className="text-xs"
-        variant="outline" 
-        onClick={handleAddClick}
-      >
-        <Plus className="h-4 w-4" />
-        {actionLabel}
-      </Button>
-    </div>
-  )
+  }) => {
+    // Don't show anything if user is not a project member
+    if (!isProjectMember) {
+      return null;
+    }
+
+    return (
+      <div className="text-center p-8 border border-dashed rounded-md">
+        <p className="text-gray-500 mb-4 text-sm">{message}</p>
+        <Button
+          className="text-xs"
+          variant="outline" 
+          onClick={handleAddClick}
+        >
+          <Plus className="h-4 w-4" />
+          {actionLabel}
+        </Button>
+      </div>
+    );
+  }
 
   // Group items by category for category view
   const groupedByCategory = useMemo(() => {
@@ -667,19 +701,23 @@ const renderListView = () => {
                       <span className="text-xs">{item.priority || 0}</span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
-                      <Button variant="ghost" size="sm" className="mr-1" onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditClick(item);
-                      }}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      {onItemDelete && (
-                        <Button variant="ghost" size="sm" onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteClick(item);
-                        }}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                    {isProjectMember && (
+                        <>
+                          <Button variant="ghost" size="sm" className="mr-1" onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditClick(item);
+                          }}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          {onItemDelete && (
+                            <Button variant="ghost" size="sm" onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteClick(item);
+                            }}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </>
                       )}
                     </td>
                   </tr>
@@ -885,24 +923,8 @@ const renderListView = () => {
           )}
         </div>
         <div className="flex space-x-1">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="min-h-8 min-w-8 p-0"
-                  onClick={() => handleEditClick(item)}
-                >
-                  <Edit className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Action: Edit item</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          {onItemDelete && (
+        {isProjectMember && (
+          <>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -910,17 +932,37 @@ const renderListView = () => {
                     variant="ghost" 
                     size="sm" 
                     className="min-h-8 min-w-8 p-0"
-                    onClick={() => handleDeleteClick(item)}
+                    onClick={() => handleEditClick(item)}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Edit className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Action: Delete item</p>
+                  <p>Action: Edit item</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          )}
+            {onItemDelete && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="min-h-8 min-w-8 p-0"
+                      onClick={() => handleDeleteClick(item)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Action: Delete item</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+          </>
+        )}
         </div>
       </div>
     </Card>
@@ -1241,10 +1283,12 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
               </TabsContent>
             </Tabs>
           </div>
-          <Button onClick={handleAddClick} variant="default" className="ml-4">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Item
-          </Button>
+          {isProjectMember && (
+            <Button onClick={handleAddClick} variant="default" className="ml-4">
+              <Plus className="h-4 w-4 mr-2" />
+              Add Item
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1526,7 +1570,7 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
             <Button variant="outline" onClick={() => setShowAddModal(false)}>
               Cancel
             </Button>
-            <Button onClick={handleAddSubmit} disabled={isSaving || !formData.title}>
+            <Button onClick={handleAddSubmit} disabled={isSaving || !formData.title || !isProjectMember}>
               {isSaving ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1764,7 +1808,7 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
             <Button variant="outline" onClick={() => setShowEditModal(false)}>
               Cancel
             </Button>
-            <Button onClick={handleEditSubmit} disabled={isSaving || !formData.title}>
+            <Button onClick={handleEditSubmit} disabled={isSaving || !formData.title || !isProjectMember}>
               {isSaving ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1792,7 +1836,7 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
               <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>
                 Cancel
               </Button>
-              <Button variant="destructive" onClick={handleDeleteConfirm} disabled={isDeleting}>
+              <Button variant="destructive" onClick={handleDeleteConfirm} disabled={isDeleting || !isProjectMember}>
                 {isDeleting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />

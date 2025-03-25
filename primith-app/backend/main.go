@@ -68,10 +68,11 @@ type ContactRequest struct {
 }
 
 type UserData struct {
-	ID        string  `json:"id"`
-	FirstName *string `json:"firstName"`
-	LastName  *string `json:"lastName"`
-	Email     string  `json:"email"`
+	ID         string  `json:"id"`
+	FirstName  *string `json:"firstName"`
+	LastName   *string `json:"lastName"`
+	Email      string  `json:"email"`
+	IsExternal *bool   `json:"isExternal"`
 }
 
 type LoginResponse struct {
@@ -558,10 +559,11 @@ func login(w http.ResponseWriter, r *http.Request) {
 	var storedHash string
 	var userData UserData
 	var userID string
+	var isExternal bool
 	err = db.QueryRow(`
-				SELECT id, password_hash, first_name, last_name, email 
+				SELECT id, password_hash, first_name, last_name, email, is_external
 				FROM auth.users WHERE email = $1`,
-		user.Username).Scan(&userID, &storedHash, &userData.FirstName, &userData.LastName, &userData.Email)
+		user.Username).Scan(&userID, &storedHash, &userData.FirstName, &userData.LastName, &userData.Email, &isExternal)
 
 	if err == sql.ErrNoRows {
 		// Record failed attempt for non-existent user
@@ -656,10 +658,11 @@ func login(w http.ResponseWriter, r *http.Request) {
 		Token:        accessTokenString,
 		RefreshToken: refreshTokenString,
 		User: UserData{
-			ID:        userID,
-			FirstName: userData.FirstName,
-			LastName:  userData.LastName,
-			Email:     userData.Email,
+			ID:         userID,
+			FirstName:  userData.FirstName,
+			LastName:   userData.LastName,
+			Email:      userData.Email,
+			IsExternal: &isExternal,
 		},
 	})
 }
@@ -2621,6 +2624,7 @@ func handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 					FROM auth.organization_members om
 					JOIN auth.users u ON u.id = om.user_id
 					WHERE u.email = $1 AND om.organization_id = $2
+					AND u.status IS NULL
 				)
 			`, claims.Username, req.OrganizationID).Scan(&authorized)
 
@@ -12525,8 +12529,9 @@ func handleGetOrganizationUsers(w http.ResponseWriter, r *http.Request) {
 	var organizationId string
 	err = db.QueryRow(`
 			SELECT om.organization_id
-			FROM auth.organization_members om
+			FROM auth.organization_members om INNER JOIN auth.users us ON us.id = om.user_id
 			WHERE om.user_id = $1
+			AND us.status IS NULL
 			LIMIT 1
 		`, userId).Scan(&organizationId)
 
@@ -14561,6 +14566,7 @@ func handleGetOrganizationRoles(w http.ResponseWriter, r *http.Request) {
 			FROM auth.organization_members om
 			JOIN auth.users u ON om.user_id = u.id
 			WHERE u.email = $1
+			AND u.status IS NULL
 			LIMIT 1
 		`, claims.Username).Scan(&organizationId)
 
@@ -14631,6 +14637,7 @@ func handleDeleteOrganizationUser(w http.ResponseWriter, r *http.Request) {
 			FROM auth.users u
 			JOIN auth.organization_members om ON om.user_id = u.id
 			WHERE u.email = $1
+			AND u.status IS NULL
 			LIMIT 1
 		`, claims.Username).Scan(&userId, &organizationId)
 
@@ -15553,7 +15560,7 @@ func handleGetOrganizationCollaborators(w http.ResponseWriter, r *http.Request) 
 			SELECT EXISTS (
 				SELECT 1 FROM auth.organization_members 
 				WHERE organization_id = $1 AND user_id = (
-					SELECT id FROM auth.users WHERE email = $2
+					SELECT id FROM auth.users WHERE email = $2 AND status IS NULL
 				)
 			)`, orgID, claims.Username).Scan(&isMember)
 	if err != nil || !isMember {
