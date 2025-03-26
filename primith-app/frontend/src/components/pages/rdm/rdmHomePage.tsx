@@ -17,6 +17,8 @@ import { ProjectService } from "@/services/projectService"
 import { ProjectActivity } from "@/types/projects"
 import { PagesService } from "@/services/pagesService"
 import { DocumentService } from "@/services/documentService"
+import AuthService from "@/services/auth"
+import { ExternalRdmHomePage } from "./ExternalRdmHomePage"
 
 import {
   ChartConfig,
@@ -59,10 +61,26 @@ export function RdmHomePage() {
   const [totalPages, setTotalPages] = useState(0)
   const [documentInterval, setDocumentInterval] = useState('month') // Options: month, quarter, year
   const [projectInterval, setProjectInterval] = useState('quarter') // Options: month, quarter, year
+  const [isExternalUser, setIsExternalUser] = useState(false)
 
   const projectService = new ProjectService()
   const pagesService = new PagesService()
   const documentService = new DocumentService()
+
+  useEffect(() => {
+    const checkMembershipType = async () => {
+      try {
+        const membershipType = await AuthService.getMembershipType();
+        setIsExternalUser(membershipType === true);
+        setIsLoading(false);
+      } catch (error) {
+        console.error("Failed to check membership type:", error);
+        setIsLoading(false);
+      }
+    };
+    
+    checkMembershipType();
+  }, []);
 
   useEffect(() => {
     async function fetchData() {
@@ -520,6 +538,18 @@ export function RdmHomePage() {
       </div>
     );
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-1 flex-col gap-8 pr-8 pl-6 pt-8 pb-8">
+        <div>Loading...</div>
+      </div>
+    );
+  }
+
+  if (isExternalUser) {
+    return <ExternalRdmHomePage />;
+  }
 
   return (
     <div className="flex flex-1 flex-col gap-8 pr-8 pl-6 pt-8 pb-8">
