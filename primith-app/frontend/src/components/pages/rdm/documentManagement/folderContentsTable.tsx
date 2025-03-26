@@ -44,6 +44,7 @@ interface FolderContentsTableProps {
  onDeleteItems?: (itemIds: string[], type: 'folder' | 'document') => Promise<void>;
  onRenameDocument?: (documentId: string, newName: string) => Promise<void>;
  onRenameFolder?: (folderId: string, newName: string) => Promise<void>;
+ hasWritePermission?: boolean; 
 }
 
 export const FolderContentsTable = memo(function FolderContentsTable({
@@ -55,7 +56,8 @@ export const FolderContentsTable = memo(function FolderContentsTable({
  onFileUpload,
  onDeleteItems,
  onRenameDocument,
- onRenameFolder
+ onRenameFolder,
+ hasWritePermission
 }: FolderContentsTableProps) {
    const [sorting, setSorting] = useState<SortingState>([
        { id: "updatedAt", desc: true }
@@ -139,12 +141,14 @@ export const FolderContentsTable = memo(function FolderContentsTable({
                    >
                        Rename
                    </ContextMenuItem>
+                   {hasWritePermission && (
                    <ContextMenuItem
                        onClick={() => onDeleteItems?.([item.id], item.type)}
                        className="text-destructive"
                    >
-                       Delete
-                   </ContextMenuItem>
+                           Delete
+                       </ContextMenuItem>
+                   )}
                </ContextMenuContent>
            </ContextMenu>
        );
@@ -264,6 +268,7 @@ export const FolderContentsTable = memo(function FolderContentsTable({
                    onChange={(event) => table.getColumn("name")?.setFilterValue(event.target.value)}
                    className="max-w-sm"
                />
+               {hasWritePermission && (
                <div className="flex items-center gap-2">
                 <Button size="sm" onClick={() => setShowNewFolderDialog(true)} className="flex items-center gap-2">
                     <Plus className="h-4 w-4 mr-2" />
@@ -280,6 +285,7 @@ export const FolderContentsTable = memo(function FolderContentsTable({
                        onChange={handleFileUpload}
                    />
                </div>
+               )}
            </div>
 
            <div className="rounded-md border mb-4">

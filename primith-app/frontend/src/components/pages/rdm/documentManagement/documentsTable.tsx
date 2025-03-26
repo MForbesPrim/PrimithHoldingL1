@@ -44,6 +44,7 @@ interface DocumentsTableProps {
   onRenameDocument?: (documentId: string, newName: string) => Promise<void>;
   onRenameFolder?: (folderId: string, newName: string) => Promise<void>;
   showDownloadButton?: boolean;
+  hasWritePermission?: boolean; 
 }
 
 export const DocumentsTable = memo(function DocumentsTable({
@@ -52,6 +53,7 @@ export const DocumentsTable = memo(function DocumentsTable({
   onDeleteDocuments,
   onRenameDocument,
   showDownloadButton = true,
+  hasWritePermission,
 }: DocumentsTableProps) {
   const [sorting, setSorting] = useState<SortingState>([{ id: "updatedAt", desc: true }])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
@@ -334,6 +336,7 @@ export const DocumentsTable = memo(function DocumentsTable({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+        {hasWritePermission && (
         <div className="flex items-center gap-2">
           <Button
             size="sm"
@@ -359,6 +362,7 @@ export const DocumentsTable = memo(function DocumentsTable({
             </Tooltip>
           )}
         </div>
+        )}
       </div>
 
       <div className="rounded-md border mb-4">

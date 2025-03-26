@@ -21,6 +21,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useProject } from '@/components/pages/rdm/context/projectContext';
 import { useToast } from '@/hooks/use-toast';
 import { Switch } from '@/components/ui/switch';
+import AuthService from '@/services/auth';
 
 export function PagesDashboard() {
   const navigate = useNavigate();
@@ -41,6 +42,7 @@ export function PagesDashboard() {
   const [newPageParentId, setNewPageParentId] = useState<string | null>(null);
   const [isPageTreeVisible, setIsPageTreeVisible] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [canCreatePages, setCanCreatePages] = useState(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
   const [showTemplateNameDialog, setShowTemplateNameDialog] = useState(false);
   const [templateToUse, setTemplateToUse] = useState<PageNode | null>(null);
@@ -71,6 +73,7 @@ export function PagesDashboard() {
     if (selectedOrgId) {
       loadPages();
       loadFolders();
+      checkPermissions();
     }
   }, [selectedOrgId, selectedProjectId]);
 
@@ -122,6 +125,37 @@ export function PagesDashboard() {
     } catch (error) {
         console.error('Failed to create folder:', error);
     }
+};
+
+const checkPermissions = async () => {
+  try {
+    // Get current user and membership type from AuthService
+    const rdmAuth = await AuthService.getRdmTokens();
+    const membershipType = await AuthService.getMembershipType();
+    
+    if (!rdmAuth?.user?.id) {
+      setCanCreatePages(false);
+      return;
+    }
+
+    let hasPermission = false;
+    if (!membershipType) {
+      // Fallback if membership type isn't set - allow only super_admin
+      hasPermission = true;
+    } else if (membershipType === true) { // External user
+      // External users can only create pages if they have specific permissions
+      hasPermission = false;
+    } else { // Internal user
+      // Internal users have broader permissions
+      hasPermission = true;
+    }
+
+    setCanCreatePages(hasPermission);
+    
+  } catch (error) {
+    console.error("Failed to check page creation permissions:", error);
+    setCanCreatePages(false);
+  }
 };
 
 const handleAssociatePageWithProject = async (pageId: string) => {
@@ -579,7 +613,7 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
                     ) : null}
                     <h1 className="text-2xl font-bold ml-2">Pages</h1>
                   </div>
-                  
+                  {canCreatePages && (  
                   <div className="flex justify-between items-center mb-4">
                     <Button
                       onClick={handleTemplatesClick}
@@ -602,6 +636,7 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
                       Create Page
                     </Button>
                   </div>
+                  )}
                 </div>
                 <PagesTable
                   pages={(pages || []).filter(p => p.status !== 'template')}

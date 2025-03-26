@@ -44,6 +44,7 @@ interface FoldersTableProps {
     onDeleteFolders: (folderIds: string[]) => void
     onCreateFolder: (parentId: string | null, name: string) => void
     onRenameFolder?: (folderId: string, newName: string) => Promise<void>
+    hasWritePermission?: boolean; 
 }
 
 export const FoldersTable = memo(function FoldersTable({
@@ -51,7 +52,8 @@ export const FoldersTable = memo(function FoldersTable({
     onFolderClick,
     onDeleteFolders,
     onCreateFolder,
-    onRenameFolder
+    onRenameFolder,
+    hasWritePermission
 }: FoldersTableProps) {
     const [sorting, setSorting] = useState<SortingState>([
         { id: "updatedAt", desc: true }
@@ -291,7 +293,7 @@ export const FoldersTable = memo(function FoldersTable({
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </div>
-
+                {hasWritePermission && (
                 <div className="flex items-center gap-2">
                     <Button
                         size="sm" 
@@ -317,6 +319,7 @@ export const FoldersTable = memo(function FoldersTable({
                         </Tooltip>
                     )}
                 </div>
+                )}
             </div>
 
             <div className="rounded-md border mb-4">

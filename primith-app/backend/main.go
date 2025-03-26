@@ -1061,29 +1061,43 @@ func handleListRoles(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCreateRole(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Starting handleCreateRole")
+
 	var role Role
 	if err := json.NewDecoder(r.Body).Decode(&role); err != nil {
+		log.Printf("Error decoding request body: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
+	log.Printf("Request decoded. Role data: Name=%s, Description=%s, OrganizationID=%v",
+		role.Name, role.Description, role.OrganizationID)
+
+	// Insert directly into the roles table instead of using the stored procedure
 	var roleID string
 	err := db.QueryRow(`
-				CALL auth.create_role($1, $2, $3, $4)
-			`, role.OrganizationID, role.Name, role.Description, &roleID).Scan(&roleID)
+        INSERT INTO auth.roles (name, description, organization_id, is_global)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+    `, role.Name, role.Description, role.OrganizationID, role.OrganizationID == nil).Scan(&roleID)
 
 	if err != nil {
+		log.Printf("Database error: %v", err)
 		http.Error(w, "Failed to create role", http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("Role created successfully with ID: %s", roleID)
+
 	role.ID = roleID
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Role created successfully",
 		"role":    role,
-	})
+	}); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
 }
 
 func handleUpdateRole(w http.ResponseWriter, r *http.Request) {
@@ -7702,7 +7716,7 @@ func handleGetProjects(w http.ResponseWriter, r *http.Request) {
 				WHERE ap.resource_id = p.id 
 				AND ap.resource_type = 'project'
 				AND u.email = $2
-				AND ap.permission_level IN ('view', 'edit', 'manage')
+				AND ap.permission_level IN ('view', 'edit')
 			)
 		`
 
@@ -7997,6 +8011,7 @@ func handleGetProjectMembers(w http.ResponseWriter, r *http.Request) {
 				FROM rdm.project_members pm
 				JOIN auth.users u ON pm.user_id = u.id
 				WHERE pm.project_id = $1
+				AND pm.role <> 'external'
 			`, projectId)
 
 	if err != nil {
@@ -16078,31 +16093,49 @@ func handleInviteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("User added to organization %s", organizationId)
 
-	// Assign role if specified
-	if req.Role != "" {
-		log.Printf("Attempting to assign role: %s", req.Role)
-		var roleId string
-		err = tx.QueryRow(`
-				SELECT id FROM auth.roles 
-				WHERE name = $1 AND organization_id = $2
-			`, req.Role, organizationId).Scan(&roleId)
-		if err == nil {
-			log.Printf("Found role ID: %s", roleId)
-			_, err = tx.Exec(`
-					INSERT INTO auth.user_roles (user_id, role_id, organization_id)
-					VALUES ($1, $2, $3)
-				`, userId, roleId, organizationId)
-			if err != nil {
-				log.Printf("Failed to assign role: %v", err)
-				http.Error(w, "Failed to assign role", http.StatusInternalServerError)
-				return
-			}
-			log.Println("Role assigned successfully")
-		} else {
-			log.Printf("Role not found: %v", err)
+	log.Println("Assigning External role to invited user")
+	var roleId string
+	err = tx.QueryRow(`
+			SELECT id FROM auth.roles 
+			WHERE name = 'external' AND is_global = true
+		`, organizationId).Scan(&roleId)
+	if err == nil {
+		log.Printf("Found External role ID: %s", roleId)
+		_, err = tx.Exec(`
+				INSERT INTO auth.user_roles (user_id, role_id, organization_id)
+				VALUES ($1, $2, $3)
+			`, userId, roleId, organizationId)
+		if err != nil {
+			log.Printf("Failed to assign External role: %v", err)
+			http.Error(w, "Failed to assign role", http.StatusInternalServerError)
+			return
 		}
+		log.Println("External role assigned successfully")
 	} else {
-		log.Println("No role specified")
+		// If External role doesn't exist, create it
+		log.Printf("External role not found, creating it: %v", err)
+		err = tx.QueryRow(`
+				INSERT INTO auth.roles (name, organization_id, description)
+				VALUES ('external', $1, 'External users with limited access')
+				RETURNING id
+			`, organizationId).Scan(&roleId)
+		if err != nil {
+			log.Printf("Failed to create External role: %v", err)
+			http.Error(w, "Failed to create External role", http.StatusInternalServerError)
+			return
+		}
+
+		// Assign the newly created role
+		_, err = tx.Exec(`
+				INSERT INTO auth.user_roles (user_id, role_id, organization_id)
+				VALUES ($1, $2, $3)
+			`, userId, roleId, organizationId)
+		if err != nil {
+			log.Printf("Failed to assign new External role: %v", err)
+			http.Error(w, "Failed to assign role", http.StatusInternalServerError)
+			return
+		}
+		log.Println("New External role created and assigned successfully")
 	}
 
 	// Validate and insert access permissions if provided
@@ -16145,6 +16178,26 @@ func handleInviteUser(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			log.Printf("Permission added for resource %s", perm.ResourceID)
+		}
+
+		for _, perm := range permissions {
+			// Existing permission validation and insertion...
+
+			// If the permission is for a project, also add them to project_members
+			if perm.ResourceType == "project" {
+				_, err = tx.Exec(`
+					INSERT INTO rdm.project_members (user_id, project_id, role)
+					VALUES ($1, $2)
+					ON CONFLICT (user_id, project_id) DO NOTHING
+				`, userId, perm.ResourceID, "external")
+
+				if err != nil {
+					log.Printf("Failed to add user to project_members: %v", err)
+					http.Error(w, "Failed to add user to project", http.StatusInternalServerError)
+					return
+				}
+				log.Printf("User added to project_members for project %s", perm.ResourceID)
+			}
 		}
 	} else {
 		log.Println("No access permissions provided")

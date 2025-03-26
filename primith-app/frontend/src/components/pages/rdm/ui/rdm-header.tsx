@@ -17,7 +17,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
-  TooltipTrigger,
+  TooltipTrigger, 
 } from "@/components/ui/tooltip"
 import {
   DropdownMenu,
@@ -245,6 +245,7 @@ export function RdmHeader() {
   const { currentSection, setCurrentSection } = useNavigation()
   const { toast } = useToast()
   const [showTooltip, setShowTooltip] = useState(false)
+  const [isExternalUser, setIsExternalUser] = useState(false)
   const [isNotificationOpen, setIsNotificationOpen] = useState(false)
   const rdmAuth = AuthService.getRdmTokens()
   const user = rdmAuth?.user
@@ -268,7 +269,18 @@ export function RdmHeader() {
     
     // Fetch user avatar
     fetchUserAvatar()
+
+    checkMembershipType()
   }, [isSuperAdmin])
+
+  async function checkMembershipType() {
+    try {
+      const membershipType = await AuthService.getMembershipType();
+      setIsExternalUser(membershipType === true);
+    } catch (error) {
+      console.error("Failed to check membership type:", error);
+    }
+  }
 
   useEffect(() => {
     if (selectedOrgId) {
@@ -538,7 +550,7 @@ export function RdmHeader() {
                 <User className="w-5 h-5 mr-2" />
                 <span>Account</span>
               </DropdownMenuItem>
-
+              {!isExternalUser && (
               <DropdownMenuSub>
                <DropdownMenuSubTrigger className="cursor-pointer text-xs flex items-center">
                  <Settings className="w-5 h-5 mr-2" />
@@ -579,7 +591,7 @@ export function RdmHeader() {
                </DropdownMenuItem>
                </DropdownMenuSubContent>
              </DropdownMenuSub>
-
+              )}
                <DropdownMenuSub>
                  <DropdownMenuSubTrigger className="cursor-pointer text-xs flex items-center">
                    <Contrast className="w-5 h-5 mr-2" />

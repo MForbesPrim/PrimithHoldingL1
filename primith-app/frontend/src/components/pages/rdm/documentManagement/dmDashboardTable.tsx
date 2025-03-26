@@ -71,6 +71,7 @@ interface DocumentsTableProps {
     currentProjectId?: string | null;
     onAssociateWithProject?: (documentId: string) => Promise<void>;
     onUnassignFromProject?: (documentId: string) => Promise<void>;
+    hasWritePermission?: boolean; 
 }
 
 export const DashboardTable = memo(function DashboardTable({
@@ -88,6 +89,7 @@ export const DashboardTable = memo(function DashboardTable({
     currentProjectId,
     onAssociateWithProject,
     onUnassignFromProject,
+    hasWritePermission,
 }: DocumentsTableProps) {
     const [sorting, setSorting] = useState<SortingState>([
         { id: "updatedAt", desc: true }
@@ -528,6 +530,7 @@ export const DashboardTable = memo(function DashboardTable({
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </div>
+                {hasWritePermission && (
                 <div className="flex items-center gap-2">
                     <Button 
                         size="sm" 
@@ -552,6 +555,7 @@ export const DashboardTable = memo(function DashboardTable({
                         <Upload className="w-4 h-4" />
                         Upload Document
                     </Button>
+
                     {(selectedDocuments.length > 0 || selectedFolders.length > 0) && (
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -574,6 +578,7 @@ export const DashboardTable = memo(function DashboardTable({
                         </Tooltip>
                     )}
                 </div>
+                )}
             </div>
 
             <div className="rounded-md border mb-4">

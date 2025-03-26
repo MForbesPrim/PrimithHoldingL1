@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { DocumentMetadata, FolderNode, FolderMetadata } from "@/types/document"
 import { DocumentService } from "@/services/documentService"
+import AuthService from '@/services/auth';
 import { Button } from "@/components/ui/button"
 import { FolderTree } from "@/components/pages/rdm/documentManagement/folderTree"
 import { FoldersTable } from "@/components/pages/rdm/documentManagement/foldersTable"
@@ -24,6 +25,7 @@ export function DocumentManagement() {
   const [viewMode, setViewMode] = useState<"dashboard" | "documents" | "folders" | "trash" | "folderContents" | "overview">("dashboard");
   const [_isUploading, _setIsUploading] = useState(false)
   const [isSidebarVisible, setIsSidebarVisible] = useState(false)
+  const [hasWritePermission, setHasWritePermission] = useState(false); 
   const [folderHistory, setFolderHistory] = useState<string[]>([])
   const { selectedProjectId } = useProject();
   const { toast } = useToast();
@@ -41,6 +43,7 @@ export function DocumentManagement() {
     }
     loadFolderData(selectedOrgId)
     loadDocuments(selectedOrgId, null)
+    checkWritePermissions()
   }, [selectedOrgId, selectedProjectId])
 
   useEffect(() => {
@@ -48,6 +51,31 @@ export function DocumentManagement() {
       loadDocuments(selectedOrgId, selectedFolderId)
     }
   }, [selectedFolderId])
+
+  const checkWritePermissions = async () => {
+    try {
+      // Get current user and membership type from AuthService
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.user?.id) {
+        setHasWritePermission(false);
+        return;
+      }
+      
+      // Get the user's membership type
+      const membershipType = await AuthService.getMembershipType();
+      
+      // For internal users (membershipType === false), allow write permissions
+      if (membershipType === false) {
+        setHasWritePermission(true);
+      } else {
+        // For external users, be more restrictive
+        setHasWritePermission(false);
+      }
+    } catch (error) {
+      console.error("Failed to check document permissions:", error);
+      setHasWritePermission(false);
+    }
+  };
 
   async function loadFolderData(orgId: string) {
     try {
@@ -189,34 +217,45 @@ export function DocumentManagement() {
     }
   }
 
-  async function handleCreateFolder(parentId: string | null, suggestedName: string) {
-    if (!selectedOrgId) return
+  const handleCreateFolder = async (parentId: string | null, suggestedName: string) => {
+    if (!hasWritePermission) {
+      toast({
+        title: "Permission Denied",
+        description: "You don't have permission to create folders",
+        variant: "destructive",
+        duration: 5000
+      });
+      return;
+    }
+    
+    if (!selectedOrgId) return;
+    
     try {
       const effectiveParentId = viewMode === "folders" ? null : parentId;
 
-      const baseName = suggestedName || "New Folder"
-      let counter = 1
-      let uniqueName = baseName
+      const baseName = suggestedName || "New Folder";
+      let counter = 1;
+      let uniqueName = baseName;
 
-      const siblingFolders = folders.filter((f) => f.parentId === effectiveParentId)
+      const siblingFolders = folders.filter((f) => f.parentId === effectiveParentId);
       while (true) {
         const nameExists = siblingFolders.some(
           (f) => f.name.toLowerCase() === uniqueName.toLowerCase()
-        )
-        if (!nameExists) break
-        uniqueName = `${baseName} (${counter++})`
+        );
+        if (!nameExists) break;
+        uniqueName = `${baseName} (${counter++})`;
       }
 
-      await documentService.createFolder(uniqueName, effectiveParentId, selectedOrgId)
-      await loadFolderData(selectedOrgId)
+      await documentService.createFolder(uniqueName, effectiveParentId, selectedOrgId);
+      await loadFolderData(selectedOrgId);
       // Add this to refresh documents at root level for dashboard view
       if (viewMode === "dashboard") {
-        await loadDocuments(selectedOrgId, null)
+        await loadDocuments(selectedOrgId, null);
       }
     } catch (error) {
-      console.error("Failed to create folder:", error)
+      console.error("Failed to create folder:", error);
     }
-  }
+  };
 
   async function handleDeleteFolder(folderId: string) {
     if (!selectedOrgId) return
@@ -284,13 +323,24 @@ export function DocumentManagement() {
   }
 
   async function handleFileUpload(file: File) {
-    if (!selectedOrgId) return
+    if (!hasWritePermission) {
+      toast({
+        title: "Permission Denied",
+        description: "You don't have permission to upload files",
+        variant: "destructive",
+        duration: 5000
+      });
+      return;
+    }
+    
+    if (!selectedOrgId) return;
+    
     try {
-      await documentService.uploadDocument(file, selectedFolderId, selectedOrgId)
+      await documentService.uploadDocument(file, selectedFolderId, selectedOrgId);
       // Refresh the documents list after upload
-      await loadDocuments(selectedOrgId, selectedFolderId)
+      await loadDocuments(selectedOrgId, selectedFolderId);
     } catch (error) {
-      console.error("Upload failed:", error)
+      console.error("Upload failed:", error);
       // Add error handling here
     }
   }
@@ -357,7 +407,7 @@ export function DocumentManagement() {
   const handleFileUploadWrapper = useCallback(async (file: File) => {
     if (!selectedOrgId) return;
     await handleFileUpload(file);
-  }, [selectedOrgId, handleFileUpload]);
+  }, [selectedOrgId, handleFileUpload, hasWritePermission]);
 
   const handleDownloadWrapper = useCallback((documentId: string, fileName: string) => 
     handleDownload(documentId, fileName),
@@ -375,7 +425,7 @@ export function DocumentManagement() {
 
   const handleCreateFolderWrapper = useCallback((parentId: string | null, name: string) => 
     handleCreateFolder(parentId, name),
-    [handleCreateFolder]
+    [handleCreateFolder, hasWritePermission]
   );
 
   const handleRenameDocumentWrapper = useCallback((documentId: string, newName: string) => 
@@ -394,6 +444,7 @@ export function DocumentManagement() {
           onMoveFolder={handleMoveFolder}
           onSelect={handleFolderClick}
           selectedFolderId={selectedFolderId}
+          hasWritePermission={hasWritePermission} 
         />
       )}
       
@@ -460,6 +511,7 @@ export function DocumentManagement() {
             onDocumentDownload={handleDownloadWrapper}
             onDeleteDocuments={handleTrashDocuments}
             onRenameDocument={handleRenameDocumentWrapper}
+            hasWritePermission={hasWritePermission}
         />
         ) : viewMode === "overview" ? (
             <DocumentsOverview 
@@ -484,6 +536,7 @@ export function DocumentManagement() {
             currentProjectId={selectedProjectId}
             onAssociateWithProject={handleAssociateWithProject}
             onUnassignFromProject={handleUnassignFromProject}
+            hasWritePermission={hasWritePermission}
           />
         ) : viewMode === "folders" ? (
             <FoldersTable 
@@ -492,6 +545,7 @@ export function DocumentManagement() {
                 onDeleteFolders={handleDeleteFoldersWrapper}
                 onCreateFolder={handleCreateFolderWrapper}
                 onRenameFolder={handleRenameFolder}
+                hasWritePermission={hasWritePermission}
             />
         ) : viewMode === "trash" && selectedOrgId ? (
             <TrashView
@@ -517,6 +571,7 @@ export function DocumentManagement() {
                 }}
                 onRenameDocument={handleRenameDocumentWrapper}
                 onRenameFolder={handleRenameFolder}
+                hasWritePermission={hasWritePermission}
             />
           ) : null}
       </div>

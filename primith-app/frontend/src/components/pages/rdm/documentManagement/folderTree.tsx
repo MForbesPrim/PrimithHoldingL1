@@ -39,7 +39,8 @@ export function FolderTree({
   onRenameFolder,
   onMoveFolder,
   onSelect,
-  selectedFolderId
+  selectedFolderId,
+  hasWritePermission
 }: {
   folders: FolderNode[];
   onCreateFolder: (parentId: string | null, name: string) => void;
@@ -47,6 +48,7 @@ export function FolderTree({
   onRenameFolder: (id: string, newName: string) => void;
   onMoveFolder: (folderId: string, newParentId: string | null) => void;
   onSelect: (id: string) => void;
+  hasWritePermission?: boolean; 
   selectedFolderId: string | null;
 }) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
@@ -213,6 +215,7 @@ export function FolderTree({
               <span className="text-sm flex-1">{folder.name}</span>
             )}
           </div>
+          {hasWritePermission && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
@@ -235,8 +238,9 @@ export function FolderTree({
                 <Trash2 className="h-4 w-4 mr-2" />
                 Delete
               </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
         {isExpanded && folder.children.map(child => (
           <DraggableFolder key={child.id} folder={child} level={level + 1} />
@@ -253,13 +257,15 @@ export function FolderTree({
     <div className="min-w-[200px] border-r pr-4 pt-4 pb-4">
       <div className="flex items-center justify-between mb-4 ml-2">
         <h3 className="font-semibold">Folders</h3>
+        {hasWritePermission && (
         <Button
           variant="ghost"
           size="sm"
           onClick={() => onCreateFolder(null, "New Folder")}
         >
-          <Plus className="h-4 w-4" />
-        </Button>
+            <Plus className="h-4 w-4" />
+          </Button>
+        )}
       </div>
       <DndContext
         onDragStart={({ active }) => setActiveId(active.id as string)}

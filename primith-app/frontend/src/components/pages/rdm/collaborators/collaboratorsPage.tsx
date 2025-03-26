@@ -101,7 +101,7 @@ export function CollaboratorsPage() {
     email: "",
     firstName: "",
     lastName: "",
-    role: "viewer",
+    role: "external",
     projects: [],
     accessPermissions: [],
   });
@@ -425,9 +425,9 @@ export function CollaboratorsPage() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">Any role</SelectItem>
-                            <SelectItem value="viewer">Viewer</SelectItem>
-                            <SelectItem value="editor">Editor</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
+                            <SelectItem value="viewer">Member</SelectItem>
+                            <SelectItem value="editor">Admin</SelectItem>
+                            <SelectItem value="editor">External</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -682,22 +682,6 @@ export function CollaboratorsPage() {
             </TabsContent>
             <TabsContent value="access">
               <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Role</label>
-                  <Select
-                    value={newCollaborator.role}
-                    onValueChange={(value) => setNewCollaborator({ ...newCollaborator, role: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="viewer">Viewer</SelectItem>
-                      <SelectItem value="editor">Editor</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
                 <div className="space-y-4">
                   <label className="text-sm font-medium">Access Permissions</label>
                   <div className="space-y-2">
@@ -802,7 +786,7 @@ export function CollaboratorsPage() {
                   email: "",
                   firstName: "",
                   lastName: "",
-                  role: "viewer",
+                  role: "external",
                   projects: [],
                   accessPermissions: [],
                 });
@@ -845,16 +829,6 @@ export function CollaboratorsPage() {
                 onChange={(e) => setBulkEmails(e.target.value)}
               />
             </div>
-            <Select defaultValue="viewer">
-              <SelectTrigger>
-                <SelectValue placeholder="Select role for all invitees" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="viewer">Viewer</SelectItem>
-                <SelectItem value="editor">Editor</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsInviteMultipleOpen(false)}>
