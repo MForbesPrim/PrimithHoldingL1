@@ -128,6 +128,19 @@ type Response struct {
 	Message string `json:"message"`
 }
 
+type ActivityLog struct {
+	ID            string          `json:"id"`
+	UserID        *string         `json:"userId"`
+	UserEmail     *string         `json:"userEmail"`
+	UserFirstName *string         `json:"userFirstName"`
+	UserLastName  *string         `json:"userLastName"`
+	ActionType    string          `json:"actionType"`
+	TargetType    *string         `json:"targetType"`
+	TargetID      *string         `json:"targetId"`
+	Details       json.RawMessage `json:"details"`
+	CreatedAt     time.Time       `json:"createdAt"`
+}
+
 // Keep AuthResponse with regular string
 type AuthResponse struct {
 	Success      bool   `json:"success"`
@@ -1231,6 +1244,118 @@ func handleDeleteRole(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(Response{Success: true, Message: "Role deleted successfully"})
+}
+
+func logActivity(db *sql.DB, userID, orgID, actionType, targetType string, targetID *string, details map[string]interface{}) error {
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
+        CALL auth.log_activity($1, $2, $3, $4, $5, $6)
+    `, userID, orgID, actionType, targetType, targetID, detailsJSON)
+	return err
+}
+
+func logActivityTx(dbTx interface{}, userID, orgID, actionType, targetType string, targetID *string, details map[string]interface{}) error {
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		return fmt.Errorf("failed to marshal activity details: %v", err)
+	}
+
+	// Type assertion to handle both *sql.DB and *sql.Tx
+	switch db := dbTx.(type) {
+	case *sql.DB:
+		_, err = db.Exec(`
+            CALL auth.log_activity($1, $2, $3, $4, $5, $6)
+        `, userID, orgID, actionType, targetType, targetID, detailsJSON)
+	case *sql.Tx:
+		_, err = db.Exec(`
+            CALL auth.log_activity($1, $2, $3, $4, $5, $6)
+        `, userID, orgID, actionType, targetType, targetID, detailsJSON)
+	default:
+		return fmt.Errorf("unsupported database type")
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to log activity: %v", err)
+	}
+	return nil
+}
+
+func handleGetOrganizationActivity(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	orgID := vars["organizationId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Verify user has access to organization
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM auth.organization_members om
+            JOIN auth.users u ON om.user_id = u.id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )`, claims.Username, orgID).Scan(&isMember)
+	if err != nil || !isMember {
+		http.Error(w, "Unauthorized", http.StatusForbidden)
+		return
+	}
+
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+
+	limit, _ := strconv.Atoi(limitStr)
+	if limit == 0 {
+		limit = 50
+	}
+	offset, _ := strconv.Atoi(offsetStr)
+
+	rows, err := db.Query(`
+        SELECT * FROM auth.get_organization_activities($1, $2, $3)
+    `, orgID, limit, offset)
+	if err != nil {
+		log.Printf("Error querying activities: %v", err)
+		http.Error(w, "Failed to fetch activities", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var activities []ActivityLog
+	for rows.Next() {
+		var activity ActivityLog
+		var userID sql.NullString
+		var targetID sql.NullString
+		err := rows.Scan(
+			&activity.ID,
+			&userID,
+			&activity.UserEmail,
+			&activity.UserFirstName,
+			&activity.UserLastName,
+			&activity.ActionType,
+			&activity.TargetType,
+			&targetID,
+			&activity.Details,
+			&activity.CreatedAt,
+		)
+		if err != nil {
+			log.Printf("Error scanning activity: %v", err)
+			http.Error(w, "Error processing activities", http.StatusInternalServerError)
+			return
+		}
+		if userID.Valid {
+			activity.UserID = &userID.String
+		}
+		if targetID.Valid {
+			activity.TargetID = &targetID.String
+		}
+		activities = append(activities, activity)
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"activities": activities,
+	})
 }
 
 func handleListServices(w http.ResponseWriter, r *http.Request) {
@@ -15906,9 +16031,24 @@ func handleRemoveCollaborator(w http.ResponseWriter, r *http.Request) {
 	userId := vars["userId"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
+	// Check if organizationId and userId are valid UUIDs
+	if _, err := uuid.Parse(organizationId); err != nil {
+		http.Error(w, "Invalid organization ID", http.StatusBadRequest)
+		return
+	}
+	if _, err := uuid.Parse(userId); err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
 	// Check if the requesting user has permission
 	isAdmin, err := isOrganizationAdmin(claims.Username, organizationId)
-	if err != nil || !isAdmin {
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		http.Error(w, "Error verifying permissions", http.StatusInternalServerError)
+		return
+	}
+	if !isAdmin {
 		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
 		return
 	}
@@ -15916,29 +16056,65 @@ func handleRemoveCollaborator(w http.ResponseWriter, r *http.Request) {
 	// Begin transaction
 	tx, err := db.Begin()
 	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
 		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			log.Printf("Transaction rolled back due to error: %v", err)
+		}
+	}()
+
+	// Get collaborator details before removal for activity log
+	var collaboratorEmail, firstName, lastName string
+	err = tx.QueryRow(`
+        SELECT email, first_name, last_name 
+        FROM auth.users 
+        WHERE id = $1
+    `, userId).Scan(&collaboratorEmail, &firstName, &lastName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Collaborator not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error fetching collaborator details: %v", err)
+		http.Error(w, "Failed to fetch collaborator details", http.StatusInternalServerError)
+		return
+	}
 
 	// Use the existing stored procedure
 	_, err = tx.Exec(`CALL auth.remove_organization_member($1, $2)`, userId, organizationId)
 	if err != nil {
-		http.Error(w, "Failed to remove collaborator", http.StatusInternalServerError)
+		pqErr, ok := err.(*pq.Error)
+		if ok {
+			switch pqErr.Code.Name() {
+			case "foreign_key_violation":
+				http.Error(w, "Cannot remove collaborator due to existing dependencies", http.StatusConflict)
+			case "not_null_violation":
+				http.Error(w, "Required data missing", http.StatusBadRequest)
+			default:
+				http.Error(w, "Failed to remove collaborator: "+pqErr.Message, http.StatusInternalServerError)
+			}
+		} else {
+			http.Error(w, "Failed to remove collaborator: "+err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 
-	// Remove access permissions (if not handled by stored procedure)
+	// Remove access permissions
 	_, err = tx.Exec(`
         DELETE FROM auth.access_permissions 
         WHERE user_id = $1
     `, userId)
 	if err != nil {
+		log.Printf("Failed to remove access permissions: %v", err)
 		http.Error(w, "Failed to remove access permissions", http.StatusInternalServerError)
 		return
 	}
 
-	// Remove from project_members (to match handleInviteUser functionality)
+	// Remove from project_members
 	_, err = tx.Exec(`
         DELETE FROM rdm.project_members 
         WHERE user_id = $1 
@@ -15949,19 +16125,46 @@ func handleRemoveCollaborator(w http.ResponseWriter, r *http.Request) {
         )
     `, userId, organizationId)
 	if err != nil {
+		log.Printf("Failed to remove project memberships: %v", err)
 		http.Error(w, "Failed to remove project memberships", http.StatusInternalServerError)
 		return
 	}
 
+	// Get remover's ID for activity logging
+	var removerID string
+	err = tx.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&removerID)
+	if err != nil {
+		log.Printf("Failed to get remover ID: %v", err)
+		http.Error(w, "Failed to process user information", http.StatusInternalServerError)
+		return
+	}
+
+	// Log the activity
+	details := map[string]interface{}{
+		"removedEmail": collaboratorEmail,
+		"firstName":    firstName,
+		"lastName":     lastName,
+	}
+	err = logActivityTx(tx, removerID, organizationId, "remove", "collaborator", &userId, details)
+	if err != nil {
+		log.Printf("Failed to log activity: %v", err)
+		// Don't fail the request just because activity logging failed
+	}
+
+	// Commit transaction
 	if err = tx.Commit(); err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
 		http.Error(w, "Failed to complete removal", http.StatusInternalServerError)
 		return
 	}
 
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(Response{
 		Success: true,
 		Message: "Collaborator removed successfully",
 	})
+
+	log.Printf("Successfully removed collaborator %s from organization %s by %s", userId, organizationId, claims.Username)
 }
 
 // handleGetProjectCollaborators retrieves all collaborators for a project
@@ -16190,33 +16393,114 @@ func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 	organizationId := vars["organizationId"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
+	// Validate organizationId
+	if _, err := uuid.Parse(organizationId); err != nil {
+		http.Error(w, "Invalid organization ID", http.StatusBadRequest)
+		return
+	}
+
+	// Check admin permissions
 	isAdmin, err := isOrganizationAdmin(claims.Username, organizationId)
-	if err != nil || !isAdmin {
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		http.Error(w, "Error verifying permissions", http.StatusInternalServerError)
+		return
+	}
+	if !isAdmin {
 		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
 		return
 	}
 
+	// Decode request body
 	var req TeamRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
+	// Validate request data
+	if req.Name == "" {
+		http.Error(w, "Team name is required", http.StatusBadRequest)
+		return
+	}
+
+	// Begin transaction
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			log.Printf("Transaction rolled back due to error: %v", err)
+		}
+	}()
+
+	// Generate team ID
 	teamId := uuid.New().String()
-	_, err = db.Exec(`
+
+	// Create the team
+	_, err = tx.Exec(`
         INSERT INTO rdm.teams (id, organization_id, name, description)
         VALUES ($1, $2, $3, $4)
     `, teamId, organizationId, req.Name, req.Description)
 	if err != nil {
-		http.Error(w, "Failed to create team", http.StatusInternalServerError)
+		pqErr, ok := err.(*pq.Error)
+		if ok {
+			switch pqErr.Code.Name() {
+			case "unique_violation":
+				http.Error(w, "A team with this name already exists", http.StatusConflict)
+			case "foreign_key_violation":
+				http.Error(w, "Invalid organization ID", http.StatusBadRequest)
+			default:
+				http.Error(w, "Failed to create team: "+pqErr.Message, http.StatusInternalServerError)
+			}
+		} else {
+			http.Error(w, "Failed to create team: "+err.Error(), http.StatusInternalServerError)
+		}
+		log.Printf("Failed to create team: %v", err)
 		return
 	}
 
+	// Get creator's ID for activity logging
+	var creatorID string
+	err = tx.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&creatorID)
+	if err != nil {
+		log.Printf("Failed to get creator ID: %v", err)
+		http.Error(w, "Failed to process user information", http.StatusInternalServerError)
+		return
+	}
+
+	// Log the activity
+	details := map[string]interface{}{
+		"teamName": req.Name,
+	}
+	if req.Description != "" {
+		details["description"] = req.Description
+	}
+	err = logActivityTx(tx, creatorID, organizationId, "create", "team", &teamId, details)
+	if err != nil {
+		log.Printf("Failed to log activity: %v", err)
+		// Don't fail the request just because activity logging failed
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		http.Error(w, "Failed to complete team creation", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"teamId":  teamId,
 		"message": "Team created successfully",
 	})
+
+	log.Printf("Successfully created team %s in organization %s by %s", teamId, organizationId, claims.Username)
 }
 
 func handleGetTeamMembers(w http.ResponseWriter, r *http.Request) {
@@ -16364,28 +16648,136 @@ func handleAddTeamMember(w http.ResponseWriter, r *http.Request) {
 	teamId := vars["teamId"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
+	// Validate IDs
+	if _, err := uuid.Parse(organizationId); err != nil {
+		http.Error(w, "Invalid organization ID", http.StatusBadRequest)
+		return
+	}
+	if _, err := uuid.Parse(teamId); err != nil {
+		http.Error(w, "Invalid team ID", http.StatusBadRequest)
+		return
+	}
+
+	// Check admin permissions
 	isAdmin, err := isOrganizationAdmin(claims.Username, organizationId)
-	if err != nil || !isAdmin {
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		http.Error(w, "Error verifying permissions", http.StatusInternalServerError)
+		return
+	}
+	if !isAdmin {
 		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
 		return
 	}
 
+	// Decode request body
 	var req TeamMemberRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	_, err = db.Exec(`CALL rdm.add_team_member($1, $2, $3)`, teamId, req.UserID, req.Role)
-	if err != nil {
-		http.Error(w, "Failed to add team member", http.StatusInternalServerError)
+	// Validate request data
+	if req.UserID == "" {
+		http.Error(w, "User ID is required", http.StatusBadRequest)
+		return
+	}
+	if _, err := uuid.Parse(req.UserID); err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+		return
+	}
+	if req.Role == "" {
+		http.Error(w, "Role is required", http.StatusBadRequest)
 		return
 	}
 
+	// Begin transaction
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			log.Printf("Transaction rolled back due to error: %v", err)
+		}
+	}()
+
+	// Get user details for logging
+	var userEmail, firstName, lastName string
+	err = tx.QueryRow(`
+        SELECT email, first_name, last_name 
+        FROM auth.users 
+        WHERE id = $1
+    `, req.UserID).Scan(&userEmail, &firstName, &lastName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error fetching user details: %v", err)
+		http.Error(w, "Failed to fetch user details", http.StatusInternalServerError)
+		return
+	}
+
+	// Add team member
+	_, err = tx.Exec(`CALL rdm.add_team_member($1, $2, $3)`, teamId, req.UserID, req.Role)
+	if err != nil {
+		pqErr, ok := err.(*pq.Error)
+		if ok {
+			switch pqErr.Code.Name() {
+			case "foreign_key_violation":
+				http.Error(w, "Invalid team or user ID", http.StatusBadRequest)
+			case "unique_violation":
+				http.Error(w, "User is already a member of this team", http.StatusConflict)
+			default:
+				http.Error(w, "Failed to add team member: "+pqErr.Message, http.StatusInternalServerError)
+			}
+		} else {
+			http.Error(w, "Failed to add team member: "+err.Error(), http.StatusInternalServerError)
+		}
+		log.Printf("Failed to add team member: %v", err)
+		return
+	}
+
+	// Get admin's ID for activity logging
+	var adminID string
+	err = tx.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&adminID)
+	if err != nil {
+		log.Printf("Failed to get admin ID: %v", err)
+		http.Error(w, "Failed to process user information", http.StatusInternalServerError)
+		return
+	}
+
+	// Log the activity
+	details := map[string]interface{}{
+		"userEmail": userEmail,
+		"firstName": firstName,
+		"lastName":  lastName,
+		"role":      req.Role,
+	}
+	err = logActivityTx(tx, adminID, organizationId, "add_member", "team", &teamId, details)
+	if err != nil {
+		log.Printf("Failed to log activity: %v", err)
+		// Continue even if logging fails as it's non-critical
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		http.Error(w, "Failed to complete team member addition", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Team member added successfully",
 	})
+
+	log.Printf("Successfully added user %s to team %s in organization %s by %s", req.UserID, teamId, organizationId, claims.Username)
 }
 
 func handleRemoveTeamMember(w http.ResponseWriter, r *http.Request) {
@@ -16397,31 +16789,118 @@ func handleRemoveTeamMember(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Remove team member request: orgId=%s, teamId=%s, userId=%s", organizationId, teamId, userId)
 
+	// Validate IDs
+	if _, err := uuid.Parse(organizationId); err != nil {
+		http.Error(w, "Invalid organization ID", http.StatusBadRequest)
+		return
+	}
+	if _, err := uuid.Parse(teamId); err != nil {
+		http.Error(w, "Invalid team ID", http.StatusBadRequest)
+		return
+	}
+	if _, err := uuid.Parse(userId); err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
 	claims := r.Context().Value(claimsKey).(*Claims)
 	log.Printf("Request by user: %s", claims.Username)
 
+	// Check admin permissions
 	isAdmin, err := isOrganizationAdmin(claims.Username, organizationId)
 	if err != nil {
 		log.Printf("Error checking admin status: %v", err)
 		http.Error(w, "Error checking permissions", http.StatusInternalServerError)
 		return
 	}
-
 	if !isAdmin {
 		log.Printf("Unauthorized access attempt: user %s is not admin for org %s", claims.Username, organizationId)
 		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
 		return
 	}
 
-	log.Printf("Executing stored procedure: rdm.remove_team_member with teamId=%s, userId=%s", teamId, userId)
-	_, err = db.Exec(`CALL rdm.remove_team_member($1, $2)`, teamId, userId)
+	// Begin transaction
+	tx, err := db.Begin()
 	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			log.Printf("Transaction rolled back due to error: %v", err)
+		}
+	}()
+
+	// Get user details for logging
+	var userEmail, firstName, lastName string
+	err = tx.QueryRow(`
+        SELECT email, first_name, last_name 
+        FROM auth.users 
+        WHERE id = $1
+    `, userId).Scan(&userEmail, &firstName, &lastName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error fetching user details: %v", err)
+		http.Error(w, "Failed to fetch user details", http.StatusInternalServerError)
+		return
+	}
+
+	// Remove team member
+	log.Printf("Executing stored procedure: rdm.remove_team_member with teamId=%s, userId=%s", teamId, userId)
+	_, err = tx.Exec(`CALL rdm.remove_team_member($1, $2)`, teamId, userId)
+	if err != nil {
+		pqErr, ok := err.(*pq.Error)
+		if ok {
+			switch pqErr.Code.Name() {
+			case "foreign_key_violation":
+				http.Error(w, "Invalid team or user ID", http.StatusBadRequest)
+			case "not_null_violation":
+				http.Error(w, "Required data missing", http.StatusBadRequest)
+			default:
+				http.Error(w, "Failed to remove team member: "+pqErr.Message, http.StatusInternalServerError)
+			}
+		} else {
+			http.Error(w, "Failed to remove team member: "+err.Error(), http.StatusInternalServerError)
+		}
 		log.Printf("Database error when removing team member: %v", err)
-		http.Error(w, "Failed to remove team member", http.StatusInternalServerError)
+		return
+	}
+
+	// Get admin's ID for activity logging
+	var adminID string
+	err = tx.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&adminID)
+	if err != nil {
+		log.Printf("Failed to get admin ID: %v", err)
+		http.Error(w, "Failed to process user information", http.StatusInternalServerError)
+		return
+	}
+
+	// Log the activity
+	details := map[string]interface{}{
+		"userEmail": userEmail,
+		"firstName": firstName,
+		"lastName":  lastName,
+	}
+	err = logActivityTx(tx, adminID, organizationId, "remove_member", "team", &teamId, details)
+	if err != nil {
+		log.Printf("Failed to log activity: %v", err)
+		// Continue even if logging fails as it's non-critical
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		http.Error(w, "Failed to complete team member removal", http.StatusInternalServerError)
 		return
 	}
 
 	log.Printf("Successfully removed user %s from team %s", userId, teamId)
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Team member removed successfully",
@@ -16435,9 +16914,25 @@ func handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
 	teamId := vars["teamId"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
+	// Validate IDs
+	if _, err := uuid.Parse(organizationId); err != nil {
+		http.Error(w, "Invalid organization ID", http.StatusBadRequest)
+		return
+	}
+	if _, err := uuid.Parse(teamId); err != nil {
+		http.Error(w, "Invalid team ID", http.StatusBadRequest)
+		return
+	}
+
 	// Check if the requesting user is an admin
 	isAdmin, err := isOrganizationAdmin(claims.Username, organizationId)
-	if err != nil || !isAdmin {
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		http.Error(w, "Error verifying permissions", http.StatusInternalServerError)
+		return
+	}
+	if !isAdmin {
+		log.Printf("Unauthorized access attempt: user %s is not admin for org %s", claims.Username, organizationId)
 		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
 		return
 	}
@@ -16445,18 +16940,48 @@ func handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
 	// Begin transaction
 	tx, err := db.Begin()
 	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
 		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			log.Printf("Transaction rolled back due to error: %v", err)
+		}
+	}()
 
-	// Delete team members first (due to foreign key constraint)
+	// Get team details for logging
+	var teamName string
+	err = tx.QueryRow(`
+        SELECT name 
+        FROM rdm.teams 
+        WHERE id = $1 AND organization_id = $2
+    `, teamId, organizationId).Scan(&teamName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Team not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Error fetching team details: %v", err)
+		http.Error(w, "Failed to fetch team details", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete team members
 	_, err = tx.Exec(`
         DELETE FROM rdm.team_members 
         WHERE team_id = $1
     `, teamId)
 	if err != nil {
-		http.Error(w, "Failed to delete team members", http.StatusInternalServerError)
+		pqErr, ok := err.(*pq.Error)
+		if ok {
+			log.Printf("Database error deleting team members: %v", pqErr)
+			http.Error(w, "Failed to delete team members: "+pqErr.Message, http.StatusInternalServerError)
+		} else {
+			log.Printf("Error deleting team members: %v", err)
+			http.Error(w, "Failed to delete team members: "+err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -16466,25 +16991,56 @@ func handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
         WHERE id = $1 AND organization_id = $2
     `, teamId, organizationId)
 	if err != nil {
-		http.Error(w, "Failed to delete team", http.StatusInternalServerError)
+		pqErr, ok := err.(*pq.Error)
+		if ok {
+			log.Printf("Database error deleting team: %v", pqErr)
+			http.Error(w, "Failed to delete team: "+pqErr.Message, http.StatusInternalServerError)
+		} else {
+			log.Printf("Error deleting team: %v", err)
+			http.Error(w, "Failed to delete team: "+err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
+		log.Printf("Error verifying deletion: %v", err)
 		http.Error(w, "Failed to verify deletion", http.StatusInternalServerError)
 		return
 	}
 	if rowsAffected == 0 {
-		http.Error(w, "Team not found", http.StatusNotFound)
+		http.Error(w, "Team not found or already deleted", http.StatusNotFound)
 		return
 	}
 
+	// Get admin's ID for activity logging
+	var adminID string
+	err = tx.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&adminID)
+	if err != nil {
+		log.Printf("Failed to get admin ID: %v", err)
+		http.Error(w, "Failed to process user information", http.StatusInternalServerError)
+		return
+	}
+
+	// Log the activity
+	details := map[string]interface{}{
+		"teamName": teamName,
+	}
+	err = logActivityTx(tx, adminID, organizationId, "delete", "team", &teamId, details)
+	if err != nil {
+		log.Printf("Failed to log activity: %v", err)
+		// Continue even if logging fails as it's non-critical
+	}
+
+	// Commit transaction
 	if err = tx.Commit(); err != nil {
-		http.Error(w, "Failed to commit deletion", http.StatusInternalServerError)
+		log.Printf("Failed to commit transaction: %v", err)
+		http.Error(w, "Failed to complete team deletion", http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("Successfully deleted team %s from organization %s by %s", teamId, organizationId, claims.Username)
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Team deleted successfully",
@@ -16712,11 +17268,19 @@ func handleInviteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Println("Invitation email sent successfully")
 
-	if err = tx.Commit(); err != nil {
-		log.Printf("Failed to commit transaction: %v", err)
-		http.Error(w, "Failed to complete invitation", http.StatusInternalServerError)
-		return
+	if err = tx.Commit(); err == nil {
+		claims := r.Context().Value(claimsKey).(*Claims)
+		var granterID string
+		err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&granterID)
+		if err == nil {
+			details := map[string]interface{}{
+				"invitedEmail": req.Email,
+				"role":         req.Role,
+			}
+			logActivity(db, granterID, organizationId, "invite", "collaborator", &userId, details)
+		}
 	}
+
 	log.Println("Transaction committed successfully")
 
 	// Set tx to nil to prevent rollback in deferred function
@@ -17569,6 +18133,8 @@ func main() {
 	r.HandleFunc("/api/organizations/{organizationId}/teams/{teamId}/members", authMiddleware(handleAddTeamMember)).Methods("POST")
 	r.HandleFunc("/api/organizations/{organizationId}/teams/{teamId}/members/{userId}", authMiddleware(handleRemoveTeamMember)).Methods("DELETE")
 	r.HandleFunc("/api/organizations/{organizationId}/teams/{teamId}", authMiddleware(handleDeleteTeam)).Methods("DELETE")
+	r.HandleFunc("/api/organizations/{organizationId}/activity", authMiddleware(handleGetOrganizationActivity)).Methods("GET")
+
 	// Invitation routes
 	r.HandleFunc("/api/organizations/{organizationId}/invite", authMiddleware(handleInviteUser)).Methods("POST")
 	r.HandleFunc("/api/accept-invitation", handleAcceptInvitation).Methods("POST")

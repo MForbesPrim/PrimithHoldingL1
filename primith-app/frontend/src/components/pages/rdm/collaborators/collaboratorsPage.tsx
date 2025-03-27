@@ -35,7 +35,6 @@ import {
   MoreHorizontal,
   Activity,
   UserPlus,
-  FileCog,
   Trash2
 } from "lucide-react";
 import AuthService from "@/services/auth";
@@ -76,6 +75,25 @@ interface TeamMember {
   teamId?: string;
 }
 
+interface Activity {
+  id: string;
+  userId?: string;
+  userEmail?: string;
+  userFirstName?: string;
+  userLastName?: string;
+  actionType: string;
+  targetType?: string;
+  targetId?: string;
+  details: {
+    [key: string]: any;
+    invitedEmail?: string;
+    removedEmail?: string;
+    role?: string;
+    teamName?: string;
+  };
+  createdAt: string;
+}
+
 interface AccessPermission {
   resource_type: "project" | "document" | "page" | "document_folder" | "page_folder";
   resource_id: string;
@@ -105,6 +123,7 @@ export function CollaboratorsPage() {
   const [availableDocumentFolders, setAvailableDocumentFolders] = useState<Resource[]>([]);
   const [availablePageFolders, setAvailablePageFolders] = useState<Resource[]>([]);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [newCollaborator, setNewCollaborator] = useState<{
     email: string;
     firstName: string;
@@ -155,6 +174,8 @@ export function CollaboratorsPage() {
           
           // Then resources
           await fetchResources();
+
+          await fetchActivities();
         } catch (error) {
           console.error("Error in loadData sequence:", error);
         }
@@ -165,6 +186,51 @@ export function CollaboratorsPage() {
       console.warn("No selectedOrgId, skipping fetches");
     }
   }, [selectedOrgId]);
+
+  async function fetchActivities() {
+    try {
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
+
+      let token = rdmAuth.tokens.token;
+      let response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/activity?limit=50`,
+        {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (response.status === 401) {
+        const refreshedTokens = await AuthService.refreshRdmAccessToken();
+        if (!refreshedTokens) throw new Error("Failed to refresh RDM token");
+        token = refreshedTokens.token;
+        response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/activity?limit=50`,
+          {
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      
+      const data = await response.json();
+      setActivities(data.activities || []);
+    } catch (error: any) {
+      console.error("Error fetching activities:", error);
+      toast({
+        title: "Error",
+        description: `Failed to fetch activities: ${error.message}`,
+        variant: "destructive",
+      });
+    }
+  }
 
   async function fetchCollaborators() {
     try {
@@ -1036,6 +1102,62 @@ export function CollaboratorsPage() {
       console.error("Error fetching avatar URL:", error);
     }
   }
+
+// Helper function to format activity message
+const formatActivityMessage = (activity: Activity) => {
+  const userName = `${activity.userFirstName || ''} ${activity.userLastName || ''}`.trim() || activity.userEmail || 'Unknown User';
+  const timeAgo = new Date(activity.createdAt).toLocaleString();
+
+  switch (activity.actionType) {
+    case 'invite':
+      return (
+        <div>
+          <p className="text-sm">
+            <span className="font-medium">{userName}</span> invited{' '}
+            <span className="font-medium">{activity.details.invitedEmail}</span>{' '}
+            as {activity.details.role}
+          </p>
+          <p className="text-xs text-muted-foreground">{timeAgo}</p>
+        </div>
+      );
+    case 'remove':
+      return (
+        <div>
+          <p className="text-sm">
+            <span className="font-medium">{userName}</span> removed{' '}
+            <span className="font-medium">{activity.details.removedEmail}</span>
+          </p>
+          <p className="text-xs text-muted-foreground">{timeAgo}</p>
+        </div>
+      );
+    case 'add_member':
+      return (
+        <div>
+          <p className="text-sm">
+            <span className="font-medium">{userName}</span> added{' '}
+            <span className="font-medium">
+              {activity.details.firstName} {activity.details.lastName}
+            </span>{' '}
+            to team <span className="font-medium">{activity.details.teamName || activity.targetId}</span>{' '}
+            as {activity.details.role}
+          </p>
+          <p className="text-xs text-muted-foreground">{timeAgo}</p>
+        </div>
+      );
+    // Add other cases as needed
+    default:
+      return (
+        <div>
+          <p className="text-sm">
+            <span className="font-medium">{userName}</span> performed {activity.actionType} on{' '}
+            {activity.targetType}{' '}
+            {activity.details.teamName || activity.targetId}
+          </p>
+          <p className="text-xs text-muted-foreground">{timeAgo}</p>
+        </div>
+      );
+  }
+};
   
   return (
     <div className="flex-1 space-y-4 p-8">
@@ -1325,30 +1447,23 @@ export function CollaboratorsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    <div className="flex items-start space-x-3">
-                      <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
-                        <FileCog className="h-4 w-4" />
-                      </div>
-                      <div>
-                        <p className="text-sm">
-                          <span className="font-medium">John Doe</span> modified permissions on <span className="font-medium">Project X</span>
-                        </p>
-                        <p className="text-xs text-muted-foreground">2 hours ago</p>
-                      </div>
-                    </div>
-                    <div className="flex items-start space-x-3">
-                      <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
-                        <UserPlus className="h-4 w-4" />
-                      </div>
-                      <div>
-                        <p className="text-sm">
-                          <span className="font-medium">Jane Smith</span> invited <span className="font-medium">5 new collaborators</span>
-                        </p>
-                        <p className="text-xs text-muted-foreground">Yesterday at 4:30 PM</p>
-                      </div>
-                    </div>
-                    <Button variant="outline" className="w-full">
-                      View All Activity
+                    {activities.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No recent activity found.</p>
+                    ) : (
+                      activities.map((activity) => (
+                        <div key={activity.id} className="flex items-start space-x-3">
+                          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                            {activity.actionType === 'invite' && <UserPlus className="h-4 w-4" />}
+                            {activity.actionType === 'remove' && <Trash2 className="h-4 w-4" />}
+                            {/* Add more icons for different action types */}
+                            {!['invite', 'remove'].includes(activity.actionType) && <Activity className="h-4 w-4" />}
+                          </div>
+                          {formatActivityMessage(activity)}
+                        </div>
+                      ))
+                    )}
+                    <Button variant="outline" className="w-full" onClick={fetchActivities}>
+                      Refresh Activities
                     </Button>
                   </div>
                 </CardContent>
