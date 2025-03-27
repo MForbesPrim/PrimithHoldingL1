@@ -106,6 +106,19 @@ type ProjectMember struct {
 	CreatedBy uuid.UUID `json:"createdBy"`
 }
 
+type TeamRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type TeamMemberRequest struct {
+	UserID    string `json:"userId"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+}
+
 type contextKey string
 
 const claimsKey contextKey = "userClaims"
@@ -15889,24 +15902,66 @@ func handleUpdateCollaborator(w http.ResponseWriter, r *http.Request) {
 func handleRemoveCollaborator(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	vars := mux.Vars(r)
-	orgID := vars["organizationId"]
-	userID := vars["userId"]
+	organizationId := vars["organizationId"]
+	userId := vars["userId"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
-	// Check if user is admin
-	isAdmin, err := isOrganizationAdmin(claims.Username, orgID)
+	// Check if the requesting user has permission
+	isAdmin, err := isOrganizationAdmin(claims.Username, organizationId)
 	if err != nil || !isAdmin {
 		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
 		return
 	}
 
-	_, err = db.Exec(`CALL auth.remove_organization_member($1, $2)`, userID, orgID)
+	// Begin transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Use the existing stored procedure
+	_, err = tx.Exec(`CALL auth.remove_organization_member($1, $2)`, userId, organizationId)
 	if err != nil {
 		http.Error(w, "Failed to remove collaborator", http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(Response{Success: true, Message: "Collaborator removed successfully"})
+	// Remove access permissions (if not handled by stored procedure)
+	_, err = tx.Exec(`
+        DELETE FROM auth.access_permissions 
+        WHERE user_id = $1
+    `, userId)
+	if err != nil {
+		http.Error(w, "Failed to remove access permissions", http.StatusInternalServerError)
+		return
+	}
+
+	// Remove from project_members (to match handleInviteUser functionality)
+	_, err = tx.Exec(`
+        DELETE FROM rdm.project_members 
+        WHERE user_id = $1 
+        AND project_id IN (
+            SELECT id 
+            FROM rdm.projects 
+            WHERE organization_id = $2
+        )
+    `, userId, organizationId)
+	if err != nil {
+		http.Error(w, "Failed to remove project memberships", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to complete removal", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(Response{
+		Success: true,
+		Message: "Collaborator removed successfully",
+	})
 }
 
 // handleGetProjectCollaborators retrieves all collaborators for a project
@@ -16127,6 +16182,313 @@ func getCurrentUserId(r *http.Request) string {
 	}
 
 	return userId
+}
+
+func handleCreateTeam(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	isAdmin, err := isOrganizationAdmin(claims.Username, organizationId)
+	if err != nil || !isAdmin {
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	var req TeamRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	teamId := uuid.New().String()
+	_, err = db.Exec(`
+        INSERT INTO rdm.teams (id, organization_id, name, description)
+        VALUES ($1, $2, $3, $4)
+    `, teamId, organizationId, req.Name, req.Description)
+	if err != nil {
+		http.Error(w, "Failed to create team", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"teamId":  teamId,
+		"message": "Team created successfully",
+	})
+}
+
+func handleGetTeamMembers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	log.Printf("Starting handleGetTeamMembers")
+
+	// Extract path variables
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	teamId := vars["teamId"]
+	log.Printf("Requested organizationId: %s, teamId: %s", organizationId, teamId)
+
+	// Get claims from context for authorization
+	claims, ok := r.Context().Value(claimsKey).(*Claims)
+	if !ok || claims == nil {
+		log.Printf("No valid claims found in context")
+		http.Error(w, "Unauthorized: Missing authentication", http.StatusUnauthorized)
+		return
+	}
+	log.Printf("User email from claims: %s", claims.Username)
+
+	// Verify organization membership
+	var authorized bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 
+			FROM auth.organization_members om
+			JOIN auth.users u ON u.id = om.user_id
+			WHERE u.email = $1 AND om.organization_id = $2
+		)`, claims.Username, organizationId).Scan(&authorized)
+	if err != nil {
+		log.Printf("Database error checking authorization: %v", err)
+		http.Error(w, "Error checking access", http.StatusInternalServerError)
+		return
+	}
+	if !authorized {
+		log.Printf("Access denied for user %s to organization %s", claims.Username, organizationId)
+		http.Error(w, "Access denied to organization", http.StatusForbidden)
+		return
+	}
+
+	// Query team members
+	query := `
+		SELECT tm.user_id, us.first_name, us.last_name, us.email, tm.role FROM rdm.team_members tm 
+		INNER JOIN rdm.teams ts ON tm.team_id = ts.id INNER JOIN auth.users us ON us.id = tm.user_id 
+		WHERE tm.team_id = $1 AND ts.organization_id = $2
+	`
+	rows, err := db.Query(query, teamId, organizationId)
+	if err != nil {
+		log.Printf("Database query error: %v", err)
+		http.Error(w, "Failed to fetch team members", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var members []TeamMemberRequest
+	for rows.Next() {
+		var member TeamMemberRequest
+		if err := rows.Scan(&member.UserID, &member.FirstName, &member.LastName, &member.Email, &member.Role); err != nil {
+			log.Printf("Scan error: %v", err)
+			http.Error(w, "Error scanning team members", http.StatusInternalServerError)
+			return
+		}
+		members = append(members, member)
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating rows: %v", err)
+		http.Error(w, "Error fetching team members", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Returning %d team members", len(members))
+	json.NewEncoder(w).Encode(members)
+}
+
+func handleGetTeams(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if the user is a member of the organization
+	var isMember bool
+	err := db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 
+            FROM auth.organization_members om
+            JOIN auth.users u ON u.id = om.user_id
+            WHERE u.email = $1 AND om.organization_id = $2
+        )`, claims.Username, organizationId).Scan(&isMember)
+	if err != nil {
+		log.Printf("Error checking organization membership: %v", err)
+		http.Error(w, "Failed to verify organization membership", http.StatusInternalServerError)
+		return
+	}
+	if !isMember {
+		http.Error(w, "Unauthorized: Not a member of this organization", http.StatusForbidden)
+		return
+	}
+
+	rows, err := db.Query(`
+        SELECT id, name, description, created_at
+        FROM rdm.teams
+        WHERE organization_id = $1
+    `, organizationId)
+	if err != nil {
+		log.Printf("Error querying teams: %v", err)
+		http.Error(w, "Failed to fetch teams", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var teams []map[string]interface{}
+	for rows.Next() {
+		var id, name string
+		var description sql.NullString
+		var createdAt time.Time
+		if err := rows.Scan(&id, &name, &description, &createdAt); err != nil {
+			log.Printf("Error scanning team row: %v", err)
+			http.Error(w, "Failed to scan teams", http.StatusInternalServerError)
+			return
+		}
+		teams = append(teams, map[string]interface{}{
+			"id":          id,
+			"name":        name,
+			"description": description.String,
+			"createdAt":   createdAt,
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating team rows: %v", err)
+		http.Error(w, "Failed to fetch teams", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(teams)
+}
+
+func handleAddTeamMember(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	teamId := vars["teamId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	isAdmin, err := isOrganizationAdmin(claims.Username, organizationId)
+	if err != nil || !isAdmin {
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	var req TeamMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	_, err = db.Exec(`CALL rdm.add_team_member($1, $2, $3)`, teamId, req.UserID, req.Role)
+	if err != nil {
+		http.Error(w, "Failed to add team member", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Team member added successfully",
+	})
+}
+
+func handleRemoveTeamMember(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	teamId := vars["teamId"]
+	userId := vars["userId"]
+
+	log.Printf("Remove team member request: orgId=%s, teamId=%s, userId=%s", organizationId, teamId, userId)
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("Request by user: %s", claims.Username)
+
+	isAdmin, err := isOrganizationAdmin(claims.Username, organizationId)
+	if err != nil {
+		log.Printf("Error checking admin status: %v", err)
+		http.Error(w, "Error checking permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !isAdmin {
+		log.Printf("Unauthorized access attempt: user %s is not admin for org %s", claims.Username, organizationId)
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	log.Printf("Executing stored procedure: rdm.remove_team_member with teamId=%s, userId=%s", teamId, userId)
+	_, err = db.Exec(`CALL rdm.remove_team_member($1, $2)`, teamId, userId)
+	if err != nil {
+		log.Printf("Database error when removing team member: %v", err)
+		http.Error(w, "Failed to remove team member", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Successfully removed user %s from team %s", userId, teamId)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Team member removed successfully",
+	})
+}
+
+func handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	teamId := vars["teamId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if the requesting user is an admin
+	isAdmin, err := isOrganizationAdmin(claims.Username, organizationId)
+	if err != nil || !isAdmin {
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	// Begin transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Delete team members first (due to foreign key constraint)
+	_, err = tx.Exec(`
+        DELETE FROM rdm.team_members 
+        WHERE team_id = $1
+    `, teamId)
+	if err != nil {
+		http.Error(w, "Failed to delete team members", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete the team
+	result, err := tx.Exec(`
+        DELETE FROM rdm.teams 
+        WHERE id = $1 AND organization_id = $2
+    `, teamId, organizationId)
+	if err != nil {
+		http.Error(w, "Failed to delete team", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		http.Error(w, "Failed to verify deletion", http.StatusInternalServerError)
+		return
+	}
+	if rowsAffected == 0 {
+		http.Error(w, "Team not found", http.StatusNotFound)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit deletion", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Team deleted successfully",
+	})
 }
 
 func handleInviteUser(w http.ResponseWriter, r *http.Request) {
@@ -16366,6 +16728,96 @@ func handleInviteUser(w http.ResponseWriter, r *http.Request) {
 		"message": "Invitation sent successfully",
 	})
 	log.Println("handleInviteUser function completed successfully")
+}
+
+// handleResendInvitation resends an invitation to a pending collaborator
+func handleResendInvitation(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	vars := mux.Vars(r)
+	organizationId := vars["organizationId"]
+	userId := vars["userId"]
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Check if the requesting user has permission
+	isAdmin, err := isOrganizationAdmin(claims.Username, organizationId)
+	if err != nil || !isAdmin {
+		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	// Verify user exists and is in pending status
+	var userEmail string
+	var userStatus string
+	err = db.QueryRow(`
+        SELECT email, status 
+        FROM auth.users 
+        WHERE id = $1
+    `, userId).Scan(&userEmail, &userStatus)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Failed to verify user", http.StatusInternalServerError)
+		return
+	}
+
+	if userStatus != "pending" {
+		http.Error(w, "Can only resend invitations to pending users", http.StatusBadRequest)
+		return
+	}
+
+	// Generate new token
+	token := uuid.New().String()
+	tempPassword := uuid.New().String()
+	expiresAt := time.Now().Add(24 * time.Hour)
+
+	// Begin transaction
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Delete existing token if it exists
+	_, err = tx.Exec(`
+        DELETE FROM auth.invitation_tokens 
+        WHERE user_id = $1
+    `, userId)
+	if err != nil {
+		http.Error(w, "Failed to clear existing token", http.StatusInternalServerError)
+		return
+	}
+
+	// Create new invitation token
+	_, err = tx.Exec(`
+        INSERT INTO auth.invitation_tokens 
+        (user_id, token, temporary_password, expires_at)
+        VALUES ($1, $2, $3, $4)
+    `, userId, token, tempPassword, expiresAt)
+	if err != nil {
+		http.Error(w, "Failed to create new invitation token", http.StatusInternalServerError)
+		return
+	}
+
+	// Send invitation email
+	inviteLink := fmt.Sprintf("%s/accept-invite?token=%s", getClientBaseURL(), token)
+	err = sendInvitationEmail(userEmail, inviteLink)
+	if err != nil {
+		http.Error(w, "Failed to send invitation email", http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		http.Error(w, "Failed to complete invitation resend", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Invitation resent successfully",
+	})
 }
 
 // Helper functions
@@ -17103,6 +17555,7 @@ func main() {
 	r.HandleFunc("/api/organizations/{organizationId}/collaborators", authMiddleware(handleAddOrganizationCollaborator)).Methods("POST")
 	r.HandleFunc("/api/organizations/{organizationId}/collaborators/{userId}", authMiddleware(handleUpdateCollaborator)).Methods("PUT")
 	r.HandleFunc("/api/organizations/{organizationId}/collaborators/{userId}", authMiddleware(handleRemoveCollaborator)).Methods("DELETE")
+	r.HandleFunc("/api/organizations/{organizationId}/collaborators/{userId}/resend", authMiddleware(handleResendInvitation)).Methods("POST")
 
 	// Project-specific collaborator routes
 	r.HandleFunc("/api/projects/{projectId}/collaborators", authMiddleware(handleGetProjectCollaborators)).Methods("GET")
@@ -17110,6 +17563,12 @@ func main() {
 	r.HandleFunc("/api/projects/{projectId}/collaborators/{userId}", authMiddleware(handleUpdateProjectCollaborator)).Methods("PUT")
 	r.HandleFunc("/api/projects/{projectId}/collaborators/{userId}", authMiddleware(handleRemoveProjectCollaborator)).Methods("DELETE")
 
+	r.HandleFunc("/api/organizations/{organizationId}/teams", authMiddleware(handleCreateTeam)).Methods("POST")
+	r.HandleFunc("/api/organizations/{organizationId}/teams", authMiddleware(handleGetTeams)).Methods("GET")
+	r.HandleFunc("/api/organizations/{organizationId}/teams/{teamId}/members", authMiddleware(handleGetTeamMembers)).Methods("GET")
+	r.HandleFunc("/api/organizations/{organizationId}/teams/{teamId}/members", authMiddleware(handleAddTeamMember)).Methods("POST")
+	r.HandleFunc("/api/organizations/{organizationId}/teams/{teamId}/members/{userId}", authMiddleware(handleRemoveTeamMember)).Methods("DELETE")
+	r.HandleFunc("/api/organizations/{organizationId}/teams/{teamId}", authMiddleware(handleDeleteTeam)).Methods("DELETE")
 	// Invitation routes
 	r.HandleFunc("/api/organizations/{organizationId}/invite", authMiddleware(handleInviteUser)).Methods("POST")
 	r.HandleFunc("/api/accept-invitation", handleAcceptInvitation).Methods("POST")

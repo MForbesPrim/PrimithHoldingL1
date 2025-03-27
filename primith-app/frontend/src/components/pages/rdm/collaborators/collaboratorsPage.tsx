@@ -44,6 +44,8 @@ import { EditCollaboratorDialog } from "@/components/pages/rdm/collaborators/edi
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Collaborator {
   id: string;
@@ -59,8 +61,19 @@ interface Collaborator {
 interface Team {
   id: string;
   name: string;
-  memberCount: number;
-  projectCount: number;
+  description: string;
+  createdAt: string;
+  memberCount?: number;
+  projectCount?: number;
+}
+
+interface TeamMember {
+  userId: string;
+  role: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  teamId?: string;
 }
 
 interface AccessPermission {
@@ -73,6 +86,11 @@ interface AccessPermission {
 interface Resource {
   id: string;
   name: string;
+}
+
+interface NewTeam {
+  name: string;
+  description: string;
 }
 
 export function CollaboratorsPage() {
@@ -111,16 +129,40 @@ export function CollaboratorsPage() {
   const [isInviteMultipleOpen, setIsInviteMultipleOpen] = useState(false);
   const [bulkEmails, setBulkEmails] = useState("");
   const [isAddingCollaborator, setIsAddingCollaborator] = useState(false);
+  const [isCreateTeamDialogOpen, setIsCreateTeamDialogOpen] = useState(false);
+  const [newTeam, setNewTeam] = useState<NewTeam>({
+    name: "",
+    description: "",
+  });
+  const [isManageTeamDialogOpen, setIsManageTeamDialogOpen] = useState(false);
+  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [newMemberId, setNewMemberId] = useState<string>("");
+  const [newMemberRole, setNewMemberRole] = useState<string>("member");
+  const [teamMemberAvatars, setTeamMemberAvatars] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (selectedOrgId) {
-      fetchCollaborators();
-      fetchResources();
-      setTeams([
-        { id: "1", name: "Engineering", memberCount: 12, projectCount: 8 },
-        { id: "2", name: "Research", memberCount: 8, projectCount: 5 },
-        { id: "3", name: "Administration", memberCount: 4, projectCount: 3 },
-      ]);
+      const loadData = async () => {
+        try {
+          // First load collaborators and wait for it to complete
+          const fetchedCollaborators = await fetchCollaborators();
+          setCollaborators(fetchedCollaborators);
+          console.log("Collaborators loaded and set:", fetchedCollaborators);
+          
+          // Then load teams and team members with the fetched collaborators
+          await fetchTeams(fetchedCollaborators);
+          
+          // Then resources
+          await fetchResources();
+        } catch (error) {
+          console.error("Error in loadData sequence:", error);
+        }
+      };
+      
+      loadData();
+    } else {
+      console.warn("No selectedOrgId, skipping fetches");
     }
   }, [selectedOrgId]);
 
@@ -128,9 +170,13 @@ export function CollaboratorsPage() {
     try {
       const rdmAuth = AuthService.getRdmTokens();
       if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
+      if (!selectedOrgId) {
+        console.warn("No organization ID selected");
+        return;
+      }
 
       let token = rdmAuth.tokens.token;
-      console.log("Fetching collaborators with permissions...");
+      console.log("Fetching collaborators with permissions for org:", selectedOrgId);
       let response = await fetch(`${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/collaborators?include=permissions`, {
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -154,7 +200,6 @@ export function CollaboratorsPage() {
       console.log("Raw response data:", data);
       console.log("Fetched collaborators with permissions:", data.collaborators);
       
-      // First, create a map of resource IDs to their names from available resources
       const resourceNameMap = new Map();
       [...availableProjects, ...availableDocuments, ...availablePages, ...availableDocumentFolders, ...availablePageFolders]
         .forEach(resource => {
@@ -163,11 +208,8 @@ export function CollaboratorsPage() {
 
       console.log("Resource name map:", Object.fromEntries(resourceNameMap));
       
-      // Map the permissions array to accessPermissions with the correct structure
       const collaboratorsWithPermissions = (data.collaborators || []).map((collaborator: Collaborator & { permissions?: any[] }) => {
-        // Transform the permissions array into accessPermissions format
         const accessPermissions = (collaborator.permissions || []).map(perm => {
-          // Try to get the resource name from our map, fallback to ID if not found
           const resourceName = resourceNameMap.get(perm.resource_id) || perm.resource_name || perm.resource_id;
           
           return {
@@ -187,12 +229,70 @@ export function CollaboratorsPage() {
       });
       
       console.log("Processed collaborators with permissions:", collaboratorsWithPermissions);
-      setCollaborators(collaboratorsWithPermissions);
+      return collaboratorsWithPermissions;
     } catch (error: any) {
       console.error("Error fetching collaborators:", error);
       toast({
         title: "Error",
         description: `Failed to fetch collaborators: ${error.message}`,
+        variant: "destructive",
+      });
+      if (error.message.includes("No RDM authentication tokens") || error.message.includes("Failed to refresh RDM token")) {
+        window.location.href = "/login";
+      }
+      return [];
+    }
+  }
+
+  async function handleRemoveCollaborator(collaboratorId: string) {
+    try {
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
+  
+      let token = rdmAuth.tokens.token;
+      let response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/collaborators/${collaboratorId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+  
+      if (response.status === 401) {
+        const refreshedTokens = await AuthService.refreshRdmAccessToken();
+        if (!refreshedTokens) throw new Error("Failed to refresh RDM token");
+        token = refreshedTokens.token;
+        response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/collaborators/${collaboratorId}`,
+          {
+            method: "DELETE",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
+  
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP error! status: ${response.status}`);
+      }
+  
+      setCollaborators(collaborators.filter(c => c.id !== collaboratorId));
+      
+      toast({
+        title: "Success",
+        description: "Collaborator removed successfully",
+      });
+    } catch (error: any) {
+      console.error("Error removing collaborator:", error);
+      toast({
+        title: "Error",
+        description: `Failed to remove collaborator: ${error.message}`,
         variant: "destructive",
       });
       if (error.message.includes("No RDM authentication tokens") || error.message.includes("Failed to refresh RDM token")) {
@@ -206,7 +306,6 @@ export function CollaboratorsPage() {
       const rdmAuth = AuthService.getRdmTokens();
       if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
   
-      // Transform accessPermissions back to the API's expected format
       const apiCollaborator = {
         ...updatedCollaborator,
         permissions: updatedCollaborator.accessPermissions?.map(perm => ({
@@ -265,7 +364,7 @@ export function CollaboratorsPage() {
         throw new Error(errorMessage);
       }
   
-      setIsEditDialogOpen(false); // Close the dialog after successful save
+      setIsEditDialogOpen(false);
       toast({
         title: "Success",
         description: "Collaborator updated successfully",
@@ -283,17 +382,62 @@ export function CollaboratorsPage() {
     }
   }
 
-  // Add effect to refresh data when dialog closes
+  async function handleResendInvitation(collaboratorId: string) {
+    try {
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
+  
+      let token = rdmAuth.tokens.token;
+      let response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/collaborators/${collaboratorId}/resend`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+  
+      if (response.status === 401) {
+        const refreshedTokens = await AuthService.refreshRdmAccessToken();
+        if (!refreshedTokens) throw new Error("Failed to refresh RDM token");
+        token = refreshedTokens.token;
+        response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/collaborators/${collaboratorId}/resend`,
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
+  
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+  
+      toast({
+        title: "Success",
+        description: "Invitation resent successfully",
+      });
+    } catch (error: any) {
+      console.error("Error resending invitation:", error);
+      toast({
+        title: "Error",
+        description: `Failed to resend invitation: ${error.message}`,
+        variant: "destructive",
+      });
+    }
+  }
+
   useEffect(() => {
     if (!isEditDialogOpen) {
-      // Reset selected collaborator
       setSelectedCollaborator(null);
-      // Refresh the table data
       fetchCollaborators();
     }
   }, [isEditDialogOpen]);
 
-  // Update the dropdown menu item click handler
   const handleEditClick = (collaborator: Collaborator) => {
     setSelectedCollaborator(collaborator);
     setIsEditDialogOpen(true);
@@ -382,14 +526,14 @@ export function CollaboratorsPage() {
           if (!response.ok) {
             const errorText = await response.text();
             console.warn(`Failed to fetch ${url}: ${response.status} - ${errorText}`);
-            return []; // Return empty array on failure
+            return [];
           }
           const data = await response.json();
           console.log(`Raw data from ${url}:`, data);
           return data;
         } catch (error) {
           console.warn(`Error fetching ${url}:`, error);
-          return []; // Return empty array on error
+          return [];
         }
       };
 
@@ -398,12 +542,10 @@ export function CollaboratorsPage() {
       console.log("Available projects:", availableProjects);
 
       const documentsData = await fetchWithAuth(`${import.meta.env.VITE_API_URL}/documents?organizationId=${selectedOrgId}`);
-      // Handle unwrapped array directly
       setAvailableDocuments(Array.isArray(documentsData) ? documentsData.map((d: any) => ({ id: d.id, name: d.name })) : []);
       console.log("Available documents:", availableDocuments);
 
       const pagesData = await fetchWithAuth(`${import.meta.env.VITE_API_URL}/pages?organizationId=${selectedOrgId}`);
-      // Handle unwrapped array directly
       setAvailablePages(Array.isArray(pagesData) ? pagesData.map((p: any) => ({ id: p.id, name: p.name })) : []);
       console.log("Available pages:", availablePages);
 
@@ -428,6 +570,345 @@ export function CollaboratorsPage() {
     }
   }
 
+  async function fetchTeams(currentCollaborators: Collaborator[]) {
+    try {
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
+
+      let token = rdmAuth.tokens.token;
+      let response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams`,
+        {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (response.status === 401) {
+        const refreshedTokens = await AuthService.refreshRdmAccessToken();
+        if (!refreshedTokens) throw new Error("Failed to refresh RDM token");
+        token = refreshedTokens.token;
+        response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams`,
+          {
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const data = await response.json();
+      console.log("Teams API response:", data);
+      const fetchedTeams = data?.teams || data || [];
+      setTeams(fetchedTeams);
+
+      // Log the current state of collaborators for debugging
+      console.log("Available collaborators when enriching team members:", currentCollaborators);
+
+      // Fetch members for each team
+      const allTeamMembers: TeamMember[] = [];
+      for (const team of fetchedTeams) {
+        try {
+          const membersResponse = await fetch(
+            `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams/${team.id}/members`,
+            {
+              headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            }
+          );
+
+          if (membersResponse.ok) {
+            const membersData = await membersResponse.json();
+            console.log(`Team ${team.id} raw members data:`, membersData);
+            
+            const enrichedMembers = (membersData || []).map((member: TeamMember) => {
+              // Add debug logging
+              console.log(`Looking for collaborator with ID ${member.userId} in`, currentCollaborators);
+              const collab = currentCollaborators.find(c => c.id === member.userId);
+              console.log(`Found collaborator for ${member.userId}:`, collab);
+              
+              return {
+                ...member,
+                teamId: team.id,
+                email: collab?.email || "Unknown",
+                firstName: collab?.firstName || "",
+                lastName: collab?.lastName || "",
+              };
+            });
+            
+            console.log(`Enriched members for team ${team.id}:`, enrichedMembers);
+            allTeamMembers.push(...enrichedMembers);
+          }
+        } catch (error) {
+          console.error(`Error fetching members for team ${team.id}:`, error);
+        }
+      }
+      
+      // Log the final enriched members for debugging
+      console.log("Final enriched team members:", allTeamMembers);
+      setTeamMembers(allTeamMembers);
+      
+    } catch (error: any) {
+      console.error("Error fetching teams:", error);
+      toast({
+        title: "Error",
+        description: `Failed to fetch teams: ${error.message}`,
+        variant: "destructive",
+      });
+      if (
+        error.message.includes("No RDM authentication tokens") ||
+        error.message.includes("Failed to refresh RDM token")
+      ) {
+        window.location.href = "/login";
+      }
+      setTeams([]);
+    }
+  }
+
+  async function handleCreateTeam() {
+    try {
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
+
+      let token = rdmAuth.tokens.token;
+      let response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(newTeam),
+        }
+      );
+
+      if (response.status === 401) {
+        const refreshedTokens = await AuthService.refreshRdmAccessToken();
+        if (!refreshedTokens) throw new Error("Failed to refresh RDM token");
+        token = refreshedTokens.token;
+        response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams`,
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(newTeam),
+          }
+        );
+      }
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const data = await response.json();
+      if (data.success) {
+        setIsCreateTeamDialogOpen(false);
+        setNewTeam({ name: "", description: "" });
+        fetchTeams(collaborators);
+        toast({
+          title: "Success",
+          description: "Team created successfully",
+        });
+      }
+    } catch (error: any) {
+      console.error("Error creating team:", error);
+      toast({
+        title: "Error",
+        description: `Failed to create team: ${error.message}`,
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function handleAddTeamMember(teamId: string) {
+    try {
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
+
+      let token = rdmAuth.tokens.token;
+      let response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams/${teamId}/members`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ userId: newMemberId, role: newMemberRole }),
+        }
+      );
+
+      if (response.status === 401) {
+        const refreshedTokens = await AuthService.refreshRdmAccessToken();
+        if (!refreshedTokens) throw new Error("Failed to refresh RDM token");
+        token = refreshedTokens.token;
+        response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams/${teamId}/members`,
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ userId: newMemberId, role: newMemberRole }),
+          }
+        );
+      }
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const data = await response.json();
+      if (data.success) {
+        fetchTeamMembers(teamId);
+        setNewMemberId("");
+        setNewMemberRole("member");
+        toast({
+          title: "Success",
+          description: "Member added to team successfully",
+        });
+      }
+    } catch (error: any) {
+      console.error("Error adding team member:", error);
+      toast({
+        title: "Error",
+        description: `Failed to add team member: ${error.message}`,
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function handleRemoveTeamMember(teamId: string, userId: string) {
+    try {
+      if (!teamId) {
+        throw new Error("Team ID is required");
+      }
+      if (!userId) {
+        throw new Error("User ID is required");
+      }
+
+      console.log("Removing team member:", { teamId, userId });
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
+
+      let token = rdmAuth.tokens.token;
+      let response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams/${teamId}/members/${userId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (response.status === 401) {
+        const refreshedTokens = await AuthService.refreshRdmAccessToken();
+        if (!refreshedTokens) throw new Error("Failed to refresh RDM token");
+        token = refreshedTokens.token;
+        response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams/${teamId}/members/${userId}`,
+          {
+            method: "DELETE",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const data = await response.json();
+      if (data.success) {
+        fetchTeamMembers(teamId);
+        toast({
+          title: "Success",
+          description: "Member removed from team successfully",
+        });
+      }
+    } catch (error: any) {
+      console.error("Error removing team member:", error);
+      toast({
+        title: "Error",
+        description: `Failed to remove team member: ${error.message}`,
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function handleDeleteTeam(teamId: string) {
+    try {
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
+
+      let token = rdmAuth.tokens.token;
+      let response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams/${teamId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (response.status === 401) {
+        const refreshedTokens = await AuthService.refreshRdmAccessToken();
+        if (!refreshedTokens) throw new Error("Failed to refresh RDM token");
+        token = refreshedTokens.token;
+        response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams/${teamId}`,
+          {
+            method: "DELETE",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const data = await response.json();
+      if (data.success) {
+        setIsManageTeamDialogOpen(false);
+        setSelectedTeam(null);
+        fetchTeams(collaborators);
+        toast({
+          title: "Success",
+          description: "Team deleted successfully",
+        });
+      }
+    } catch (error: any) {
+      console.error("Error deleting team:", error);
+      toast({
+        title: "Error",
+        description: `Failed to delete team: ${error.message}`,
+        variant: "destructive",
+      });
+    }
+  }
+
+  const handleManageTeam = async (team: Team) => {
+    setSelectedTeam(team);
+    await fetchTeams(collaborators);
+    setIsManageTeamDialogOpen(true);
+  };
+
   const filteredCollaborators = collaborators.filter(collaborator => {
     const matchesSearch = searchQuery === "" || 
       `${collaborator.firstName} ${collaborator.lastName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -448,6 +929,114 @@ export function CollaboratorsPage() {
     r.name.toLowerCase().includes(resourceSearch.toLowerCase())
   );
 
+  async function fetchTeamMembers(teamId: string) {
+    try {
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
+    
+      let token = rdmAuth.tokens.token;
+      let response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams/${teamId}/members`,
+        {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+    
+      if (response.status === 401) {
+        const refreshedTokens = await AuthService.refreshRdmAccessToken();
+        if (!refreshedTokens) throw new Error("Failed to refresh RDM token");
+        token = refreshedTokens.token;
+        response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/teams/${teamId}/members`,
+          {
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+      }
+    
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    
+      const data = await response.json();
+      console.log("Team members API response:", data);
+    
+      // Direct implementation - no async needed here
+      const enrichedMembers = (data || []).map((member: TeamMember) => {
+        // Log the collaborators for debugging
+        console.log("Available collaborators:", collaborators.map(c => ({ id: c.id, email: c.email })));
+        console.log("Looking for user:", member.userId);
+        
+        // Find the collaborator with the exact same ID
+        const collab = collaborators.find(c => c.id === member.userId);
+        
+        if (collab) {
+          console.log("Found matching collaborator:", collab);
+          return {
+            ...member,
+            teamId,
+            email: collab.email,
+            firstName: collab.firstName,
+            lastName: collab.lastName,
+          };
+        } else {
+          console.log("No matching collaborator found");
+          return {
+            ...member,
+            teamId,
+            email: "Unknown",
+            firstName: "",
+            lastName: ""
+          };
+        }
+      });
+    
+      console.log("Enriched members:", enrichedMembers);
+      
+      setTeamMembers(prevMembers => {
+        const otherTeamMembers = prevMembers.filter(m => m.teamId !== teamId);
+        return [...otherTeamMembers, ...enrichedMembers];
+      });
+    } catch (error: any) {
+      console.error("Error fetching team members:", error);
+      toast({
+        title: "Error",
+        description: `Failed to fetch team members: ${error.message}`,
+        variant: "destructive",
+      });
+      setTeamMembers(prevMembers => prevMembers.filter(m => m.teamId !== teamId));
+    }
+  }
+
+  // Add this function to fetch avatar URLs
+  async function fetchTeamMemberAvatar(userId: string) {
+    try {
+      const rdmAuth = AuthService.getRdmTokens();
+      if (!rdmAuth?.tokens) return null;
+
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/account/avatar?userId=${userId}`, {
+        headers: {
+          "Authorization": `Bearer ${rdmAuth.tokens.token}`,
+        },
+      });
+
+      if (!response.ok) return null;
+      const data = await response.json();
+      if (data.hasAvatar && data.avatarUrl) {
+        setTeamMemberAvatars(prev => ({
+          ...prev,
+          [userId]: data.avatarUrl
+        }));
+      }
+    } catch (error) {
+      console.error("Error fetching avatar URL:", error);
+    }
+  }
+  
   return (
     <div className="flex-1 space-y-4 p-8">
       <div className="flex flex-col space-y-4">
@@ -510,7 +1099,7 @@ export function CollaboratorsPage() {
                             <SelectItem value="all">Any role</SelectItem>
                             <SelectItem value="viewer">Member</SelectItem>
                             <SelectItem value="editor">Admin</SelectItem>
-                            <SelectItem value="editor">External</SelectItem>
+                            <SelectItem value="external">External</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -622,9 +1211,14 @@ export function CollaboratorsPage() {
                               >
                                 Edit
                               </DropdownMenuItem>
-                              <DropdownMenuItem>Resend invitation</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleResendInvitation(collaborator.id)}>
+                                Resend Invitation
+                              </DropdownMenuItem>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem className="text-destructive">
+                              <DropdownMenuItem 
+                                className="text-destructive"
+                                onClick={() => handleRemoveCollaborator(collaborator.id)}
+                              >
                                 Remove
                               </DropdownMenuItem>
                             </DropdownMenuContent>
@@ -639,36 +1233,81 @@ export function CollaboratorsPage() {
 
             <TabsContent value="team">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {teams.map(team => (
+                {teams.map((team) => (
                   <Card key={team.id}>
                     <CardHeader>
                       <CardTitle>{team.name}</CardTitle>
                       <CardDescription>
-                        {team.memberCount} {team.memberCount === 1 ? 'member' : 'members'} · 
-                        {team.projectCount} {team.projectCount === 1 ? 'project' : 'projects'}
+                        {team.description || "No description"}
+                        {team.memberCount !== undefined && team.projectCount !== undefined && (
+                          ` · ${team.memberCount} ${team.memberCount === 1 ? "member" : "members"} · 
+                          ${team.projectCount} ${team.projectCount === 1 ? "project" : "projects"}`
+                        )}
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
                       <div className="flex justify-between items-center">
                         <div className="flex -space-x-2">
-                          <div className="h-8 w-8 rounded-full bg-primary"></div>
-                          <div className="h-8 w-8 rounded-full bg-muted"></div>
-                          <div className="h-8 w-8 rounded-full bg-secondary"></div>
-                          {team.memberCount > 3 && (
-                            <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-xs">
-                              +{team.memberCount - 3}
-                            </div>
-                          )}
+                          {(() => {
+                            const teamMembersList = teamMembers.filter(member => member.teamId === team.id);
+                            console.log(`Team ${team.id} members:`, teamMembersList);
+                            
+                            return (
+                              <>
+                                {teamMembersList.slice(0, 3).map((member) => {
+                                  // Fetch avatar URL if we don't have it yet
+                                  if (!teamMemberAvatars[member.userId]) {
+                                    fetchTeamMemberAvatar(member.userId);
+                                  }
+                                  
+                                  return (
+                                    <TooltipProvider key={member.userId}>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Avatar className="h-8 w-8 border-2 border-background">
+                                            <AvatarImage
+                                              src={teamMemberAvatars[member.userId]}
+                                              alt={`${member.firstName} ${member.lastName}`}
+                                              className="object-cover aspect-square"
+                                            />
+                                            <AvatarFallback className="text-xs bg-primary text-primary-foreground">
+                                              {member.firstName?.[0] || ''}
+                                              {member.lastName?.[0] || ''}
+                                            </AvatarFallback>
+                                          </Avatar>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          <p>{`${member.firstName} ${member.lastName}`}</p>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  );
+                                })}
+                                {teamMembersList.length > 3 && (
+                                  <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-xs">
+                                    +{teamMembersList.length - 3}
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
-                        <Button variant="outline" size="sm">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleManageTeam(team)}
+                        >
                           Manage
                         </Button>
                       </div>
                     </CardContent>
                   </Card>
                 ))}
-                <Card className="border-dashed flex items-center justify-center h-[140px]">
-                  <Button variant="ghost">
+                <Card className="border-dashed flex items-center justify-center h-[148px]">
+                  <Button
+                    variant="ghost"
+                    onClick={() => setIsCreateTeamDialogOpen(true)}
+                  >
                     <Plus className="h-4 w-4 mr-2" />
                     Create New Team
                   </Button>
@@ -793,7 +1432,7 @@ export function CollaboratorsPage() {
                                         ],
                                       });
                                     }
-                                    setResourceSearch(""); // Clear search after selection
+                                    setResourceSearch("");
                                   }}
                                 >
                                   <span className="text-sm">{resource.name}</span>
@@ -909,7 +1548,7 @@ export function CollaboratorsPage() {
                   projects: [],
                   accessPermissions: [],
                 });
-                setResourceSearch(""); // Reset search
+                setResourceSearch("");
               }}
               disabled={isAddingCollaborator}
             >
@@ -952,6 +1591,183 @@ export function CollaboratorsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsInviteMultipleOpen(false)}>
               Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isCreateTeamDialogOpen}
+        onOpenChange={setIsCreateTeamDialogOpen}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Create New Team</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Team Name</label>
+              <Input
+                placeholder="Team Name"
+                value={newTeam.name}
+                onChange={(e) =>
+                  setNewTeam({ ...newTeam, name: e.target.value })
+                }
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Description</label>
+              <Input
+                placeholder="Team Description"
+                value={newTeam.description}
+                onChange={(e) =>
+                  setNewTeam({ ...newTeam, description: e.target.value })
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsCreateTeamDialogOpen(false);
+                setNewTeam({ name: "", description: "" });
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateTeam}
+              disabled={!newTeam.name}
+            >
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isManageTeamDialogOpen}
+        onOpenChange={(open) => {
+          setIsManageTeamDialogOpen(open);
+          if (!open) {
+            setSelectedTeam(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Manage Team: {selectedTeam?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Add Member</label>
+              <div className="flex gap-2">
+                <Select
+                  value={newMemberId}
+                  onValueChange={setNewMemberId}
+                >
+                  <SelectTrigger className="w-[300px]">
+                    <SelectValue placeholder="Select a collaborator" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {collaborators
+                      .filter(collab => !teamMembers.some(m => m.userId === collab.id))
+                      .map(collab => (
+                        <SelectItem key={collab.id} value={collab.id}>
+                          {`${collab.firstName} ${collab.lastName} (${collab.email})`}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={newMemberRole}
+                  onValueChange={setNewMemberRole}
+                >
+                  <SelectTrigger className="w-[120px]">
+                    <SelectValue placeholder="Role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="member">Member</SelectItem>
+                    <SelectItem value="leader">Leader</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  onClick={() => selectedTeam && handleAddTeamMember(selectedTeam.id)}
+                  disabled={!newMemberId}
+                >
+                  Add
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Team Members</label>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {teamMembers.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center py-4">
+                        No members in this team yet.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    teamMembers.map((member) => (
+                      <TableRow key={member.userId}>
+                        <TableCell>{`${member.firstName} ${member.lastName}`}</TableCell>
+                        <TableCell>{member.email}</TableCell>
+                        <TableCell>
+                          <Badge>{member.role}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              if (selectedTeam?.id) {
+                                handleRemoveTeamMember(selectedTeam.id, member.userId);
+                              } else {
+                                toast({
+                                  title: "Error",
+                                  description: "Could not remove team member: Team ID is missing",
+                                  variant: "destructive",
+                                });
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+          <DialogFooter className="flex justify-between">
+            <Button
+              variant="destructive"
+              onClick={() => selectedTeam && handleDeleteTeam(selectedTeam.id)}
+            >
+              Delete Team
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsManageTeamDialogOpen(false);
+                setSelectedTeam(null);
+              }}
+            >
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
