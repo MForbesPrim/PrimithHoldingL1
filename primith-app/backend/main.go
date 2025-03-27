@@ -15724,41 +15724,164 @@ func handleUpdateCollaborator(w http.ResponseWriter, r *http.Request) {
 	userID := vars["userId"]
 	claims := r.Context().Value(claimsKey).(*Claims)
 
+	log.Printf("Starting update collaborator handler: orgID=%s, userID=%s, requester=%s",
+		orgID, userID, claims.Username)
+
 	// Check if user is admin
 	isAdmin, err := isOrganizationAdmin(claims.Username, orgID)
 	if err != nil || !isAdmin {
+		log.Printf("Unauthorized request: isAdmin=%v, error=%v", isAdmin, err)
 		http.Error(w, "Unauthorized: Admin access required", http.StatusForbidden)
 		return
 	}
 
-	var req struct {
-		Role string `json:"role"`
+	// Read and log the request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Error reading request body: %v", err)
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
 	}
+	log.Printf("Raw request body: %s", string(body))
+
+	// Restore the body for further processing
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+
+	var req struct {
+		Role              string `json:"role"`
+		AccessPermissions []struct {
+			ResourceType string `json:"resource_type"`
+			ResourceID   string `json:"resource_id"`
+			ResourceName string `json:"resource_name,omitempty"`
+			AccessLevel  string `json:"access_level"`
+		} `json:"accessPermissions"`
+	}
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding request body: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// Update role
+	log.Printf("Decoded request: role=%s, accessPermissions count=%d",
+		req.Role, len(req.AccessPermissions))
+
+	// Begin transaction for all operations
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Failed to begin transaction: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	defer func() {
+		if err != nil {
+			log.Printf("Rolling back transaction due to error: %v", err)
+			tx.Rollback()
+		}
+	}()
+
+	// Update role if provided
 	if req.Role != "" {
 		var roleID string
-		err = db.QueryRow(`
+		err = tx.QueryRow(`
 				SELECT id FROM auth.roles WHERE name = $1 AND organization_id = $2
 			`, req.Role, orgID).Scan(&roleID)
 		if err == sql.ErrNoRows {
+			log.Printf("Role not found: %s for organization %s", req.Role, orgID)
 			http.Error(w, "Role not found", http.StatusBadRequest)
 			return
 		}
-		_, err = db.Exec(`
-				DELETE FROM auth.user_roles WHERE user_id = $1 AND organization_id = $2;
-				CALL auth.assign_user_role($1, $3, $2)
-			`, userID, orgID, roleID)
 		if err != nil {
+			log.Printf("Database error when querying role: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("Found role ID: %s for role name: %s", roleID, req.Role)
+
+		// First statement: delete existing roles
+		_, err = tx.Exec(`
+				DELETE FROM auth.user_roles WHERE user_id = $1 AND organization_id = $2
+			`, userID, orgID)
+		if err != nil {
+			log.Printf("Failed to delete existing roles: %v", err)
 			http.Error(w, "Failed to update role", http.StatusInternalServerError)
 			return
 		}
+
+		// Second statement: assign new role
+		_, err = tx.Exec(`
+				INSERT INTO auth.user_roles (user_id, role_id, organization_id)
+				VALUES ($1, $2, $3)
+			`, userID, roleID, orgID)
+		if err != nil {
+			log.Printf("Failed to assign new role: %v", err)
+			http.Error(w, "Failed to update role", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("Successfully updated role for user %s in organization %s", userID, orgID)
+	} else {
+		log.Printf("No role update requested")
 	}
 
+	// Update access permissions if provided
+	if len(req.AccessPermissions) > 0 {
+		// Get admin user ID
+		var adminUserID string
+		err = tx.QueryRow(`
+			SELECT id FROM auth.users WHERE email = $1
+		`, claims.Username).Scan(&adminUserID)
+		if err != nil {
+			log.Printf("Failed to get admin user ID: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+
+		// Delete existing permissions
+		_, err = tx.Exec(`
+			DELETE FROM auth.access_permissions 
+			WHERE user_id = $1
+		`, userID)
+		if err != nil {
+			log.Printf("Failed to delete existing permissions: %v", err)
+			http.Error(w, "Failed to update permissions", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Deleted existing permissions for user %s", userID)
+
+		// Insert new permissions
+		for i, perm := range req.AccessPermissions {
+			_, err = tx.Exec(`
+				INSERT INTO auth.access_permissions 
+				(user_id, resource_type, resource_id, permission_level, granted_by)
+				VALUES ($1, $2, $3, $4, $5)
+			`, userID, perm.ResourceType, perm.ResourceID, perm.AccessLevel, adminUserID)
+
+			if err != nil {
+				log.Printf("Failed to insert permission %d: %v", i, err)
+				http.Error(w, "Failed to update permissions", http.StatusInternalServerError)
+				return
+			}
+			log.Printf("Added permission: type=%s, id=%s, level=%s",
+				perm.ResourceType, perm.ResourceID, perm.AccessLevel)
+		}
+		log.Printf("Successfully updated %d permissions for user %s",
+			len(req.AccessPermissions), userID)
+	} else {
+		log.Printf("No permission updates requested")
+	}
+
+	// Commit the transaction
+	err = tx.Commit()
+	if err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Collaborator update completed successfully")
 	json.NewEncoder(w).Encode(Response{Success: true, Message: "Collaborator updated successfully"})
 }
 

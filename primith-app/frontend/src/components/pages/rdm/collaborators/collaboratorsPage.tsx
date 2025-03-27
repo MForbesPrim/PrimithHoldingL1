@@ -53,10 +53,7 @@ interface Collaborator {
   role: string;
   projects: string[];
   status: string;
-  lastActive?: string;
-  joinDate?: string;
-  department?: string;
-  teamId?: string;
+  accessPermissions?: AccessPermission[];
 }
 
 interface Team {
@@ -133,7 +130,8 @@ export function CollaboratorsPage() {
       if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
 
       let token = rdmAuth.tokens.token;
-      let response = await fetch(`${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/collaborators`, {
+      console.log("Fetching collaborators with permissions...");
+      let response = await fetch(`${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/collaborators?include=permissions`, {
         headers: {
           "Authorization": `Bearer ${token}`,
           "Content-Type": "application/json",
@@ -143,7 +141,7 @@ export function CollaboratorsPage() {
         const refreshedTokens = await AuthService.refreshRdmAccessToken();
         if (!refreshedTokens) throw new Error("Failed to refresh RDM token");
         token = refreshedTokens.token;
-        response = await fetch(`${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/collaborators`, {
+        response = await fetch(`${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/collaborators?include=permissions`, {
           headers: {
             "Authorization": `Bearer ${token}`,
             "Content-Type": "application/json",
@@ -153,7 +151,43 @@ export function CollaboratorsPage() {
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
       const data = await response.json();
-      setCollaborators(data.collaborators || []);
+      console.log("Raw response data:", data);
+      console.log("Fetched collaborators with permissions:", data.collaborators);
+      
+      // First, create a map of resource IDs to their names from available resources
+      const resourceNameMap = new Map();
+      [...availableProjects, ...availableDocuments, ...availablePages, ...availableDocumentFolders, ...availablePageFolders]
+        .forEach(resource => {
+          resourceNameMap.set(resource.id, resource.name);
+        });
+
+      console.log("Resource name map:", Object.fromEntries(resourceNameMap));
+      
+      // Map the permissions array to accessPermissions with the correct structure
+      const collaboratorsWithPermissions = (data.collaborators || []).map((collaborator: Collaborator & { permissions?: any[] }) => {
+        // Transform the permissions array into accessPermissions format
+        const accessPermissions = (collaborator.permissions || []).map(perm => {
+          // Try to get the resource name from our map, fallback to ID if not found
+          const resourceName = resourceNameMap.get(perm.resource_id) || perm.resource_name || perm.resource_id;
+          
+          return {
+            resource_type: perm.resource_type,
+            resource_id: perm.resource_id,
+            resource_name: resourceName,
+            access_level: perm.permission_level === 'view' ? 'view' : 'edit'
+          };
+        });
+
+        console.log(`Mapped permissions for ${collaborator.email}:`, accessPermissions);
+
+        return {
+          ...collaborator,
+          accessPermissions
+        };
+      });
+      
+      console.log("Processed collaborators with permissions:", collaboratorsWithPermissions);
+      setCollaborators(collaboratorsWithPermissions);
     } catch (error: any) {
       console.error("Error fetching collaborators:", error);
       toast({
@@ -172,6 +206,22 @@ export function CollaboratorsPage() {
       const rdmAuth = AuthService.getRdmTokens();
       if (!rdmAuth?.tokens) throw new Error("No RDM authentication tokens found");
   
+      // Transform accessPermissions back to the API's expected format
+      const apiCollaborator = {
+        ...updatedCollaborator,
+        permissions: updatedCollaborator.accessPermissions?.map(perm => ({
+          resource_type: perm.resource_type,
+          resource_id: perm.resource_id,
+          resource_name: perm.resource_name,
+          permission_level: perm.access_level
+        }))
+      };
+      
+      console.log("Sending collaborator update request:", {
+        url: `${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/collaborators/${updatedCollaborator.id}`,
+        body: JSON.stringify(apiCollaborator, null, 2)
+      });
+
       let token = rdmAuth.tokens.token;
       let response = await fetch(`${import.meta.env.VITE_API_URL}/api/organizations/${selectedOrgId}/collaborators/${updatedCollaborator.id}`, {
         method: "PUT",
@@ -179,7 +229,7 @@ export function CollaboratorsPage() {
           "Authorization": `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(updatedCollaborator), // This now includes accessPermissions
+        body: JSON.stringify(apiCollaborator),
       });
   
       if (response.status === 401) {
@@ -192,13 +242,30 @@ export function CollaboratorsPage() {
             "Authorization": `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(updatedCollaborator),
+          body: JSON.stringify(apiCollaborator),
         });
       }
   
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) {
+        const responseText = await response.text();
+        console.error("Error response from server:", {
+          status: response.status,
+          statusText: response.statusText,
+          body: responseText
+        });
+        
+        let errorMessage: string;
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.message || `HTTP error! status: ${response.status}`;
+        } catch (e) {
+          errorMessage = responseText || `HTTP error! status: ${response.status}`;
+        }
+        
+        throw new Error(errorMessage);
+      }
   
-      fetchCollaborators();
+      setIsEditDialogOpen(false); // Close the dialog after successful save
       toast({
         title: "Success",
         description: "Collaborator updated successfully",
@@ -215,6 +282,22 @@ export function CollaboratorsPage() {
       }
     }
   }
+
+  // Add effect to refresh data when dialog closes
+  useEffect(() => {
+    if (!isEditDialogOpen) {
+      // Reset selected collaborator
+      setSelectedCollaborator(null);
+      // Refresh the table data
+      fetchCollaborators();
+    }
+  }, [isEditDialogOpen]);
+
+  // Update the dropdown menu item click handler
+  const handleEditClick = (collaborator: Collaborator) => {
+    setSelectedCollaborator(collaborator);
+    setIsEditDialogOpen(true);
+  };
 
   async function handleAddCollaborator() {
     try {
@@ -535,10 +618,7 @@ export function CollaboratorsPage() {
                             <DropdownMenuContent align="end">
                               <DropdownMenuLabel>Actions</DropdownMenuLabel>
                               <DropdownMenuItem 
-                                onClick={() => {
-                                  setSelectedCollaborator(collaborator);
-                                  setIsEditDialogOpen(true);
-                                }}
+                                onClick={() => handleEditClick(collaborator)}
                               >
                                 Edit
                               </DropdownMenuItem>
@@ -730,45 +810,84 @@ export function CollaboratorsPage() {
                         {newCollaborator.accessPermissions.length === 0 ? (
                           <p className="text-sm text-muted-foreground p-4">No access permissions added yet.</p>
                         ) : (
-                          newCollaborator.accessPermissions.map((perm, index) => (
-                            <div key={index} className="flex items-center justify-between p-3 bg-background">
+                          <>
+                            <div className="p-3 bg-muted/40 border-b flex items-center justify-between">
+                              <span className="text-sm font-medium">Bulk Actions</span>
                               <div className="flex items-center space-x-2">
-                                <span className="text-sm font-medium">{perm.resource_name || perm.resource_id}</span>
-                                <Badge variant="outline">
-                                  {perm.resource_type.replace("_", " ")}
-                                </Badge>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                <Select
-                                  value={perm.access_level}
-                                  onValueChange={(value) => {
-                                    const updatedPermissions = [...newCollaborator.accessPermissions];
-                                    updatedPermissions[index].access_level = value as "view" | "edit";
-                                    setNewCollaborator({ ...newCollaborator, accessPermissions: updatedPermissions });
-                                  }}
-                                >
-                                  <SelectTrigger className="w-24 h-8">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="view">View</SelectItem>
-                                    <SelectItem value="edit">Edit</SelectItem>
-                                  </SelectContent>
-                                </Select>
                                 <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8"
+                                  variant="outline"
+                                  size="sm"
                                   onClick={() => {
-                                    const updatedPermissions = newCollaborator.accessPermissions.filter((_, i) => i !== index);
-                                    setNewCollaborator({ ...newCollaborator, accessPermissions: updatedPermissions });
+                                    const updatedPermissions = [...newCollaborator.accessPermissions];
+                                    updatedPermissions.forEach(perm => {
+                                      perm.access_level = "view";
+                                    });
+                                    setNewCollaborator({
+                                      ...newCollaborator,
+                                      accessPermissions: updatedPermissions
+                                    });
                                   }}
                                 >
-                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                  Set All to View
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    const updatedPermissions = [...newCollaborator.accessPermissions];
+                                    updatedPermissions.forEach(perm => {
+                                      perm.access_level = "edit";
+                                    });
+                                    setNewCollaborator({
+                                      ...newCollaborator,
+                                      accessPermissions: updatedPermissions
+                                    });
+                                  }}
+                                >
+                                  Set All to Edit
                                 </Button>
                               </div>
                             </div>
-                          ))
+                            {newCollaborator.accessPermissions.map((perm, index) => (
+                              <div key={index} className="flex items-center justify-between p-3 bg-background">
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-sm font-medium">{perm.resource_name || perm.resource_id}</span>
+                                  <Badge variant="outline">
+                                    {perm.resource_type.replace("_", " ")}
+                                  </Badge>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <Select
+                                    value={perm.access_level}
+                                    onValueChange={(value) => {
+                                      const updatedPermissions = [...newCollaborator.accessPermissions];
+                                      updatedPermissions[index].access_level = value as "view" | "edit";
+                                      setNewCollaborator({ ...newCollaborator, accessPermissions: updatedPermissions });
+                                    }}
+                                  >
+                                    <SelectTrigger className="w-24 h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="view">View</SelectItem>
+                                      <SelectItem value="edit">Edit</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => {
+                                      const updatedPermissions = newCollaborator.accessPermissions.filter((_, i) => i !== index);
+                                      setNewCollaborator({ ...newCollaborator, accessPermissions: updatedPermissions });
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </>
                         )}
                       </div>
                     </div>
@@ -841,7 +960,12 @@ export function CollaboratorsPage() {
       {selectedCollaborator && (
         <EditCollaboratorDialog
           open={isEditDialogOpen}
-          onOpenChange={setIsEditDialogOpen}
+          onOpenChange={(open) => {
+            setIsEditDialogOpen(open);
+            if (!open) {
+              setSelectedCollaborator(null);
+            }
+          }}
           collaborator={selectedCollaborator}
           availableProjects={availableProjects.map(p => p.name)}
           availableResources={[
