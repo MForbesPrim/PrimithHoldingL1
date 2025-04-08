@@ -701,7 +701,7 @@ const renderListView = () => {
                       <span className="text-xs">{item.priority || 0}</span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
-                    {isProjectMember && (
+                      {isProjectMember && (
                         <>
                           <Button variant="ghost" size="sm" className="mr-1" onClick={(e) => {
                             e.stopPropagation();
@@ -770,28 +770,30 @@ const renderListView = () => {
                       }`}>
                         {capitalizeWords(item.status)}
                       </span>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleEditClick(item)}>
-                            <Edit className="mr-2 h-4 w-4" />
-                            Edit
-                          </DropdownMenuItem>
-                          {onItemDelete && (
-                            <DropdownMenuItem 
-                              className="text-red-600"
-                              onClick={() => handleDeleteClick(item)}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Delete
+                      {isProjectMember && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleEditClick(item)}>
+                              <Edit className="mr-2 h-4 w-4" />
+                              Edit
                             </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                            {onItemDelete && (
+                              <DropdownMenuItem 
+                                className="text-red-600"
+                                onClick={() => handleDeleteClick(item)}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </div>
                   </div>
                   {item.description && (
@@ -1059,41 +1061,45 @@ const renderTimelineItemCard = (item: RoadmapItem) => (
           )}
         </div>
         <div className="flex space-x-1 flex-shrink-0 ml-2">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="h-6 w-6 p-0"
-                  onClick={() => handleEditClick(item)}
-                >
-                  <Edit className="h-3 w-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Action: Edit item</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          {onItemDelete && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="h-6 w-6 p-0"
-                    onClick={() => handleDeleteClick(item)}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Action: Delete item</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+          {isProjectMember && (
+            <>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-6 w-6 p-0"
+                      onClick={() => handleEditClick(item)}
+                    >
+                      <Edit className="h-3 w-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Action: Edit item</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              {onItemDelete && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-6 w-6 p-0"
+                        onClick={() => handleDeleteClick(item)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Action: Delete item</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </>
           )}
         </div>
       </div>

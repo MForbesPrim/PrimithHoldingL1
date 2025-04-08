@@ -109,19 +109,21 @@ export const FoldersTable = memo(function FoldersTable({
                         {children}
                     </TableRow>
                 </ContextMenuTrigger>
-                <ContextMenuContent>
-                    <ContextMenuItem
-                        onClick={() => handleRenameClick(row.original.id, row.original.name)}
-                    >
-                        Rename
-                    </ContextMenuItem>
-                    <ContextMenuItem
-                        onClick={() => onDeleteFolders([row.original.id])}
-                        className="text-destructive"
-                    >
-                        Delete
-                    </ContextMenuItem>
-                </ContextMenuContent>
+                {hasWritePermission && (
+                    <ContextMenuContent>
+                        <ContextMenuItem
+                            onClick={() => handleRenameClick(row.original.id, row.original.name)}
+                        >
+                            Rename
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                            onClick={() => onDeleteFolders([row.original.id])}
+                            className="text-destructive"
+                        >
+                            Delete
+                        </ContextMenuItem>
+                    </ContextMenuContent>
+                )}
             </ContextMenu>
         );
     });
@@ -188,26 +190,28 @@ export const FoldersTable = memo(function FoldersTable({
             header: "",
             cell: ({ row }) => (
                 <div className="flex items-center gap-2">
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className="h-8 w-8 p-0">
-                                <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                                onClick={() => handleRenameClick(row.original.id, row.original.name)}
-                            >
-                                Rename
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onClick={() => onDeleteFolders([row.original.id])}
-                                className="text-destructive"
-                            >
-                                Delete
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                    {hasWritePermission && (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" className="h-8 w-8 p-0">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                    onClick={() => handleRenameClick(row.original.id, row.original.name)}
+                                >
+                                    Rename
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    onClick={() => onDeleteFolders([row.original.id])}
+                                    className="text-destructive"
+                                >
+                                    Delete
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
                 </div>
             ),
             enableHiding: true,

@@ -98,7 +98,7 @@ interface AccessPermission {
   resource_type: "project" | "document" | "page" | "document_folder" | "page_folder";
   resource_id: string;
   resource_name?: string;
-  access_level: "view" | "edit";
+  access_level: "view";
 }
 
 interface Resource {
@@ -276,13 +276,12 @@ export function CollaboratorsPage() {
       
       const collaboratorsWithPermissions = (data.collaborators || []).map((collaborator: Collaborator & { permissions?: any[] }) => {
         const accessPermissions = (collaborator.permissions || []).map(perm => {
-          const resourceName = resourceNameMap.get(perm.resource_id) || perm.resource_name || perm.resource_id;
           
           return {
             resource_type: perm.resource_type,
             resource_id: perm.resource_id,
-            resource_name: resourceName,
-            access_level: perm.permission_level === 'view' ? 'view' : 'edit'
+            resource_name: perm.resource_name,
+            access_level: 'view'
           };
         });
 
@@ -374,11 +373,11 @@ export function CollaboratorsPage() {
   
       const apiCollaborator = {
         ...updatedCollaborator,
-        permissions: updatedCollaborator.accessPermissions?.map(perm => ({
+        accessPermissions: updatedCollaborator.accessPermissions?.map(perm => ({
           resource_type: perm.resource_type,
           resource_id: perm.resource_id,
           resource_name: perm.resource_name,
-          permission_level: perm.access_level
+          access_level: "view" 
         }))
       };
       
@@ -1565,43 +1564,6 @@ const formatActivityMessage = (activity: Activity) => {
                           <p className="text-sm text-muted-foreground p-4">No access permissions added yet.</p>
                         ) : (
                           <>
-                            <div className="p-3 bg-muted/40 border-b flex items-center justify-between">
-                              <span className="text-sm font-medium">Bulk Actions</span>
-                              <div className="flex items-center space-x-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    const updatedPermissions = [...newCollaborator.accessPermissions];
-                                    updatedPermissions.forEach(perm => {
-                                      perm.access_level = "view";
-                                    });
-                                    setNewCollaborator({
-                                      ...newCollaborator,
-                                      accessPermissions: updatedPermissions
-                                    });
-                                  }}
-                                >
-                                  Set All to View
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    const updatedPermissions = [...newCollaborator.accessPermissions];
-                                    updatedPermissions.forEach(perm => {
-                                      perm.access_level = "edit";
-                                    });
-                                    setNewCollaborator({
-                                      ...newCollaborator,
-                                      accessPermissions: updatedPermissions
-                                    });
-                                  }}
-                                >
-                                  Set All to Edit
-                                </Button>
-                              </div>
-                            </div>
                             {newCollaborator.accessPermissions.map((perm, index) => (
                               <div key={index} className="flex items-center justify-between p-3 bg-background">
                                 <div className="flex items-center space-x-2">
@@ -1615,7 +1577,7 @@ const formatActivityMessage = (activity: Activity) => {
                                     value={perm.access_level}
                                     onValueChange={(value) => {
                                       const updatedPermissions = [...newCollaborator.accessPermissions];
-                                      updatedPermissions[index].access_level = value as "view" | "edit";
+                                      updatedPermissions[index].access_level = value as "view";
                                       setNewCollaborator({ ...newCollaborator, accessPermissions: updatedPermissions });
                                     }}
                                   >
@@ -1624,7 +1586,6 @@ const formatActivityMessage = (activity: Activity) => {
                                     </SelectTrigger>
                                     <SelectContent>
                                       <SelectItem value="view">View</SelectItem>
-                                      <SelectItem value="edit">Edit</SelectItem>
                                     </SelectContent>
                                   </Select>
                                   <Button

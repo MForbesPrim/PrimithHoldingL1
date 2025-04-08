@@ -53,7 +53,7 @@ export const DocumentsTable = memo(function DocumentsTable({
   onDeleteDocuments,
   onRenameDocument,
   showDownloadButton = true,
-  hasWritePermission,
+  hasWritePermission = false,
 }: DocumentsTableProps) {
   const [sorting, setSorting] = useState<SortingState>([{ id: "updatedAt", desc: true }])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
@@ -128,41 +128,42 @@ export const DocumentsTable = memo(function DocumentsTable({
                 <Download className="h-4 w-4" />
               </Button>
             )}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-8 w-8 p-0">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onClick={() => {
-                    const baseName = row.original.name.split(".")[0]
-                    setDocumentToRename({
-                      id: row.original.id,
-                      name: row.original.name,
-                    })
-                    setNewName(baseName)
-                    setShowRenameDialog(true)
-                  }}
-                >
-                  Rename
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    // Instead of window.confirm, open the ShadCN confirmation dialog.
-                    setDocumentToDelete({
-                      id: row.original.id,
-                      name: row.original.name,
-                    })
-                    setShowDeleteDialog(true)
-                  }}
-                  className="text-destructive"
-                >
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {hasWritePermission && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="h-8 w-8 p-0">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() => {
+                      const baseName = row.original.name.split(".")[0]
+                      setDocumentToRename({
+                        id: row.original.id,
+                        name: row.original.name,
+                      })
+                      setNewName(baseName)
+                      setShowRenameDialog(true)
+                    }}
+                  >
+                    Rename
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setDocumentToDelete({
+                        id: row.original.id,
+                        name: row.original.name,
+                      })
+                      setShowDeleteDialog(true)
+                    }}
+                    className="text-destructive"
+                  >
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         )
       },
@@ -176,6 +177,7 @@ export const DocumentsTable = memo(function DocumentsTable({
   }: {
     row: any
     children: React.ReactNode
+    hasWritePermission: boolean
   }) {
     return (
       <ContextMenu>
@@ -198,7 +200,6 @@ export const DocumentsTable = memo(function DocumentsTable({
           </ContextMenuItem>
           <ContextMenuItem
             onClick={() => {
-              // Instead of window.confirm, open the confirmation dialog.
               setDocumentToDelete({
                 id: row.original.id,
                 name: row.original.name,
@@ -400,7 +401,7 @@ export const DocumentsTable = memo(function DocumentsTable({
           <TableBody>
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
-                <TableRowWithContext key={row.id} row={row}>
+                <TableRowWithContext key={row.id} row={row} hasWritePermission={hasWritePermission}>
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}

@@ -8,13 +8,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Search, Trash2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -35,7 +28,7 @@ interface AccessPermission {
   resource_type: "project" | "document" | "page" | "document_folder" | "page_folder";
   resource_id: string;
   resource_name?: string;
-  access_level: "view" | "edit";
+  access_level: "view";
 }
 
 interface Resource {
@@ -161,17 +154,6 @@ export function EditCollaboratorDialog({
       accessPermissions: updatedPermissions
     });
   };
-  
-  const updatePermissionLevel = (index: number, level: "view" | "edit") => {
-    console.log("Updating permission level:", { index, level });
-    const updatedPermissions = [...(editedCollaborator.accessPermissions || [])];
-    updatedPermissions[index].access_level = level;
-    console.log("Updated permissions after level change:", updatedPermissions);
-    setEditedCollaborator({
-      ...editedCollaborator,
-      accessPermissions: updatedPermissions
-    });
-  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -251,45 +233,9 @@ export function EditCollaboratorDialog({
                           Edit or remove existing permissions below
                         </p>
                       </div>
-                      {editedCollaborator.accessPermissions && editedCollaborator.accessPermissions.length > 0 && (
-                        <div className="flex items-center space-x-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const updatedPermissions = editedCollaborator.accessPermissions?.map(perm => ({
-                                ...perm,
-                                access_level: "view" as const
-                              })) || [];
-                              setEditedCollaborator({
-                                ...editedCollaborator,
-                                accessPermissions: updatedPermissions
-                              });
-                            }}
-                          >
-                            Set All to View
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const updatedPermissions = editedCollaborator.accessPermissions?.map(perm => ({
-                                ...perm,
-                                access_level: "edit" as const
-                              })) || [];
-                              setEditedCollaborator({
-                                ...editedCollaborator,
-                                accessPermissions: updatedPermissions
-                              });
-                            }}
-                          >
-                            Set All to Edit
-                          </Button>
-                        </div>
-                      )}
                     </div>
                   </div>
-                  <ScrollArea className="max-h-[200px]">
+                  <ScrollArea className="h-[200px] rounded-b-md">
                     <div className="divide-y">
                       {!editedCollaborator.accessPermissions || editedCollaborator.accessPermissions.length === 0 ? (
                         <p className="text-sm text-muted-foreground p-4">No access permissions added yet.</p>
@@ -305,18 +251,6 @@ export function EditCollaboratorDialog({
                               </div>
                             </div>
                             <div className="flex items-center space-x-2">
-                              <Select
-                                value={perm.access_level}
-                                onValueChange={(value) => updatePermissionLevel(index, value as "view" | "edit")}
-                              >
-                                <SelectTrigger className="w-24 h-8">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="view">View</SelectItem>
-                                  <SelectItem value="edit">Edit</SelectItem>
-                                </SelectContent>
-                              </Select>
                               <Button
                                 variant="ghost"
                                 size="icon"

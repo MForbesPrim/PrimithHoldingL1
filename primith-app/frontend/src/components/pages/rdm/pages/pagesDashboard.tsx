@@ -57,6 +57,7 @@ export function PagesDashboard() {
   const [pageToUnassign, setPageToUnassign] = useState<string | null>(null);
   const { selectedProjectId } = useProject();
   const { toast } = useToast();
+  const [hasWritePermission, setHasWritePermission] = useState(false);
 
   const handleTemplatesClick = () => {
     navigate('/rdm/pages/templates');
@@ -502,6 +503,11 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
     }
   }, [selectedPageId, selectedProjectId, pages]);
 
+  useEffect(() => {
+    // Update hasWritePermission based on canCreatePages
+    setHasWritePermission(canCreatePages);
+  }, [canCreatePages]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -540,24 +546,28 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsPageTreeVisible(!isPageTreeVisible)}
-                  className="mr-2"
-                >
-                  {isPageTreeVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
-                </Button>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm">Auto-Save</span>
-                  <Switch
-                    checked={autoSaveEnabled}
-                    onCheckedChange={(checked) => {
-                      setAutoSaveEnabled(checked);
-                      console.log('Auto-save enabled:', checked);
-                    }}
-                  />
-                </div>
+                {hasWritePermission && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIsPageTreeVisible(!isPageTreeVisible)}
+                      className="mr-2"
+                    >
+                      {isPageTreeVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
+                    </Button>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">Auto-Save</span>
+                      <Switch
+                        checked={autoSaveEnabled}
+                        onCheckedChange={(checked) => {
+                          setAutoSaveEnabled(checked);
+                          console.log('Auto-save enabled:', checked);
+                        }}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
               <Button
                 variant="ghost"
@@ -574,6 +584,7 @@ const handleRenameFolder = async (folderId: string, newName: string) => {
               onRename={handleRenamePage}
               autoSave={autoSaveEnabled}
               projectId={selectedProjectId}
+              hasWritePermission={hasWritePermission}
             />
           </div>
                ) : showTemplates ? (

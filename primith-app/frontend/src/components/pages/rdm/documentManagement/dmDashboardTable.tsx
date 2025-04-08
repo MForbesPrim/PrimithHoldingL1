@@ -233,10 +233,12 @@ export const DashboardTable = memo(function DashboardTable({
                     </TableRow>
                 </ContextMenuTrigger>
                 <ContextMenuContent>
-                    <ContextMenuItem onClick={handleRenameClick}>
-                    <Pen className="w-4 h-4 mr-2" /> 
-                        Rename
-                    </ContextMenuItem>
+                    {hasWritePermission && (
+                        <ContextMenuItem onClick={handleRenameClick}>
+                            <Pen className="w-4 h-4 mr-2" /> 
+                            Rename
+                        </ContextMenuItem>
+                    )}
                     {currentProjectId && onAssociateWithProject && row.original.type === 'document' && (
                         !isAssignedToProject ? (
                             <ContextMenuItem
@@ -259,13 +261,15 @@ export const DashboardTable = memo(function DashboardTable({
                             )
                         )
                     )}
-                    <ContextMenuItem
-                        onClick={() => handleDeleteClick(row.original)}
-                        className="text-destructive"
-                    >
-                    <Trash2 className="w-4 h-4 mr-2" />    
-                        Delete
-                    </ContextMenuItem>
+                    {hasWritePermission && (
+                        <ContextMenuItem
+                            onClick={() => handleDeleteClick(row.original)}
+                            className="text-destructive"
+                        >
+                            <Trash2 className="w-4 h-4 mr-2" />    
+                            Delete
+                        </ContextMenuItem>
+                    )}
                 </ContextMenuContent>
             </ContextMenu>
         );
@@ -371,60 +375,66 @@ export const DashboardTable = memo(function DashboardTable({
                                 <Download className="h-4 w-4" />
                             </Button>
                         )}
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                    <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                    onClick={() => {
-                                        const type = row.original.type;
-                                        const baseName = type === 'document' ? row.original.name.split('.')[0] : row.original.name;
-                                        setItemToRename({
-                                            id: row.original.id,
-                                            name: row.original.name,
-                                            type: type
-                                        });
-                                        setNewName(baseName);
-                                        setShowRenameDialog(true);
-                                    }}
-                                >
-                                <Pen className="w-4 h-4" /> 
-                                    Rename
-                                </DropdownMenuItem>
-                                {currentProjectId && onAssociateWithProject && row.original.type === 'document' && (
-                                    !isAssignedToProject ? (
-                                        <DropdownMenuItem
-                                            onClick={() => onAssociateWithProject(row.original.id)}
-                                        >
-                                        <Link2 className="w-4 h-4" />    
-                                            Add to Current Project
-                                        </DropdownMenuItem>
-                                    ) : (
-                                        onUnassignFromProject && (
+                        {(hasWritePermission || (currentProjectId && onAssociateWithProject && row.original.type === 'document')) && (
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" className="h-8 w-8 p-0">
+                                        <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    {hasWritePermission && (
                                         <DropdownMenuItem
                                             onClick={() => {
-                                                setDocumentToUnassign(row.original.id);
-                                                setShowUnassignDialog(true);
+                                                const type = row.original.type;
+                                                const baseName = type === 'document' ? row.original.name.split('.')[0] : row.original.name;
+                                                setItemToRename({
+                                                    id: row.original.id,
+                                                    name: row.original.name,
+                                                    type: type
+                                                });
+                                                setNewName(baseName);
+                                                setShowRenameDialog(true);
                                             }}
                                         >
-                                        <Unlink className="w-4 h-4" />        
-                                            Remove from Current Project
+                                            <Pen className="w-4 h-4" /> 
+                                            Rename
                                         </DropdownMenuItem>
+                                    )}
+                                    {currentProjectId && onAssociateWithProject && row.original.type === 'document' && (
+                                        !isAssignedToProject ? (
+                                            <DropdownMenuItem
+                                                onClick={() => onAssociateWithProject(row.original.id)}
+                                            >
+                                            <Link2 className="w-4 h-4" />    
+                                                Add to Current Project
+                                            </DropdownMenuItem>
+                                        ) : (
+                                            onUnassignFromProject && (
+                                            <DropdownMenuItem
+                                                onClick={() => {
+                                                    setDocumentToUnassign(row.original.id);
+                                                    setShowUnassignDialog(true);
+                                                }}
+                                            >
+                                            <Unlink className="w-4 h-4" />        
+                                                Remove from Current Project
+                                            </DropdownMenuItem>
+                                            )
                                         )
-                                    )
-                                )}
-                                <DropdownMenuItem
-                                    onClick={() => handleDeleteClick(row.original)}
-                                    className="text-destructive"
-                                >
-                                <Trash2 className="w-4 h-4" /> 
-                                    Delete
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                                    )}
+                                    {hasWritePermission && (
+                                        <DropdownMenuItem
+                                            onClick={() => handleDeleteClick(row.original)}
+                                            className="text-destructive"
+                                        >
+                                            <Trash2 className="w-4 h-4" /> 
+                                            Delete
+                                        </DropdownMenuItem>
+                                    )}
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        )}
                     </div>
                 );
             },

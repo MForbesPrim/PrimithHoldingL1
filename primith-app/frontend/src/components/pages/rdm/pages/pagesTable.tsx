@@ -67,6 +67,7 @@ interface PagesTableProps {
   currentProjectId?: string | null;
   onAssociateWithProject?: (pageId: string) => Promise<void>;
   onUnassignFromProject?: (pageId: string) => Promise<void>;
+  hasWritePermission?: boolean;
 }
 
 type CombinedNode = {
@@ -247,6 +248,7 @@ export function PagesTable({
     currentProjectId,
     onAssociateWithProject,
     onUnassignFromProject,
+    hasWritePermission,
   }: PagesTableProps) {
     console.log('PagesTable props:', { pages, folders, currentProjectId });
     const [sorting, setSorting] = useState<SortingState>([
@@ -330,9 +332,11 @@ export function PagesTable({
                     </TableRow>
                 </ContextMenuTrigger>
                 <ContextMenuContent>
-                    <ContextMenuItem onClick={handleRenameClick}>
-                        Rename
-                    </ContextMenuItem>
+                    {hasWritePermission && (
+                        <ContextMenuItem onClick={handleRenameClick}>
+                            Rename
+                        </ContextMenuItem>
+                    )}
                     {currentProjectId && onAssociateWithProject && node.type !== 'folder' && (
                         !isAssignedToProject ? (
                             <ContextMenuItem
@@ -355,16 +359,18 @@ export function PagesTable({
                             )
                         )
                     )}
-                    <ContextMenuItem
-                        onClick={() => {
-                            setDeleteTargetId(node.id);
-                            setIsTargetFolder(node.type === 'folder');
-                            setIsDeleteDialogOpen(true);
-                        }}
-                        className="text-red-600"
-                    >
-                        Delete
-                    </ContextMenuItem>
+                    {hasWritePermission && (
+                        <ContextMenuItem
+                            onClick={() => {
+                                setDeleteTargetId(node.id);
+                                setIsTargetFolder(node.type === 'folder');
+                                setIsDeleteDialogOpen(true);
+                            }}
+                            className="text-red-600"
+                        >
+                            Delete
+                        </ContextMenuItem>
+                    )}
                 </ContextMenuContent>
             </ContextMenu>
         );
@@ -532,6 +538,14 @@ export function PagesTable({
             currentProjectId && 
             node.projectId === currentProjectId;
             
+          // Only show dropdown if there are actions available
+          const hasAvailableActions = hasWritePermission || 
+              (currentProjectId && onAssociateWithProject && node.type !== 'folder');
+
+          if (!hasAvailableActions) {
+              return null;
+          }
+
           return (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -541,113 +555,119 @@ export function PagesTable({
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 {node.type === 'folder' ? (
-                  <>
-                    <DropdownMenuItem 
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setTimeout(() => {
-                          onCreateFolder(node.id, 'folders'); 
-                        }, 0);
-                      }}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                    >
-                      <Folder className="h-4 w-4 mr-2" /> 
-                      New Subfolder
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setTimeout(() => {
-                          onCreatePage(node.id); // Removed 'folder'
-                        }, 0);
-                      }}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                    >
-                      <Plus className="h-4 w-4 mr-2" />      
-                      New Subpage
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                    onClick={() => {
-                        setTimeout(() => {
-                        setRenameTargetId(node.id);
-                        setNewName(node.name);
-                        setIsTargetFolder(true);
-                        setIsRenameDialogOpen(true);
-                        }, 0);
-                    }}
-                    >
-                    <FolderPen className="h-4 w-4 mr-2" />    
-                    Rename
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                    onClick={() => {
-                        setTimeout(() => {
-                        setDeleteTargetId(node.id);
-                        setIsTargetFolder(node.type === 'folder');
-                        setIsDeleteDialogOpen(true);
-                        }, 0);
-                    }}
-                    className="text-red-600"
-                    >
-                    <Trash2 className="h-4 w-4 mr-2" />    
-                    Delete
-                    </DropdownMenuItem>
+                  hasWritePermission && (
+                    <>
+                      <DropdownMenuItem 
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setTimeout(() => {
+                            onCreateFolder(node.id, 'folders'); 
+                          }, 0);
+                        }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                      >
+                        <Folder className="h-4 w-4 mr-2" /> 
+                        New Subfolder
+                      </DropdownMenuItem>
+                      <DropdownMenuItem 
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setTimeout(() => {
+                            onCreatePage(node.id);
+                          }, 0);
+                        }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                      >
+                        <Plus className="h-4 w-4 mr-2" />      
+                        New Subpage
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setTimeout(() => {
+                            setRenameTargetId(node.id);
+                            setNewName(node.name);
+                            setIsTargetFolder(true);
+                            setIsRenameDialogOpen(true);
+                          }, 0);
+                        }}
+                      >
+                        <FolderPen className="h-4 w-4 mr-2" />    
+                        Rename
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setTimeout(() => {
+                            setDeleteTargetId(node.id);
+                            setIsTargetFolder(node.type === 'folder');
+                            setIsDeleteDialogOpen(true);
+                          }, 0);
+                        }}
+                        className="text-red-600"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />    
+                        Delete
+                      </DropdownMenuItem>
                     </>
+                  )
                 ) : (
                   <>
-                    <DropdownMenuItem 
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setTimeout(() => {
-                          onCreateFolder(node.id, node.type === 'page' ? 'pages' : 'folders');
-                        }, 0);
-                      }}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                    >
-                      <Folder className="h-4 w-4 mr-2 fill-blue-500 stroke-blue-500 stroke-[1.5]" /> 
-                      New Subfolder
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setTimeout(() => {
-                          onCreatePage(node.id); // Removed conditional parentType
-                        }, 0);
-                      }}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                    >
-                      <Plus className="h-4 w-4 mr-2" />      
-                      New Subpage
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                    onClick={() => {
-                        setTimeout(() => {
-                        setRenameTargetId(node.id);
-                        setNewName(node.name);
-                        setIsTargetFolder(false);
-                        setIsRenameDialogOpen(true);
-                        }, 0);
-                    }}
-                    >
-                    <FilePen className="h-4 w-4 mr-2" />       
-                    Rename
-                    </DropdownMenuItem>
+                    {hasWritePermission && (
+                      <>
+                        <DropdownMenuItem 
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setTimeout(() => {
+                              onCreateFolder(node.id, node.type === 'page' ? 'pages' : 'folders');
+                            }, 0);
+                          }}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                        >
+                          <Folder className="h-4 w-4 mr-2 fill-blue-500 stroke-blue-500 stroke-[1.5]" /> 
+                          New Subfolder
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setTimeout(() => {
+                              onCreatePage(node.id);
+                            }, 0);
+                          }}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                        >
+                          <Plus className="h-4 w-4 mr-2" />      
+                          New Subpage
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setTimeout(() => {
+                              setRenameTargetId(node.id);
+                              setNewName(node.name);
+                              setIsTargetFolder(false);
+                              setIsRenameDialogOpen(true);
+                            }, 0);
+                          }}
+                        >
+                          <FilePen className="h-4 w-4 mr-2" />       
+                          Rename
+                        </DropdownMenuItem>
+                      </>
+                    )}
                     {currentProjectId && onAssociateWithProject && (
                       !isAssignedToProject ? (
                         <DropdownMenuItem
@@ -659,7 +679,7 @@ export function PagesTable({
                             }, 0);
                           }}
                         >
-                        <Link2 className="h-4 w-4 mr-2" />    
+                          <Link2 className="h-4 w-4 mr-2" />    
                           Add to Current Project
                         </DropdownMenuItem>
                       ) : (
@@ -678,20 +698,22 @@ export function PagesTable({
                         )
                       )
                     )}
-                    <DropdownMenuItem
-                    onClick={() => {
-                        setTimeout(() => {
-                        setDeleteTargetId(node.id);
-                        setIsTargetFolder(false);
-                        setIsDeleteDialogOpen(true);
-                        }, 0);
-                    }}
-                    className="text-red-600"
-                    >
-                    <Trash2 className="h-4 w-4 mr-2" />       
-                    Delete
-                    </DropdownMenuItem>
-                </>
+                    {hasWritePermission && (
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setTimeout(() => {
+                            setDeleteTargetId(node.id);
+                            setIsTargetFolder(false);
+                            setIsDeleteDialogOpen(true);
+                          }, 0);
+                        }}
+                        className="text-red-600"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />       
+                        Delete
+                      </DropdownMenuItem>
+                    )}
+                  </>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -699,7 +721,7 @@ export function PagesTable({
         },
       },
     ],
-    [expandedRows, onPageClick, onFolderClick, onCreateFolder, onCreatePage, currentProjectId, onAssociateWithProject, onUnassignFromProject]
+    [expandedRows, onPageClick, onFolderClick, onCreateFolder, onCreatePage, currentProjectId, onAssociateWithProject, onUnassignFromProject, hasWritePermission]
   );
 
   const table = useReactTable({

@@ -466,7 +466,7 @@ export function RdmHeader() {
 
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbPage className="font-regular text-[#172B4D]">
+            <BreadcrumbPage className="font-regular text-foreground">
               {currentSection}
             </BreadcrumbPage>
           </BreadcrumbItem>

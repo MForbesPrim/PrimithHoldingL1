@@ -114,6 +114,7 @@ interface PageEditorProps {
   templateMode?: boolean;
   editMode?: boolean;
   projectId?: string | null;
+  hasWritePermission?: boolean;
   onUpdateTemplateDetails?: (id: string, details: {
     title: string;
     description: string;
@@ -453,7 +454,8 @@ const PageEditor = ({
   autoSave = false,
   templateMode = false,
   editMode = false,
-  projectId
+  projectId,
+  hasWritePermission = false
 }: PageEditorProps) => {
   const { toast } = useToast();
   const pagesService = new PagesService();
@@ -1803,45 +1805,49 @@ useEffect(() => {
           {/* Save Button - show differently for template mode */}
           {templateMode ? (
           <div className="flex items-center gap-1">
-            <TooltipButton
-              title="Save Template"
-              onClick={() => {
-                if (editMode) {
-                  // In edit mode, save directly without dialog
-                  onSave(page.id, editor.getHTML(), {
-                    name: stagingTemplateDetails.name,
-                    description: stagingTemplateDetails.description,
-                    categoryId: stagingTemplateDetails.categoryId
-                  });
-                } else {
-                  // In create mode, show confirmation dialog
-                  setIsEditing(false);
-                  setShowTemplateDialog(true);
-                  setTemplateName(stagingTemplateDetails.name || page.name);
-                  setTemplateDescription(stagingTemplateDetails.description || '');
-                  setSelectedCategoryId(stagingTemplateDetails.categoryId);
-                }
-              }}
-            >
-              <Save className="w-4 h-4 text-gray-600" />
-            </TooltipButton>
+            {hasWritePermission && (
+              <>
+                <TooltipButton
+                  title="Save Template"
+                  onClick={() => {
+                    if (editMode) {
+                      // In edit mode, save directly without dialog
+                      onSave(page.id, editor.getHTML(), {
+                        name: stagingTemplateDetails.name,
+                        description: stagingTemplateDetails.description,
+                        categoryId: stagingTemplateDetails.categoryId
+                      });
+                    } else {
+                      // In create mode, show confirmation dialog
+                      setIsEditing(false);
+                      setShowTemplateDialog(true);
+                      setTemplateName(stagingTemplateDetails.name || page.name);
+                      setTemplateDescription(stagingTemplateDetails.description || '');
+                      setSelectedCategoryId(stagingTemplateDetails.categoryId);
+                    }
+                  }}
+                >
+                  <Save className="w-4 h-4 text-gray-600" />
+                </TooltipButton>
 
-            <TooltipButton
-              title="Template Details"
-              onClick={() => {
-                setIsEditing(true);
-                setShowTemplateDialog(true);
-                setTemplateName(stagingTemplateDetails.name || page.name);
-                setTemplateDescription(stagingTemplateDetails.description || '');
-                setSelectedCategoryId(stagingTemplateDetails.categoryId);
-              }}
-            >
-              <Edit className="w-4 h-4 text-gray-600" />
-            </TooltipButton>
+                <TooltipButton
+                  title="Template Details"
+                  onClick={() => {
+                    setIsEditing(true);
+                    setShowTemplateDialog(true);
+                    setTemplateName(stagingTemplateDetails.name || page.name);
+                    setTemplateDescription(stagingTemplateDetails.description || '');
+                    setSelectedCategoryId(stagingTemplateDetails.categoryId);
+                  }}
+                >
+                  <Edit className="w-4 h-4 text-gray-600" />
+                </TooltipButton>
+              </>
+            )}
           </div>
         ) : (
           <>
-          {!autoSave && (
+          {!autoSave && hasWritePermission && (
             <TooltipButton
               title="Save"
               onClick={() => {
@@ -1896,20 +1902,22 @@ useEffect(() => {
                     <FileDown className="w-4 h-4 mr-2" />
                     <span>Export PDF</span>
                   </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    className="cursor-pointer" 
-                    onClick={() => {
-                      setTimeout(() => {
-                        setShowTemplateDialog(true);
-                        setTemplateName("");
-                        setTemplateCategory("");
-                        setTemplateDescription("");
-                      }, 0);
-                    }}
-                  >
-                    <Save className="w-4 h-4 mr-2" />
-                    <span>Save as Template</span>
-                  </DropdownMenuItem>
+                  {hasWritePermission && (
+                    <DropdownMenuItem 
+                      className="cursor-pointer" 
+                      onClick={() => {
+                        setTimeout(() => {
+                          setShowTemplateDialog(true);
+                          setTemplateName("");
+                          setTemplateCategory("");
+                          setTemplateDescription("");
+                        }, 0);
+                      }}
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      <span>Save as Template</span>
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>

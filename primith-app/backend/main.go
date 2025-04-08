@@ -15722,28 +15722,41 @@ func handleGetOrganizationCollaborators(w http.ResponseWriter, r *http.Request) 
 	}
 
 	rows, err := db.Query(`
-			SELECT 
-				u.id, u.email, u.first_name, u.last_name,
-				COALESCE(r.name, 'member') AS role,
-				ARRAY_AGG(p.name) FILTER (WHERE p.name IS NOT NULL) AS projects,
-				u.is_active,
-				COALESCE((
-					SELECT json_agg(json_build_object(
-						'resource_type', ap.resource_type,
-						'resource_id', ap.resource_id,
-						'permission_level', ap.permission_level
-					))
-					FROM auth.access_permissions ap
-					WHERE ap.user_id = u.id
-				), '[]') AS permissions
-			FROM auth.users u
-			JOIN auth.organization_members om ON u.id = om.user_id
-			LEFT JOIN auth.user_roles ur ON u.id = ur.user_id AND ur.organization_id = om.organization_id
-			LEFT JOIN auth.roles r ON ur.role_id = r.id
-			LEFT JOIN rdm.project_members pm ON u.id = pm.user_id
-			LEFT JOIN rdm.projects p ON pm.project_id = p.id AND p.organization_id = om.organization_id
-			WHERE om.organization_id = $1
-			GROUP BY u.id, u.email, u.first_name, u.last_name, r.name, u.is_active
+		SELECT 
+			u.id, u.email, u.first_name, u.last_name,
+			COALESCE(r.name, 'member') AS role,
+			ARRAY_AGG(p.name) FILTER (WHERE p.name IS NOT NULL) AS projects,
+			u.is_active,
+			COALESCE((
+				SELECT json_agg(json_build_object(
+					'resource_type', ap.resource_type,
+					'resource_id', ap.resource_id,
+					'resource_name', 
+					CASE
+						WHEN ap.resource_type = 'project' THEN (SELECT name FROM rdm.projects WHERE id = ap.resource_id)
+						WHEN ap.resource_type = 'document' THEN (SELECT name FROM rdm.documents WHERE id = ap.resource_id)
+						WHEN ap.resource_type = 'page' THEN (SELECT name FROM pages.pages_content WHERE id = ap.resource_id)
+						WHEN ap.resource_type = 'folder' THEN 
+							CASE 
+								WHEN EXISTS (SELECT 1 FROM rdm.folders WHERE id = ap.resource_id) 
+								THEN (SELECT name FROM rdm.folders WHERE id = ap.resource_id)
+								ELSE (SELECT name FROM pages.pages_content WHERE id = ap.resource_id AND type = 'folder')
+							END
+						ELSE 'Unknown'
+					END,
+					'permission_level', ap.permission_level
+				))
+				FROM auth.access_permissions ap
+				WHERE ap.user_id = u.id
+			), '[]') AS permissions
+		FROM auth.users u
+		JOIN auth.organization_members om ON u.id = om.user_id
+		LEFT JOIN auth.user_roles ur ON u.id = ur.user_id AND ur.organization_id = om.organization_id
+		LEFT JOIN auth.roles r ON ur.role_id = r.id
+		LEFT JOIN rdm.project_members pm ON u.id = pm.user_id
+		LEFT JOIN rdm.projects p ON pm.project_id = p.id AND p.organization_id = om.organization_id
+		WHERE om.organization_id = $1
+		GROUP BY u.id, u.email, u.first_name, u.last_name, r.name, u.is_active
 		`, orgID)
 	if err != nil {
 		log.Printf("Error querying collaborators: %v", err)

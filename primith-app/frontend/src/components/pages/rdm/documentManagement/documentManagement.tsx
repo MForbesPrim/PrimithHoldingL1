@@ -52,6 +52,12 @@ export function DocumentManagement() {
     }
   }, [selectedFolderId])
 
+  useEffect(() => {
+    if (viewMode === "trash" && !hasWritePermission) {
+      setViewMode("dashboard");
+    }
+  }, [viewMode, hasWritePermission]);
+
   const checkWritePermissions = async () => {
     try {
       // Get current user and membership type from AuthService
@@ -435,7 +441,7 @@ export function DocumentManagement() {
 
   return (
     <div className="flex h-full">
-      {isSidebarVisible && (
+      {isSidebarVisible && hasWritePermission && (
         <FolderTree
           folders={folders}
           onCreateFolder={handleCreateFolder}
@@ -452,14 +458,16 @@ export function DocumentManagement() {
       <div className="flex-1 p-4">
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setIsSidebarVisible(!isSidebarVisible)}
-              className="mr-2"
-            >
-              {isSidebarVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
-            </Button>
+            {hasWritePermission && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsSidebarVisible(!isSidebarVisible)}
+                className="mr-2"
+              >
+                {isSidebarVisible ? <PanelLeftClose /> : <PanelLeftOpen />}
+              </Button>
+            )}
             
             {selectedFolderId ? (
               <div className="flex items-center gap-2">
@@ -497,7 +505,7 @@ export function DocumentManagement() {
                   <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
                   <TabsTrigger value="documents">Documents</TabsTrigger>
                   <TabsTrigger value="folders">Folders</TabsTrigger>
-                  <TabsTrigger value="trash">Trash</TabsTrigger>
+                  {hasWritePermission && <TabsTrigger value="trash">Trash</TabsTrigger>}
                   <TabsTrigger value="overview">Overview</TabsTrigger>
                 </TabsList>
               </Tabs>

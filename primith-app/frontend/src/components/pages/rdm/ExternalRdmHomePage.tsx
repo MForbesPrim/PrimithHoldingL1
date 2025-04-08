@@ -113,34 +113,26 @@ export function ExternalRdmHomePage() {
         </div>
       </div>
 
-      {/* Quick Access Grid - Glassmorphism Design */}
+      {/* Quick Access Grid */}
       <div className="grid gap-6 md:grid-cols-3">
         {quickAccessCards.map((card) => (
-          <div
+          <Card
             key={card.title}
-            className={`relative cursor-pointer group overflow-hidden rounded-xl transition-all duration-300 ${
-              selectedOrgId ? 'hover:translate-y-[-2px] hover:shadow-lg' : 'opacity-50'
-            }`}
+            className={`cursor-pointer group overflow-hidden transition-all duration-300 
+              bg-white dark:bg-card hover:bg-slate-50 dark:hover:bg-accent
+              ${selectedOrgId ? 'hover:translate-y-[-2px] hover:shadow-lg' : 'opacity-50'}`}
             onClick={() => selectedOrgId && navigate(card.route)}
-            style={{
-              background: 'rgba(255, 255, 255, 0.7)',
-              boxShadow: '0 1px 8px rgba(31, 38, 135, 0.1)',
-              border: '1px solid rgba(255, 255, 255, 0.18)',
-              transform: 'translateY(0)',
-              transition: 'all 0.2s ease-in-out'
-            }}
           >
-            <div className="absolute -inset-1 transition-opacity rounded-xl" />
-            <div className="p-6 relative z-10">
+            <CardContent className="p-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-slate-800">{card.title}</h3>
-                <div className="rounded-full p-2 text-blue-500 transition-all group-hover:scale-110">
+                <CardTitle className="text-lg text-slate-800 dark:text-slate-100">{card.title}</CardTitle>
+                <div className="rounded-full p-2 text-blue-500 dark:text-blue-400 transition-all group-hover:scale-110">
                   <card.icon className="h-5 w-5" />
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground">{card.description}</p>
-            </div>
-          </div>
+              <p className="text-sm text-muted-foreground dark:text-slate-300">{card.description}</p>
+            </CardContent>
+          </Card>
         ))}
       </div>
 

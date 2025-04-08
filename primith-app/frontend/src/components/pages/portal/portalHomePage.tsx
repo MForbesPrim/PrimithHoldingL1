@@ -22,7 +22,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { ChatBot } from "@/components/pages/portal/primithChat"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast"
 import { useState, useEffect } from "react"
@@ -32,7 +31,6 @@ export function PortalHomePage() {
   const { toast } = useToast()
   const navigate = useNavigate()
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
-  const [isChatOpen, setIsChatOpen] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [isLoadingAvatar, setIsLoadingAvatar] = useState(false)
@@ -157,11 +155,6 @@ export function PortalHomePage() {
 
         <div className="ml-auto flex items-center space-x-4">
           <TooltipProvider>
-            {/* Chat Assistant */}
-            <ChatBot 
-                isOpen={isChatOpen}
-                setIsOpen={setIsChatOpen}
-                          />
             {/* Notifications */}
             <TooltipProvider>
                 <Tooltip open={showTooltip && !isNotificationOpen}>
