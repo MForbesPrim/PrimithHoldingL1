@@ -15250,17 +15250,12 @@ func handleGeneratePDF(w http.ResponseWriter, r *http.Request) {
 	pdf.SetMargins(20, 20, 20)
 	pdf.AddPage()
 
-	// Add title
-	pdf.SetFont("Arial", "B", 16)
-	pdf.Cell(170, 10, req.Title)
-	pdf.Ln(15)
-
 	// Reset font for content
 	pdf.SetFont("Arial", "", 12)
 
 	// Process and extract variables if applicable
 	content := req.Content
-	if strings.Contains(content, "data-variable") && req.PageID != "" {
+	if strings.Contains(content, "{{") && req.PageID != "" {
 		var projectID string
 		err := db.QueryRow("SELECT project_id FROM pages.pages_content WHERE id = $1", req.PageID).Scan(&projectID)
 
@@ -15278,9 +15273,9 @@ func handleGeneratePDF(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 
-				// Manual parsing to replace variables
+				// Replace {{Variable}} format
 				for key, value := range variables {
-					varPattern := fmt.Sprintf(`<span data-variable="%s"[^>]*>([^<]*)</span>`, key)
+					varPattern := fmt.Sprintf(`\{\{%s\}\}`, key)
 					content = regexp.MustCompile(varPattern).ReplaceAllString(content, value)
 				}
 			}
