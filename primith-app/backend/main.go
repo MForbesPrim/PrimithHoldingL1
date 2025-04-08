@@ -15990,6 +15990,34 @@ func handleUpdateCollaborator(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Before deleting existing permissions, get current project permissions
+		var currentProjectIDs []string
+		rows, err := tx.Query(`
+			SELECT resource_id FROM auth.access_permissions 
+			WHERE user_id = $1 AND resource_type = 'project'
+		`, userID)
+		if err != nil {
+			log.Printf("Failed to fetch current project permissions: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var projectID string
+			if err := rows.Scan(&projectID); err != nil {
+				log.Printf("Error scanning project ID: %v", err)
+				http.Error(w, "Database error", http.StatusInternalServerError)
+				return
+			}
+			currentProjectIDs = append(currentProjectIDs, projectID)
+		}
+		if err = rows.Err(); err != nil {
+			log.Printf("Error iterating project rows: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+
 		// Delete existing permissions
 		_, err = tx.Exec(`
 			DELETE FROM auth.access_permissions 
@@ -16001,6 +16029,9 @@ func handleUpdateCollaborator(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("Deleted existing permissions for user %s", userID)
+
+		// Track which projects are in the new permissions
+		newProjectIDs := make(map[string]bool)
 
 		// Insert new permissions
 		for i, perm := range req.AccessPermissions {
@@ -16017,7 +16048,43 @@ func handleUpdateCollaborator(w http.ResponseWriter, r *http.Request) {
 			}
 			log.Printf("Added permission: type=%s, id=%s, level=%s",
 				perm.ResourceType, perm.ResourceID, perm.AccessLevel)
+
+			// If the permission is for a project, also add them to project_members
+			if perm.ResourceType == "project" {
+				newProjectIDs[perm.ResourceID] = true
+
+				_, err = tx.Exec(`
+					INSERT INTO rdm.project_members (user_id, project_id, role)
+					VALUES ($1, $2, 'external')
+					ON CONFLICT (user_id, project_id) DO NOTHING
+				`, userID, perm.ResourceID)
+
+				if err != nil {
+					log.Printf("Failed to add user to project_members: %v", err)
+					http.Error(w, "Failed to add user to project", http.StatusInternalServerError)
+					return
+				}
+				log.Printf("User added to project_members for project %s", perm.ResourceID)
+			}
 		}
+
+		// Remove user from projects that are no longer in permissions
+		for _, projectID := range currentProjectIDs {
+			if !newProjectIDs[projectID] {
+				_, err = tx.Exec(`
+					DELETE FROM rdm.project_members 
+					WHERE user_id = $1 AND project_id = $2
+				`, userID, projectID)
+
+				if err != nil {
+					log.Printf("Failed to remove user from project_members: %v", err)
+					http.Error(w, "Failed to remove user from project", http.StatusInternalServerError)
+					return
+				}
+				log.Printf("User removed from project_members for project %s", projectID)
+			}
+		}
+
 		log.Printf("Successfully updated %d permissions for user %s",
 			len(req.AccessPermissions), userID)
 	} else {

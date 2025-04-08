@@ -429,6 +429,10 @@ export function CollaboratorsPage() {
         throw new Error(errorMessage);
       }
   
+      // Get fresh data immediately after successful update
+      const updatedCollaborators = await fetchCollaborators();
+      setCollaborators(updatedCollaborators);
+      
       setIsEditDialogOpen(false);
       toast({
         title: "Success",
@@ -499,7 +503,6 @@ export function CollaboratorsPage() {
   useEffect(() => {
     if (!isEditDialogOpen) {
       setSelectedCollaborator(null);
-      fetchCollaborators();
     }
   }, [isEditDialogOpen]);
 
