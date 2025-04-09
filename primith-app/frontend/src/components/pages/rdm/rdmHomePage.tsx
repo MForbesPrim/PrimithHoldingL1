@@ -483,7 +483,7 @@ export function RdmHomePage() {
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-medium">All Activities This Week</h3>
+              <h3 className="text-sm font-medium">All Activity</h3>
               <Button 
                 variant="ghost" 
                 size="sm" 
@@ -523,7 +523,7 @@ export function RdmHomePage() {
               </div>
             ) : (
               <p className="text-sm text-muted-foreground text-center py-4">
-                No activities recorded this week
+                No activity recorded
               </p>
             )}
           </div>
