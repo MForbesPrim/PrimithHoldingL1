@@ -12,7 +12,7 @@ import {
   BarChart2
 } from "lucide-react"
 import { useOrganization } from "@/components/pages/rdm/context/organizationContext"
-import { useState, useEffect, SetStateAction } from "react"
+import { useState, useEffect, SetStateAction, useCallback } from "react"
 import { ProjectService } from "@/services/projectService"
 import { ProjectActivity } from "@/types/projects"
 import { PagesService } from "@/services/pagesService"
@@ -51,6 +51,8 @@ export function RdmHomePage() {
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [dayActivities, setDayActivities] = useState<ProjectActivity[]>([])
   const [showAllActivities, setShowAllActivities] = useState(false)
+  const [activityPeriod, setActivityPeriod] = useState<'week' | 'month' | 'quarter' | 'year'>('week')
+  const [allActivities, setAllActivities] = useState<ProjectActivity[]>([])
   
   // New state variables for Quick Stats
   const [documentStats, setDocumentStats] = useState<{ name: string; documents: number }[]>([])
@@ -82,6 +84,113 @@ export function RdmHomePage() {
     checkMembershipType();
   }, []);
 
+  // Move processActivityData inside useCallback to memoize it
+  const processActivityData = useCallback((activities: ProjectActivity[]) => {
+    const currentDate = new Date()
+    let filteredActivities: ProjectActivity[] = []
+    let labels: string[] = []
+    
+    switch (activityPeriod) {
+      case 'week':
+        // Get start of current week (Sunday)
+        const startOfWeek = new Date(currentDate)
+        startOfWeek.setDate(currentDate.getDate() - currentDate.getDay())
+        startOfWeek.setHours(0, 0, 0, 0)
+        
+        filteredActivities = activities.filter(activity => {
+          const activityDate = new Date(activity.timestamp)
+          return activityDate >= startOfWeek
+        })
+        
+        // Create array of days from Sunday to Saturday
+        labels = Array.from({ length: 7 }, (_, i) => {
+          const day = new Date(startOfWeek)
+          day.setDate(startOfWeek.getDate() + i)
+          return day.toLocaleDateString('en-US', { weekday: 'short' })
+        })
+        break
+        
+      case 'month':
+        // Get activities from current year
+        filteredActivities = activities.filter(activity => {
+          const activityDate = new Date(activity.timestamp)
+          return activityDate.getFullYear() === currentDate.getFullYear()
+        })
+        
+        // Create array of all months
+        labels = Array.from({ length: 12 }, (_, i) => {
+          const month = new Date(currentDate.getFullYear(), i)
+          return month.toLocaleDateString('en-US', { month: 'short' })
+        })
+        break
+        
+      case 'quarter':
+        // Get activities from current year
+        filteredActivities = activities.filter(activity => {
+          const activityDate = new Date(activity.timestamp)
+          return activityDate.getFullYear() === currentDate.getFullYear()
+        })
+        
+        // Create array of quarters for the year
+        labels = ['Q1', 'Q2', 'Q3', 'Q4']
+        break
+        
+      case 'year':
+        // Get all activities from the past 5 years
+        const startYear = currentDate.getFullYear() - 4 // Show last 5 years
+        filteredActivities = activities.filter(activity => {
+          const activityDate = new Date(activity.timestamp)
+          return activityDate.getFullYear() >= startYear
+        })
+        
+        // Create array of years
+        labels = Array.from({ length: 5 }, (_, i) => (startYear + i).toString())
+        break
+    }
+
+    // Group activities by period label
+    const groupedData = labels.map(label => {
+      let count = 0
+      
+      switch (activityPeriod) {
+        case 'week':
+          count = filteredActivities.filter(activity => {
+            const date = new Date(activity.timestamp)
+            return date.toLocaleDateString('en-US', { weekday: 'short' }) === label
+          }).length
+          break
+          
+        case 'month':
+          count = filteredActivities.filter(activity => {
+            const date = new Date(activity.timestamp)
+            return date.toLocaleDateString('en-US', { month: 'short' }) === label
+          }).length
+          break
+          
+        case 'quarter':
+          const quarterIndex = labels.indexOf(label)
+          count = filteredActivities.filter(activity => {
+            const date = new Date(activity.timestamp)
+            const activityQuarter = Math.floor(date.getMonth() / 3)
+            return activityQuarter === quarterIndex
+          }).length
+          break
+          
+        case 'year':
+          count = filteredActivities.filter(activity => {
+            const date = new Date(activity.timestamp)
+            return date.getFullYear().toString() === label
+          }).length
+          break
+      }
+      
+      return { name: label, activity: count }
+    })
+
+    setActivityData(groupedData)
+    setRecentActivity(filteredActivities)
+  }, [activityPeriod])
+
   useEffect(() => {
     async function fetchData() {
       if (!selectedOrgId) {
@@ -104,29 +213,12 @@ export function RdmHomePage() {
         const activityResults = await Promise.all(activityPromises)
         
         // Process activity data
-        const allActivities = activityResults
+        const allActivitiesData = activityResults
           .flatMap(result => result?.activities || [])
           .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
         
-        setRecentActivity(allActivities)
-
-        // Process chart data
-        const activityByDay = allActivities.reduce((acc, activity) => {
-          const date = new Date(activity.timestamp)
-          const dayName = date.toLocaleDateString('en-US', { weekday: 'short' })
-          if (!acc[dayName]) {
-            acc[dayName] = { name: dayName, activity: 0 }
-          }
-          acc[dayName].activity += 1
-          return acc
-        }, {} as Record<string, { name: string; activity: number }>)
-
-        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-        const sortedActivityData = days.map(day => 
-          activityByDay[day] || { name: day, activity: 0 }
-        )
-        
-        setActivityData(sortedActivityData)
+        setAllActivities(allActivitiesData)
+        processActivityData(allActivitiesData)
 
         // Process stats data
         const activeProjectsCount = projects.filter(p => p.status === 'active').length
@@ -313,6 +405,13 @@ export function RdmHomePage() {
 
     return () => clearTimeout(timer)
   }, [selectedOrgId])
+
+  // Update the effect for activity period changes
+  useEffect(() => {
+    if (allActivities.length > 0) {
+      processActivityData(allActivities)
+    }
+  }, [activityPeriod, processActivityData, allActivities])
 
   const toggleActivityChart = () => {
     setShowActivityChart(!showActivityChart)
@@ -623,33 +722,79 @@ export function RdmHomePage() {
               <div>
                 {showActivityChart && (
                   <div className="h-[120px] mb-4 animate-in fade-in duration-300">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ChartContainer 
-                        config={{
-                          activity: {
-                            label: "Activities",
-                            color: "#6366f1",
-                          },
-                        } satisfies ChartConfig}
-                      >
-                        <BarChart data={activityData}>
-                          <XAxis 
-                            dataKey="name" 
-                            tick={{ fontSize: 12 }} 
-                            axisLine={false}
-                            tickLine={false}
-                          />
-                          <ChartTooltip content={<ChartTooltipContent />} />
-                          <Bar 
-                            dataKey="activity" 
-                            fill="var(--color-activity)" 
-                            radius={[4, 4, 0, 0]}
-                            onClick={handleBarClick}
-                            cursor="pointer"
-                          />
-                        </BarChart>
-                      </ChartContainer>
-                    </ResponsiveContainer>
+                    <div className="flex items-center justify-end mb-2">
+                      <div className="flex items-center rounded-md border overflow-hidden text-xs">
+                        <button 
+                          className={`px-2 py-1 ${activityPeriod === 'week' ? 'bg-blue-100 text-blue-700' : 'bg-transparent'}`}
+                          onClick={() => {
+                            setActivityPeriod('week')
+                            setSelectedDay(null)
+                          }}
+                        >
+                          W
+                        </button>
+                        <button 
+                          className={`px-2 py-1 ${activityPeriod === 'month' ? 'bg-blue-100 text-blue-700' : 'bg-transparent'}`}
+                          onClick={() => {
+                            setActivityPeriod('month')
+                            setSelectedDay(null)
+                          }}
+                        >
+                          M
+                        </button>
+                        <button 
+                          className={`px-2 py-1 ${activityPeriod === 'quarter' ? 'bg-blue-100 text-blue-700' : 'bg-transparent'}`}
+                          onClick={() => {
+                            setActivityPeriod('quarter')
+                            setSelectedDay(null)
+                          }}
+                        >
+                          Q
+                        </button>
+                        <button 
+                          className={`px-2 py-1 ${activityPeriod === 'year' ? 'bg-blue-100 text-blue-700' : 'bg-transparent'}`}
+                          onClick={() => {
+                            setActivityPeriod('year')
+                            setSelectedDay(null)
+                          }}
+                        >
+                          Y
+                        </button>
+                      </div>
+                    </div>
+                    {activityData.some(data => data.activity > 0) ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ChartContainer 
+                          config={{
+                            activity: {
+                              label: "Activities",
+                              color: "#6366f1",
+                            },
+                          } satisfies ChartConfig}
+                        >
+                          <BarChart data={activityData}>
+                            <XAxis 
+                              dataKey="name" 
+                              tick={{ fontSize: 12 }} 
+                              axisLine={false}
+                              tickLine={false}
+                            />
+                            <ChartTooltip content={<ChartTooltipContent />} />
+                            <Bar 
+                              dataKey="activity" 
+                              fill="var(--color-activity)" 
+                              radius={[4, 4, 0, 0]}
+                              onClick={activityPeriod === 'week' ? handleBarClick : undefined}
+                              cursor={activityPeriod === 'week' ? "pointer" : "default"}
+                            />
+                          </BarChart>
+                        </ChartContainer>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="h-full flex items-center justify-center">
+                        <p className="text-sm text-muted-foreground">No Activity To Display</p>
+                      </div>
+                    )}
                   </div>
                 )}
                 {renderActivityList()}
