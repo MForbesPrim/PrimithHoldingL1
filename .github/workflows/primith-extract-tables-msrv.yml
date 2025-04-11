@@ -24,7 +24,6 @@ jobs:
         
         # Create a startup script that will run before the application
         cat > deploy_package/startup.sh << 'EOF'
-#!/bin/bash
 echo "=============== STARTUP DIAGNOSTIC LOG ==============="
 cd /home/site/wwwroot
 
