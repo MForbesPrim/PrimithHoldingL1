@@ -14,6 +14,23 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     
+    - name: Debug - Repository Structure
+      run: |
+        echo "===== REPOSITORY STRUCTURE ====="
+        find primith-app/microservices/pdfTableExtract -type f | sort
+        
+    - name: Verify app.py exists
+      run: |
+        echo "===== CHECKING FOR APP.PY ====="
+        if [ -f "primith-app/microservices/pdfTableExtract/app.py" ]; then
+          echo "✅ app.py found!"
+          ls -la primith-app/microservices/pdfTableExtract/app.py
+        else
+          echo "❌ app.py NOT FOUND in expected location!"
+          echo "Files in directory:"
+          ls -la primith-app/microservices/pdfTableExtract/
+        fi
+    
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -24,10 +41,26 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
       working-directory: ./primith-app/microservices/pdfTableExtract
+    
+    - name: Create simple test file
+      run: |
+        echo "===== CREATING TEST FILE ====="
+        echo "This file was created during deployment at $(date)" > primith-app/microservices/pdfTableExtract/deployment_test.txt
+        echo "Contents of deployment directory:"
+        ls -la primith-app/microservices/pdfTableExtract/
         
     - name: Deploy to Azure
+      id: deploy
       uses: azure/webapps-deploy@v2
       with:
         app-name: 'primith-table-extract'
         publish-profile: ${{ secrets.AZURE_PDF_EXTRACT_PUBLISH_PROFILE }}
         package: ./primith-app/microservices/pdfTableExtract
+    
+    - name: Deployment result
+      run: |
+        echo "===== DEPLOYMENT COMPLETED ====="
+        echo "Deployment Status: ${{ steps.deploy.outcome }}"
+        echo "Remember to check these settings in Azure:"
+        echo "1. Current startup command: gunicorn app:app --bind=0.0.0.0:8000"
+        echo "2. Python version: 3.13"
