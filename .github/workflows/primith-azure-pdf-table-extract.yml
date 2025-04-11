@@ -27,7 +27,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         # Install FastAPI and Uvicorn explicitly
-        pip install fastapi uvicorn
+        pip install fastapi uvicorn[standard]
         echo "The uvicorn version installed is:"
         uvicorn --version
     - name: Deploy to Azure Web App
