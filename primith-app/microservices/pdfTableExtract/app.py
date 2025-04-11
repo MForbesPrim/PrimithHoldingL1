@@ -289,4 +289,4 @@ async def health_check():
 
 @app.get("/")
 async def root():
-    return {"message": "Table Extraction Service. POST PDF to /extract-tables"}
+    return {"message": "Table Extraction Service. POST PDF to /extract-tables endpoint"}

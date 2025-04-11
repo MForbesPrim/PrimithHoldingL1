@@ -21,18 +21,25 @@ jobs:
       with:
         python-version: '3.13'
 
-    - name: Install Dependencies
+    - name: Prepare deployment package
       working-directory: ./primith-app/microservices/pdfTableExtract
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        # Install FastAPI and Uvicorn explicitly
-        pip install fastapi uvicorn[standard]
-        echo "The uvicorn version installed is:"
-        uvicorn --version
+        # Create deployment directory
+        mkdir -p deployment
+        
+        # Copy application files
+        cp app.py requirements.txt deployment/
+        
+        # Create and setup startup script
+        echo '#!/bin/bash' > deployment/startup.sh
+        echo 'cd /home/site/wwwroot' >> deployment/startup.sh
+        echo 'pip install -r requirements.txt' >> deployment/startup.sh
+        echo 'gunicorn --bind=0.0.0.0:8000 -k uvicorn.workers.UvicornWorker app:app' >> deployment/startup.sh
+        chmod +x deployment/startup.sh
+
     - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
       with:
         app-name: 'primth-tbl-extract'
         publish-profile: ${{ secrets.AZURE_PDF_EXTRACT_PUBLISH_PROFILE }}
-        package: ./primith-app/microservices/pdfTableExtract
+        package: ./primith-app/microservices/pdfTableExtract/deployment
