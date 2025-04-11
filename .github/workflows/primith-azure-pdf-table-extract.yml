@@ -32,15 +32,18 @@ jobs:
         pip install --no-cache-dir fastapi uvicorn[standard]
         deactivate
         
-        # Create deployment directory and copy files
-        mkdir -p deployment
-        cp -r * deployment/
-        cp -r env deployment/
-        rm -rf env  # Clean up original env directory
+        # Create deployment directory
+        mkdir -p ../deployment
+        # Copy all files except env and deployment directory
+        find . -maxdepth 1 -not -name env -not -name deployment -not -name . -exec cp -r {} ../deployment/ \;
+        # Copy virtual environment
+        cp -r env ../deployment/
+        # Clean up
+        rm -rf env
 
     - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
       with:
         app-name: 'primth-tbl-extract'
         publish-profile: ${{ secrets.AZURE_PDF_EXTRACT_PUBLISH_PROFILE }}
-        package: ./primith-app/microservices/pdfTableExtract/deployment
+        package: ./primith-app/deployment
