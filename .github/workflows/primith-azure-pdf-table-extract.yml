@@ -22,8 +22,19 @@ jobs:
         python-version: '3.13'
 
     - name: Prepare deployment package
-      working-directory: ./primith-app/microservices/pdfTableExtract
       run: |
+        # Debug: Print current directory
+        echo "Current directory: $PWD"
+        
+        # Create deployment directory
+        mkdir -p deployment_package
+        
+        # Debug: Confirm directory creation
+        ls -la
+        
+        # Copy files to deployment directory
+        cd primith-app/microservices/pdfTableExtract
+        
         # Create and setup virtual environment
         python -m venv env
         source env/bin/activate
@@ -32,18 +43,17 @@ jobs:
         pip install --no-cache-dir fastapi uvicorn[standard]
         deactivate
         
-        # Create deployment directory
-        mkdir -p ../deployment
-        # Copy all files except env and deployment directory
-        find . -maxdepth 1 -not -name env -not -name deployment -not -name . -exec cp -r {} ../deployment/ \;
-        # Copy virtual environment
-        cp -r env ../deployment/
-        # Clean up
-        rm -rf env
+        # Copy files to deployment package
+        cp -r * $GITHUB_WORKSPACE/deployment_package/
+        cp -r env $GITHUB_WORKSPACE/deployment_package/
+        
+        # Debug: Show deployment package contents
+        echo "Deployment package contents:"
+        ls -la $GITHUB_WORKSPACE/deployment_package/
 
     - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
       with:
         app-name: 'primth-tbl-extract'
         publish-profile: ${{ secrets.AZURE_PDF_EXTRACT_PUBLISH_PROFILE }}
-        package: ./primith-app/deployment
+        package: ${{ github.workspace }}/deployment_package
