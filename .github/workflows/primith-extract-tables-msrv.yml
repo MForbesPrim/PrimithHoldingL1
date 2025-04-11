@@ -14,51 +14,29 @@ jobs:
     steps:
     - uses: actions/checkout@v3
       
-    - name: Create deployment package with setup scripts
+    - name: Create deployment package
       run: |
-        mkdir -p deploy_package
+        # Create a temporary directory
+        mkdir -p deploy_temp
         
-        # Copy application files
-        cp primith-app/microservices/pdfTableExtract/app.py deploy_package/
-        cp primith-app/microservices/pdfTableExtract/requirements.txt deploy_package/
+        # Copy core files
+        cp primith-app/microservices/pdfTableExtract/app.py deploy_temp/
+        cp primith-app/microservices/pdfTableExtract/requirements.txt deploy_temp/
         
         # Create a simple startup script
-        echo '#!/bin/bash' > deploy_package/startup.sh
-        echo 'echo "=============== STARTUP DIAGNOSTIC LOG ==============="' >> deploy_package/startup.sh
-        echo 'cd /home/site/wwwroot' >> deploy_package/startup.sh
-        echo 'echo "Current directory: $(pwd)"' >> deploy_package/startup.sh
-        echo 'echo "Directory contents:"' >> deploy_package/startup.sh
-        echo 'ls -la' >> deploy_package/startup.sh
-        echo 'echo "Python version:"' >> deploy_package/startup.sh
-        echo 'python --version' >> deploy_package/startup.sh
-        echo 'echo "Installing dependencies from requirements.txt..."' >> deploy_package/startup.sh
-        echo 'pip install -r requirements.txt' >> deploy_package/startup.sh
-        echo 'echo "Installed packages:"' >> deploy_package/startup.sh
-        echo 'pip list' >> deploy_package/startup.sh
-        echo 'echo "Creating status file to track successful setup..."' >> deploy_package/startup.sh
-        echo 'echo "Setup completed at $(date)" > setup_complete.txt' >> deploy_package/startup.sh
-        echo 'echo "=============== END DIAGNOSTIC LOG ==============="' >> deploy_package/startup.sh
-        echo 'echo "Starting application..."' >> deploy_package/startup.sh
-        echo 'gunicorn app:app --bind=0.0.0.0:8000' >> deploy_package/startup.sh
+        echo '#!/bin/bash' > deploy_temp/startup.sh
+        echo 'cd /home/site/wwwroot' >> deploy_temp/startup.sh
+        echo 'pip install -r requirements.txt' >> deploy_temp/startup.sh
+        echo 'gunicorn app:app --bind=0.0.0.0:8000' >> deploy_temp/startup.sh
+        chmod +x deploy_temp/startup.sh
         
-        # Make script executable
-        chmod +x deploy_package/startup.sh
-        
-        # Create Python version marker for Oryx
-        echo "3.13" > deploy_package/.python_version
-        
-        echo "Deployment package prepared with the following files:"
-        ls -la deploy_package/
+        # List files to verify
+        echo "Files being deployed:"
+        ls -la deploy_temp/
         
     - name: Deploy to Azure
       uses: azure/webapps-deploy@v2
       with:
         app-name: 'primith-table-extract'
         publish-profile: ${{ secrets.AZURE_PDF_EXTRACT_PUBLISH_PROFILE }}
-        package: ./deploy_package
-        
-    - name: Post-deployment instructions
-      run: |
-        echo "Deployment completed. Important:"
-        echo "1. In Azure Portal, update startup command to: bash /home/site/wwwroot/startup.sh"
-        echo "2. After deployment, check logs for diagnostic information"
+        package: ./deploy_temp
