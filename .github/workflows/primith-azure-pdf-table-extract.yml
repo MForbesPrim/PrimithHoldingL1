@@ -21,6 +21,15 @@ jobs:
       with:
         python-version: '3.13'
 
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Stop Web App
+      run: |
+        az webapp stop --name primth-tbl-extract --resource-group YOUR_RESOURCE_GROUP_NAME
+
     - name: Prepare deployment package
       run: |
         # Create deployment directory
@@ -30,11 +39,16 @@ jobs:
         cd primith-app/microservices/pdfTableExtract
         cp app.py requirements.txt $GITHUB_WORKSPACE/deployment_package/
         
-        # Create startup script
-        echo "pip install -r requirements.txt" > $GITHUB_WORKSPACE/deployment_package/startup.sh
+        # Add gunicorn config
+        echo "bind = '0.0.0.0:8000'
+        workers = 4
+        worker_class = 'uvicorn.workers.UvicornWorker'
+        " > $GITHUB_WORKSPACE/deployment_package/gunicorn.conf.py
+        
+        # Create startup command file
+        echo "cd /home/site/wwwroot && pip install --no-cache-dir -r requirements.txt && gunicorn app:app -c gunicorn.conf.py" > $GITHUB_WORKSPACE/deployment_package/startup.sh
         chmod +x $GITHUB_WORKSPACE/deployment_package/startup.sh
         
-        # Debug: Show deployment package contents
         echo "Deployment package contents:"
         ls -la $GITHUB_WORKSPACE/deployment_package/
 
@@ -45,3 +59,7 @@ jobs:
         publish-profile: ${{ secrets.AZURE_PDF_EXTRACT_PUBLISH_PROFILE }}
         package: ${{ github.workspace }}/deployment_package
         timeout-in-min: 10
+
+    - name: Start Web App
+      run: |
+        az webapp start --name primth-tbl-extract --resource-group YOUR_RESOURCE_GROUP_NAME
