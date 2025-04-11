@@ -1,4 +1,4 @@
-name: Deploy PDF Table Extract Service to Azure
+name: Build and Deploy PDF Table Extract Container
 
 on:
   push:
@@ -8,35 +8,28 @@ on:
       - 'primith-app/microservices/pdfTableExtract/**'
 
 jobs:
-  build_and_deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    environment: production
     steps:
     - uses: actions/checkout@v3
-      
-    - name: Create deployment package
-      run: |
-        # Create a temporary directory
-        mkdir -p deploy_temp
+    
+    - name: Login to Azure Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: primithcrprod.azurecr.io
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
         
-        # Copy core files
-        cp primith-app/microservices/pdfTableExtract/app.py deploy_temp/
-        cp primith-app/microservices/pdfTableExtract/requirements.txt deploy_temp/
+    - name: Build and push
+      uses: docker/build-push-action@v4
+      with:
+        context: ./primith-app/microservices/pdfTableExtract
+        push: true
+        tags: primithcrprod.azurecr.io/pdf-table-extract:latest
         
-        # Create a simple startup script
-        echo '#!/bin/bash' > deploy_temp/startup.sh
-        echo 'cd /home/site/wwwroot' >> deploy_temp/startup.sh
-        echo 'pip install -r requirements.txt' >> deploy_temp/startup.sh
-        echo 'gunicorn app:app --bind=0.0.0.0:8000' >> deploy_temp/startup.sh
-        chmod +x deploy_temp/startup.sh
-        
-        # List files to verify
-        echo "Files being deployed:"
-        ls -la deploy_temp/
-        
-    - name: Deploy to Azure
+    - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
       with:
         app-name: 'primith-table-extract'
         publish-profile: ${{ secrets.AZURE_PDF_EXTRACT_PUBLISH_PROFILE }}
-        package: ./deploy_temp
+        images: 'primithcrprod.azurecr.io/pdf-table-extract:latest'
