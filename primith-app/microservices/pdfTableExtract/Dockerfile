@@ -9,4 +9,5 @@ COPY . .
 
 EXPOSE 8000
 
-CMD exec gunicorn app:app --bind 0.0.0.0:${PORT:-8000}
+# Use UvicornWorker and reference correct file name (adjust 'app' if needed)
+CMD exec gunicorn app:app --bind 0.0.0.0:${PORT:-8000} -k uvicorn.workers.UvicornWorker
