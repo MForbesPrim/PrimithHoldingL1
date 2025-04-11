@@ -7,7 +7,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+# Use environment variable for port
+ENV PORT=8000
+EXPOSE ${PORT}
 
-# Use UvicornWorker and reference correct file name (adjust 'app' if needed)
-CMD exec gunicorn app:app --bind 0.0.0.0:${PORT:-8000} -k uvicorn.workers.UvicornWorker
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:8000", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker"]
