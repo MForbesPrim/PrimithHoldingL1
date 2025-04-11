@@ -14499,7 +14499,7 @@ func handleUpdateOrganizationUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !isAdmin {
-		http.Error(w, "Unauthorized: Only admins can update users", http.StatusForbidden)
+		http.Error(w, "Unauthorized: Only system admins can update users", http.StatusForbidden)
 		return
 	}
 
