@@ -33,9 +33,9 @@ jobs:
         deactivate
         
         # Create deployment directory and copy files
-        mkdir -p ../deploy
-        cp -r * ../deploy/
-        cp -r env ../deploy/
+        mkdir -p deployment
+        cp -r * deployment/
+        cp -r env deployment/
         rm -rf env  # Clean up original env directory
 
     - name: Deploy to Azure Web App
@@ -43,4 +43,4 @@ jobs:
       with:
         app-name: 'primth-tbl-extract'
         publish-profile: ${{ secrets.AZURE_PDF_EXTRACT_PUBLISH_PROFILE }}
-        package: ./primith-app/deploy
+        package: ./primith-app/microservices/pdfTableExtract/deployment
