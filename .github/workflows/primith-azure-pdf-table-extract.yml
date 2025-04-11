@@ -1,4 +1,4 @@
-name: Deploy Python Table Extract Microservice to Azure
+name: Deploy Table Extract Microservice to Azure
 
 on:
   push:
