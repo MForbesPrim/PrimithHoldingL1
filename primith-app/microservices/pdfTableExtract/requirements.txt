@@ -1,0 +1,8 @@
+fastapi
+python-multipart
+gmft
+openpyxl
+pandas
+uvicorn[standard]
+gunicorn
+pypdfium2

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -150,8 +151,9 @@ type AuthResponse struct {
 }
 
 type Config struct {
-	Environment string `json:"ENVIRONMENT"`
-	SendGrid    struct {
+	Environment     string `json:"ENVIRONMENT"`
+	PdfTableExtract string `json:"PDF_EXTRACT_SERVICE_URL"`
+	SendGrid        struct {
 		APIKey string `json:"SENDGRID_API_KEY"`
 	} `json:"sendgrid"`
 	Clerk struct {
@@ -17843,6 +17845,209 @@ func handleGetPageFolders(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func getPdfExtractServiceURL() (string, error) {
+	var url string
+	environment := os.Getenv("ENVIRONMENT")
+
+	if environment == "production" {
+		url = os.Getenv("PDF_EXTRACT_SERVICE_URL")
+		if url == "" {
+			errMsg := "CRITICAL: Running in production but PDF_EXTRACT_SERVICE_URL env var is not set"
+			log.Println(errMsg)
+			return "", errors.New(errMsg) // Changed from fmt.Errorf to errors.New and removed !
+		}
+		log.Println("Production environment detected. Using PDF Extract Service URL from ENV VAR.")
+
+	} else {
+		cfg, err := loadConfigIfDev()
+		if err != nil {
+			errMsg := fmt.Sprintf("Error loading config.json for development environment: %v", err)
+			log.Println(errMsg)
+			return "", errors.New(errMsg) // Changed from fmt.Errorf to errors.New
+		}
+
+		url = cfg.PdfTableExtract
+		if url == "" {
+			errMsg := "PDF_EXTRACT_SERVICE_URL missing or empty in development config (config.json)"
+			log.Println(errMsg)
+			return "", errors.New(errMsg) // Changed from fmt.Errorf to errors.New
+		}
+		log.Println("Development/Other environment detected. Using PDF Extract Service URL from config.json.")
+	}
+
+	if url == "" {
+		return "", errors.New("resolved PDF Extract Service URL is empty") // Changed from fmt.Errorf to errors.New
+	}
+
+	return url, nil
+}
+
+func handleExtractTables(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Starting table extraction request")
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("User email: %s", claims.Username)
+
+	// Parse multipart form
+	err := r.ParseMultipartForm(32 << 20) // 32 MB max memory
+	if err != nil {
+		log.Printf("Error parsing multipart form: %v", err)
+		http.Error(w, fmt.Sprintf("Unable to parse form: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Get the file handle and header from the form data
+	// "file" must match the name attribute of the file input in your frontend form
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		log.Printf("Error retrieving file from form: %v", err)
+		http.Error(w, fmt.Sprintf("Error retrieving file: %v", err), http.StatusBadRequest)
+		return
+	}
+	defer file.Close() // Ensure the uploaded file handle is closed
+
+	log.Printf("Processing uploaded file: %s, Size: %d", header.Filename, header.Size)
+
+	// --- Get the target Python microservice URL dynamically ---
+	pythonServiceURL, err := getPdfExtractServiceURL() // Call the helper function
+	if err != nil {
+		log.Printf("Configuration error getting PDF service URL: %v", err)
+		http.Error(w, "Internal server configuration error (URL)", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Forwarding request to Python service at: %s", pythonServiceURL)
+	// --- End Get URL ---
+
+	// --- Prepare the request body to forward to the Python service ---
+	// Create a new multipart writer and buffer
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Create a new form file part in the outgoing request
+	part, err := writer.CreateFormFile("file", header.Filename) // "file" must match what the Python service expects
+	if err != nil {
+		log.Printf("Error creating form file part for forwarding: %v", err)
+		http.Error(w, "Error creating form file for forwarding request", http.StatusInternalServerError)
+		return
+	}
+
+	// Seek back to the beginning of the original uploaded file data
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+		log.Printf("Error seeking beginning of uploaded file: %v", err)
+		http.Error(w, "Error processing uploaded file", http.StatusInternalServerError)
+		return
+	}
+
+	// Copy the original file content directly into the new multipart part
+	_, err = io.Copy(part, file)
+	if err != nil {
+		log.Printf("Error copying file content for forwarding: %v", err)
+		http.Error(w, "Error copying file content for forwarding request", http.StatusInternalServerError)
+		return
+	}
+
+	// Close the multipart writer to finalize the body
+	err = writer.Close()
+	if err != nil {
+		log.Printf("Error closing multipart writer: %v", err)
+		http.Error(w, "Error finalizing forwarded request", http.StatusInternalServerError)
+		return
+	}
+	// --- End Prepare Request Body ---
+
+	// --- Call the Python microservice ---
+	// Create the HTTP request to the Python service
+	req, err := http.NewRequest("POST", pythonServiceURL, body) // Use the dynamic URL and the prepared body
+	if err != nil {
+		log.Printf("Error creating HTTP request to Python service: %v", err)
+		http.Error(w, "Error creating request to backend service", http.StatusInternalServerError)
+		return
+	}
+	// Set the correct Content-Type header for a multipart request
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	// Create an HTTP client with a reasonable timeout
+	// Increased timeout as PDF processing can take time
+	client := &http.Client{Timeout: 90 * time.Second}
+
+	// Execute the request
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Error executing request to Python service: %v", err)
+		// Use StatusBadGateway or StatusServiceUnavailable to indicate upstream failure
+		http.Error(w, fmt.Sprintf("Error calling PDF extraction service: %v", err), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close() // Ensure the response body is closed
+	// --- End Call Python Microservice ---
+
+	// --- Process the response from the Python microservice ---
+	// Read the entire response body first, as we need it whether it's an error or success (the Excel file)
+	respBodyBytes, ioErr := io.ReadAll(resp.Body)
+	if ioErr != nil {
+		// Log the error, but might still proceed if status code was OK previously (unlikely but possible)
+		log.Printf("Error reading response body from Python service: %v", ioErr)
+		// If the status code was not OK, this read error is secondary. If it was OK, this is the primary error now.
+		if resp.StatusCode == http.StatusOK {
+			http.Error(w, "Error reading response from PDF extraction service", http.StatusInternalServerError)
+			return
+		}
+		// If status was already bad, we'll handle that next, prioritize the status code error message.
+	}
+
+	// Check the status code from the Python service
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Error response status from Python service: %d", resp.StatusCode)
+		log.Printf("Python service response body (if any): %s", string(respBodyBytes)) // Log error details from Python service
+		// Forward a generic error or the status code back to the original client
+		http.Error(w, fmt.Sprintf("Error from PDF extraction service (Status: %d)", resp.StatusCode), resp.StatusCode)
+		return
+	}
+
+	// --- Success Case: Forward the Excel file ---
+	log.Printf("Successfully received response from Python service (Status: %d)", resp.StatusCode)
+
+	// Set response headers for the file download back to the original caller (frontend)
+	// Use the Content-Type header returned by the Python service
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		log.Printf("Warning: Python service did not return Content-Type header. Defaulting to Excel.")
+		contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" // Default Excel MIME type
+	}
+	w.Header().Set("Content-Type", contentType)
+
+	// Use the Content-Disposition header returned by the Python service if available, otherwise use a default
+	contentDisposition := resp.Header.Get("Content-Disposition")
+	if contentDisposition == "" {
+		log.Printf("Warning: Python service did not return Content-Disposition header. Defaulting filename.")
+		// Construct a default filename, perhaps using the original uploaded name if desired
+		originalFilename := "unknown_file"
+		if header != nil {
+			originalFilename = header.Filename
+			// Basic sanitization or modification of original filename for the output?
+			// e.g., replace .pdf with .xlsx
+		}
+		contentDisposition = fmt.Sprintf("attachment; filename=\"extracted_tables_from_%s.xlsx\"", originalFilename)
+	}
+	w.Header().Set("Content-Disposition", contentDisposition)
+
+	// Explicitly set the OK status header for the response to the frontend
+	w.WriteHeader(http.StatusOK)
+
+	// Copy the Excel file content (already read into respBodyBytes) to the response writer
+	_, err = w.Write(respBodyBytes)
+	if err != nil {
+		// This usually means the client closed the connection prematurely
+		log.Printf("Error writing Excel response body to client: %v", err)
+		// No need to send another http.Error here as headers are likely already sent
+		return
+	}
+
+	log.Printf("Successfully forwarded Excel response to client.")
+	// --- End Process Response ---
+}
+
 // isProjectAdmin checks if a user is an admin of a project
 func isProjectAdmin(email, projectID string) (bool, error) {
 	var isAdmin bool
@@ -17985,7 +18190,7 @@ func handleRdmRefreshToken(w http.ResponseWriter, r *http.Request) {
 func main() {
 	r := mux.NewRouter()
 	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173", "http://portal.localhost:5173", "https://primith.com", "https://portal.primith.com"},
+		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:8000", "http://portal.localhost:5173", "https://primith.com", "https://portal.primith.com"},
 		AllowedMethods:   []string{"DELETE", "GET", "POST", "PUT", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", "Authorization", "X-Refresh-Token"},
 		AllowCredentials: true,
@@ -18209,6 +18414,9 @@ func main() {
 	r.HandleFunc("/api/organizations/{organizationId}/teams/{teamId}/members/{userId}", authMiddleware(handleRemoveTeamMember)).Methods("DELETE")
 	r.HandleFunc("/api/organizations/{organizationId}/teams/{teamId}", authMiddleware(handleDeleteTeam)).Methods("DELETE")
 	r.HandleFunc("/api/organizations/{organizationId}/activity", authMiddleware(handleGetOrganizationActivity)).Methods("GET")
+
+	// Document Insights
+	r.HandleFunc("/api/extract-tables", authMiddleware(handleExtractTables)).Methods("POST")
 
 	// Invitation routes
 	r.HandleFunc("/api/organizations/{organizationId}/invite", authMiddleware(handleInviteUser)).Methods("POST")

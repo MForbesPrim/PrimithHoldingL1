@@ -47,6 +47,7 @@ Thumbs.db
 .env.development
 .env.production
 .env.*.local
+.venv/
 
 # Log files
 *.log
@@ -71,3 +72,8 @@ bower_components/
 
 # Storybook
 .out/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class

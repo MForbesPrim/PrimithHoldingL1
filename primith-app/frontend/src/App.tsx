@@ -30,6 +30,7 @@ import { PagesDashboard } from "@/components/pages/rdm/pages/pagesDashboard";
 import { CreateTemplate } from "@/components/pages/rdm/pages/pagesCreateTemplate";
 import { EditTemplate } from "@/components/pages/rdm/pages/pagesEditTemplate";
 import { DocumentManagementPage } from "@/components/pages/rdm/documentManagement/dmDashboard";
+import { DiDashboard } from "@/components/pages/rdm/documentInsights/diDashboard";
 import { ProtectedRdmLayout } from "@/components/pages/rdm/layouts/protected-rdm-layout";
 import { HelpPage } from "@/components/pages/helpCenterPage";
 import { ServicesPage as MainServicesPage } from "@/components/pages/servicesPage"
@@ -92,6 +93,7 @@ function App() {
                     <Route path="/rdm/pages" element={<PagesDashboard />} />
                     <Route path="/rdm/pages/templates" element={<PagesDashboard />} />
                     <Route path="/rdm/document-management" element={<DocumentManagementPage />} />
+                    <Route path="/rdm/document-intelligence" element={<DiDashboard />} />
                     <Route path="/rdm/collaborators" element={<CollaboratorsPage />} />
                     <Route path="/rdm/create-template" element={<CreateTemplate />} />
                     <Route path="/rdm/pages/templates/edit/:id" element={<EditTemplate />} />

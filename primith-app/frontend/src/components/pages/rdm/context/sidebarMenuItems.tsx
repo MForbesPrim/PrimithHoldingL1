@@ -29,8 +29,8 @@ export const menuItems = [
     icon: FileText,
   },
   {
-    title: "Document Insights",
-    url: "#",
+    title: "Document Intelligence",
+    url: "/rdm/document-intelligence",
     icon: Lightbulb,
   },
   {
