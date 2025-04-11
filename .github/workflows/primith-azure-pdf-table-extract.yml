@@ -24,21 +24,23 @@ jobs:
     - name: Prepare deployment package
       working-directory: ./primith-app/microservices/pdfTableExtract
       run: |
+        # Create and setup virtual environment
         python -m venv env
         source env/bin/activate
         python -m pip install --upgrade pip
         pip install --no-cache-dir -r requirements.txt
-        pip install fastapi uvicorn[standard]
+        pip install --no-cache-dir fastapi uvicorn[standard]
         deactivate
         
-        # Create deployment structure
-        mkdir -p deploy
-        cp -r * deploy/
-        cp -r env deploy/
+        # Create deployment directory and copy files
+        mkdir -p ../deploy
+        cp -r * ../deploy/
+        cp -r env ../deploy/
+        rm -rf env  # Clean up original env directory
 
     - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
       with:
         app-name: 'primth-tbl-extract'
         publish-profile: ${{ secrets.AZURE_PDF_EXTRACT_PUBLISH_PROFILE }}
-        package: ./primith-app/microservices/pdfTableExtract/deploy
+        package: ./primith-app/deploy
