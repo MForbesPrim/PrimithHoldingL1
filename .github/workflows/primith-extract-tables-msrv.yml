@@ -13,54 +13,62 @@ jobs:
     environment: production
     steps:
     - uses: actions/checkout@v3
-    
-    - name: Debug - Repository Structure
+      
+    - name: Create deployment package with setup scripts
       run: |
-        echo "===== REPOSITORY STRUCTURE ====="
-        find primith-app/microservices/pdfTableExtract -type f | sort
+        mkdir -p deploy_package
         
-    - name: Verify app.py exists
-      run: |
-        echo "===== CHECKING FOR APP.PY ====="
-        if [ -f "primith-app/microservices/pdfTableExtract/app.py" ]; then
-          echo "✅ app.py found!"
-          ls -la primith-app/microservices/pdfTableExtract/app.py
-        else
-          echo "❌ app.py NOT FOUND in expected location!"
-          echo "Files in directory:"
-          ls -la primith-app/microservices/pdfTableExtract/
-        fi
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.13'
+        # Copy application files
+        cp primith-app/microservices/pdfTableExtract/app.py deploy_package/
+        cp primith-app/microservices/pdfTableExtract/requirements.txt deploy_package/
         
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-      working-directory: ./primith-app/microservices/pdfTableExtract
-    
-    - name: Create simple test file
-      run: |
-        echo "===== CREATING TEST FILE ====="
-        echo "This file was created during deployment at $(date)" > primith-app/microservices/pdfTableExtract/deployment_test.txt
-        echo "Contents of deployment directory:"
-        ls -la primith-app/microservices/pdfTableExtract/
+        # Create a startup script that will run before the application
+        cat > deploy_package/startup.sh << 'EOF'
+#!/bin/bash
+echo "=============== STARTUP DIAGNOSTIC LOG ==============="
+cd /home/site/wwwroot
+
+echo "Current directory: $(pwd)"
+echo "Directory contents:"
+ls -la
+
+echo "Python version:"
+python --version
+
+echo "Installing dependencies from requirements.txt..."
+pip install -r requirements.txt
+
+echo "Installed packages:"
+pip list
+
+echo "Creating status file to track successful setup..."
+echo "Setup completed at $(date)" > setup_complete.txt
+
+echo "=============== END DIAGNOSTIC LOG ==============="
+
+# Start the application using gunicorn
+echo "Starting application..."
+gunicorn app:app --bind=0.0.0.0:8000
+EOF
+
+        # Make script executable
+        chmod +x deploy_package/startup.sh
+        
+        # Create Python version marker for Oryx
+        echo "3.13" > deploy_package/.python_version
+        
+        echo "Deployment package prepared with the following files:"
+        ls -la deploy_package/
         
     - name: Deploy to Azure
-      id: deploy
       uses: azure/webapps-deploy@v2
       with:
         app-name: 'primith-table-extract'
         publish-profile: ${{ secrets.AZURE_PDF_EXTRACT_PUBLISH_PROFILE }}
-        package: ./primith-app/microservices/pdfTableExtract
-    
-    - name: Deployment result
+        package: ./deploy_package
+        
+    - name: Post-deployment instructions
       run: |
-        echo "===== DEPLOYMENT COMPLETED ====="
-        echo "Deployment Status: ${{ steps.deploy.outcome }}"
-        echo "Remember to check these settings in Azure:"
-        echo "1. Current startup command: gunicorn app:app --bind=0.0.0.0:8000"
-        echo "2. Python version: 3.13"
+        echo "Deployment completed. Important:"
+        echo "1. In Azure Portal, update startup command to: bash /home/site/wwwroot/startup.sh"
+        echo "2. After deployment, check logs for diagnostic information"
