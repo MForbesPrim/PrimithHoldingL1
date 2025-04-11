@@ -25,15 +25,15 @@ jobs:
       working-directory: ./primith-app/microservices/pdfTableExtract
       run: |
         mkdir -p deployment
-        cp app.py requirements.txt deployment/
+        cp app.py requirements.txt web.config startup.py .deployment deployment/
         
-        # Create startup command file
-        echo 'pip install --no-cache-dir -r requirements.txt && gunicorn --bind=0.0.0.0:8000 -k uvicorn.workers.UvicornWorker app:app' > deployment/startup.sh
+        # Create startup command file as a fallback
+        echo 'python startup.py' > deployment/startup.sh
         chmod +x deployment/startup.sh
 
     - name: Deploy to Azure Web App
       uses: azure/webapps-deploy@v2
       with:
-        app-name: 'primth-tbl-extract'
+        app-name: 'primith-tbl-extract'
         publish-profile: ${{ secrets.AZURE_PDF_EXTRACT_PUBLISH_PROFILE }}
         package: ./primith-app/microservices/pdfTableExtract/deployment
