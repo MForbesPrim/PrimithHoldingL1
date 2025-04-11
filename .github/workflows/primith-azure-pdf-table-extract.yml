@@ -23,29 +23,16 @@ jobs:
 
     - name: Prepare deployment package
       run: |
-        # Debug: Print current directory
-        echo "Current directory: $PWD"
-        
         # Create deployment directory
         mkdir -p deployment_package
         
-        # Debug: Confirm directory creation
-        ls -la
-        
-        # Copy files to deployment directory
+        # Copy only necessary files
         cd primith-app/microservices/pdfTableExtract
+        cp app.py requirements.txt $GITHUB_WORKSPACE/deployment_package/
         
-        # Create and setup virtual environment
-        python -m venv env
-        source env/bin/activate
-        python -m pip install --upgrade pip
-        pip install --no-cache-dir -r requirements.txt
-        pip install --no-cache-dir fastapi uvicorn[standard]
-        deactivate
-        
-        # Copy files to deployment package
-        cp -r * $GITHUB_WORKSPACE/deployment_package/
-        cp -r env $GITHUB_WORKSPACE/deployment_package/
+        # Create startup script
+        echo "pip install -r requirements.txt" > $GITHUB_WORKSPACE/deployment_package/startup.sh
+        chmod +x $GITHUB_WORKSPACE/deployment_package/startup.sh
         
         # Debug: Show deployment package contents
         echo "Deployment package contents:"
@@ -57,3 +44,4 @@ jobs:
         app-name: 'primth-tbl-extract'
         publish-profile: ${{ secrets.AZURE_PDF_EXTRACT_PUBLISH_PROFILE }}
         package: ${{ github.workspace }}/deployment_package
+        timeout-in-min: 10
