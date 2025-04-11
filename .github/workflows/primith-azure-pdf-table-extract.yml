@@ -24,17 +24,11 @@ jobs:
     - name: Prepare deployment package
       working-directory: ./primith-app/microservices/pdfTableExtract
       run: |
-        # Create deployment directory
         mkdir -p deployment
-        
-        # Copy application files
         cp app.py requirements.txt deployment/
         
-        # Create and setup startup script
-        echo '#!/bin/bash' > deployment/startup.sh
-        echo 'cd /home/site/wwwroot' >> deployment/startup.sh
-        echo 'pip install -r requirements.txt' >> deployment/startup.sh
-        echo 'gunicorn --bind=0.0.0.0:8000 -k uvicorn.workers.UvicornWorker app:app' >> deployment/startup.sh
+        # Create startup command file
+        echo 'pip install --no-cache-dir -r requirements.txt && gunicorn --bind=0.0.0.0:8000 -k uvicorn.workers.UvicornWorker app:app' > deployment/startup.sh
         chmod +x deployment/startup.sh
 
     - name: Deploy to Azure Web App
