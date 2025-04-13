@@ -467,14 +467,45 @@ export function RdmHomePage() {
   ]
   
   const handleBarClick = (data: any) => {
-    const clickedDay = data.name;
-    const activitiesForDay = recentActivity.filter(activity => {
-      const date = new Date(activity.timestamp);
-      const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-      return dayName === clickedDay;
-    });
-    setSelectedDay(clickedDay);
-    setDayActivities(activitiesForDay);
+    const clickedPeriod = data.name;
+    let activitiesForPeriod: ProjectActivity[] = [];
+    
+    switch (activityPeriod) {
+      case 'week':
+        activitiesForPeriod = recentActivity.filter(activity => {
+          const date = new Date(activity.timestamp);
+          const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+          return dayName === clickedPeriod;
+        });
+        break;
+        
+      case 'month':
+        activitiesForPeriod = recentActivity.filter(activity => {
+          const date = new Date(activity.timestamp);
+          const monthName = date.toLocaleDateString('en-US', { month: 'short' });
+          return monthName === clickedPeriod;
+        });
+        break;
+        
+      case 'quarter':
+        const quarterIndex = ['Q1', 'Q2', 'Q3', 'Q4'].indexOf(clickedPeriod);
+        activitiesForPeriod = recentActivity.filter(activity => {
+          const date = new Date(activity.timestamp);
+          const activityQuarter = Math.floor(date.getMonth() / 3);
+          return activityQuarter === quarterIndex;
+        });
+        break;
+        
+      case 'year':
+        activitiesForPeriod = recentActivity.filter(activity => {
+          const date = new Date(activity.timestamp);
+          return date.getFullYear().toString() === clickedPeriod;
+        });
+        break;
+    }
+    
+    setSelectedDay(clickedPeriod);
+    setDayActivities(activitiesForPeriod);
   };
 
   const renderActivityList = () => {
@@ -784,8 +815,8 @@ export function RdmHomePage() {
                               dataKey="activity" 
                               fill="var(--color-activity)" 
                               radius={[4, 4, 0, 0]}
-                              onClick={activityPeriod === 'week' ? handleBarClick : undefined}
-                              cursor={activityPeriod === 'week' ? "pointer" : "default"}
+                              onClick={handleBarClick}
+                              cursor="pointer"
                             />
                           </BarChart>
                         </ChartContainer>

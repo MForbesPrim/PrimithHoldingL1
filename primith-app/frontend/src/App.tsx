@@ -31,6 +31,8 @@ import { CreateTemplate } from "@/components/pages/rdm/pages/pagesCreateTemplate
 import { EditTemplate } from "@/components/pages/rdm/pages/pagesEditTemplate";
 import { DocumentManagementPage } from "@/components/pages/rdm/documentManagement/dmDashboard";
 import { DiDashboard } from "@/components/pages/rdm/documentInsights/diDashboard";
+import { TableExtraction } from "@/components/pages/rdm/documentInsights/tableExtraction";
+import { DocumentChat } from "@/components/pages/rdm/documentInsights/documentChat";
 import { ProtectedRdmLayout } from "@/components/pages/rdm/layouts/protected-rdm-layout";
 import { HelpPage } from "@/components/pages/helpCenterPage";
 import { ServicesPage as MainServicesPage } from "@/components/pages/servicesPage"
@@ -93,7 +95,9 @@ function App() {
                     <Route path="/rdm/pages" element={<PagesDashboard />} />
                     <Route path="/rdm/pages/templates" element={<PagesDashboard />} />
                     <Route path="/rdm/document-management" element={<DocumentManagementPage />} />
-                    <Route path="/rdm/document-intelligence" element={<DiDashboard />} />
+                    <Route path="/rdm/document-insights" element={<DiDashboard />} />
+                    <Route path="/rdm/document-insights/table-extraction" element={<TableExtraction />} />
+                    <Route path="/rdm/document-insights/document-chat" element={<DocumentChat />} />
                     <Route path="/rdm/collaborators" element={<CollaboratorsPage />} />
                     <Route path="/rdm/create-template" element={<CreateTemplate />} />
                     <Route path="/rdm/pages/templates/edit/:id" element={<EditTemplate />} />

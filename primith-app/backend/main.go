@@ -153,6 +153,7 @@ type AuthResponse struct {
 type Config struct {
 	Environment     string `json:"ENVIRONMENT"`
 	PdfTableExtract string `json:"PDF_EXTRACT_SERVICE_URL"`
+	MistralOcr      string `json:"MISTRAL_OCR_SERVICE_URL"`
 	SendGrid        struct {
 		APIKey string `json:"SENDGRID_API_KEY"`
 	} `json:"sendgrid"`
@@ -18048,6 +18049,177 @@ func handleExtractTables(w http.ResponseWriter, r *http.Request) {
 	// --- End Process Response ---
 }
 
+func getMistralOcrServiceURL() (string, error) {
+	var url string
+	environment := os.Getenv("ENVIRONMENT")
+
+	if environment == "production" {
+		url = os.Getenv("MISTRAL_OCR_SERVICE_URL")
+		if url == "" {
+			errMsg := "CRITICAL: Running in production but MISTRAL_OCR_SERVICE_URL env var is not set"
+			log.Println(errMsg)
+			return "", errors.New(errMsg)
+		}
+		log.Println("Production environment detected. Using Mistral OCR Service URL from ENV VAR.")
+	} else {
+		cfg, err := loadConfigIfDev()
+		if err != nil {
+			errMsg := fmt.Sprintf("Error loading config.json for development environment: %v", err)
+			log.Println(errMsg)
+			return "", errors.New(errMsg)
+		}
+
+		// Assuming you'll add this field to your Config struct
+		url = cfg.MistralOcr
+		if url == "" {
+			errMsg := "MISTRAL_OCR_SERVICE_URL missing or empty in development config (config.json)"
+			log.Println(errMsg)
+			return "", errors.New(errMsg)
+		}
+		log.Println("Development environment detected. Using Mistral OCR Service URL from config.json.")
+	}
+
+	if url == "" {
+		return "", errors.New("resolved Mistral OCR Service URL is empty")
+	}
+
+	return url, nil
+}
+
+func handleChatWithDocument(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Starting chat with document request")
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("User email: %s", claims.Username)
+
+	// Parse multipart form
+	err := r.ParseMultipartForm(50 << 20) // 50 MB max memory
+	if err != nil {
+		log.Printf("Error parsing multipart form: %v", err)
+		http.Error(w, fmt.Sprintf("Unable to parse form: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Get the file and message from the form data
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		log.Printf("Error retrieving file from form: %v", err)
+		http.Error(w, fmt.Sprintf("Error retrieving file: %v", err), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Log file information
+	log.Printf("Received file: %s, Content-Type: %s", header.Filename, header.Header.Get("Content-Type"))
+
+	message := r.FormValue("message")
+	if message == "" {
+		log.Printf("No message provided in chat request")
+		http.Error(w, "Message is required", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("Processing chat for file: %s, Size: %d, Message: %s", header.Filename, header.Size, message)
+
+	// Get the MistralOCR service URL
+	mistralOcrServiceURL, err := getMistralOcrServiceURL()
+	if err != nil {
+		log.Printf("Configuration error getting Mistral OCR service URL: %v", err)
+		http.Error(w, "Internal server configuration error (URL)", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Forwarding request to Mistral OCR service at: %s", mistralOcrServiceURL)
+
+	// Create the multipart form for the OCR+Chat request
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Add the file to the form
+	part, err := writer.CreateFormFile("file", header.Filename)
+	if err != nil {
+		log.Printf("Error creating form file part: %v", err)
+		http.Error(w, "Error preparing request", http.StatusInternalServerError)
+		return
+	}
+
+	// Reset file position
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+		log.Printf("Error seeking file: %v", err)
+		http.Error(w, "Error processing file", http.StatusInternalServerError)
+		return
+	}
+
+	// Copy file content
+	_, err = io.Copy(part, file)
+	if err != nil {
+		log.Printf("Error copying file content: %v", err)
+		http.Error(w, "Error preparing request", http.StatusInternalServerError)
+		return
+	}
+
+	// Add the message parameter
+	err = writer.WriteField("message", message)
+	if err != nil {
+		log.Printf("Error writing message field: %v", err)
+		http.Error(w, "Error preparing request", http.StatusInternalServerError)
+		return
+	}
+
+	err = writer.Close()
+	if err != nil {
+		log.Printf("Error closing multipart writer: %v", err)
+		http.Error(w, "Error preparing request", http.StatusInternalServerError)
+		return
+	}
+
+	// Create the request to the combined OCR and chat endpoint
+	req, err := http.NewRequest("POST", mistralOcrServiceURL+"/ocr/chat", body)
+	if err != nil {
+		log.Printf("Error creating request: %v", err)
+		http.Error(w, "Error creating request to OCR service", http.StatusInternalServerError)
+		return
+	}
+
+	// Set the content type to multipart/form-data with the boundary
+	contentType := writer.FormDataContentType()
+	log.Printf("Setting Content-Type for request: %s", contentType)
+	req.Header.Set("Content-Type", contentType)
+
+	// Explicitly set additional header to help the Python service identify PDF files
+	req.Header.Set("X-File-Type", "application/pdf")
+
+	// Execute the request with timeout
+	client := &http.Client{Timeout: 180 * time.Second} // 3 minutes timeout for combined OCR and chat
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Error executing request: %v", err)
+		http.Error(w, fmt.Sprintf("Error calling OCR+Chat service: %v", err), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		log.Printf("OCR+Chat service error (Status: %d): %s", resp.StatusCode, string(bodyBytes))
+		http.Error(w, fmt.Sprintf("OCR+Chat service error (Status: %d)", resp.StatusCode), resp.StatusCode)
+		return
+	}
+
+	// Read and forward the response from the Python service
+	responseBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Error reading response: %v", err)
+		http.Error(w, "Error reading service response", http.StatusInternalServerError)
+		return
+	}
+
+	// Forward the response to the client
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBytes)
+}
+
 // isProjectAdmin checks if a user is an admin of a project
 func isProjectAdmin(email, projectID string) (bool, error) {
 	var isAdmin bool
@@ -18417,6 +18589,7 @@ func main() {
 
 	// Document Insights
 	r.HandleFunc("/api/extract-tables", authMiddleware(handleExtractTables)).Methods("POST")
+	r.HandleFunc("/api/chat-with-document", authMiddleware(handleChatWithDocument)).Methods("POST")
 
 	// Invitation routes
 	r.HandleFunc("/api/organizations/{organizationId}/invite", authMiddleware(handleInviteUser)).Methods("POST")
