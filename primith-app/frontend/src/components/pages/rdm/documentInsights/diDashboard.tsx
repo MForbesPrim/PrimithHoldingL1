@@ -1,4 +1,4 @@
-import { Table2, ArrowRight, MessageSquare } from "lucide-react"
+import { Table2, ArrowRight, MessageSquare, BarChart } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
@@ -13,6 +13,10 @@ export function DiDashboard() {
 
   const handleNavigateToDocumentChat = () => {
     navigate("/rdm/document-insights/document-chat")
+  }
+
+  const handleNavigateToCharting = () => {
+    navigate("/rdm/document-insights/charting")
   }
 
   return (
@@ -64,6 +68,30 @@ export function DiDashboard() {
               >
                 <MessageSquare className="mr-2 h-4 w-4" />
                 Chat with Document
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="max-w-xl">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BarChart className="h-5 w-5" />
+              Data Visualization
+            </CardTitle>
+            <CardDescription>
+              Create charts and visualizations from your document data
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-4">
+              <Button
+                onClick={handleNavigateToCharting}
+                className="w-fit"
+              >
+                <BarChart className="mr-2 h-4 w-4" />
+                Create Charts
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>

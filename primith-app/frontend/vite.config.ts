@@ -6,6 +6,9 @@ export default defineConfig({
   build: {
     outDir: 'build',  // Change output directory to 'build'
   },
+  optimizeDeps: {
+    include: ['papaparse']
+  },
   plugins: [react(),],
   resolve: {
     alias: {
