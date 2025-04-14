@@ -2042,7 +2042,7 @@ export function Charting() {
                   <div className="flex flex-col space-y-2">
                     <Label>Custom JSON Data</Label>
                     <Textarea
-                      placeholder={`Valid JSON example: [{"name":"Jan","value":400},{"name":"Feb","value":300},...]`}
+                      placeholder={`JSON example: [{"name":"Jan","value":400},...]`}
                       value={customData}
                       onChange={(e) => setCustomData(e.target.value)}
                       className="min-h-[100px]"

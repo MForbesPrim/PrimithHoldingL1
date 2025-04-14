@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { ArrowLeft, Bold, Italic, List, ListOrdered, Heading2, ChevronDown, Save, BarChart } from "lucide-react"
+import { ArrowLeft, Bold, Italic, List, ListOrdered, Heading2, ChevronDown, Save, BarChart, FileDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { useNavigate } from "react-router-dom"
@@ -37,6 +37,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
 import ReactDOM from "react-dom/client"
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
 interface ChartReport {
   chartType: string;
@@ -65,7 +67,6 @@ interface ChartReport {
   groupByConfig: any;
 }
 
-// Move renderChartContent before ChartNode
 function renderChartContent(reportData: ChartReport) {
   const { chartType, chartData, chartStyles, columns } = reportData;
 
@@ -474,6 +475,7 @@ const MenuBar = ({ editor }: { editor: any }) => {
 export function ChartReport() {
   const [reportData, setReportData] = useState<ChartReport | null>(null)
   const [reportName, setReportName] = useState<string>("Untitled Report")
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
   const navigate = useNavigate()
   const { toast } = useToast()
 
@@ -564,6 +566,252 @@ export function ChartReport() {
     }
   }
 
+  const handleExportPDF = async () => {
+    setIsGeneratingPDF(true);
+    toast({ title: "Generating PDF...", description: "Preparing report...", duration: 5000 });
+  
+    let tempRenderContainer = null;
+  
+    try {
+      // Get editor content
+      if (!editor) {
+        throw new Error("Editor is not initialized.");
+      }
+      
+      // Create off-screen container
+      tempRenderContainer = document.createElement('div');
+      tempRenderContainer.style.position = 'absolute';
+      tempRenderContainer.style.left = '-9999px';
+      tempRenderContainer.style.width = '800px';
+      tempRenderContainer.style.padding = '40px';
+      tempRenderContainer.style.backgroundColor = 'white';
+      
+      // Get editor content as JSON
+      const editorContent = editor.getJSON();
+      
+      // Create a clean version of the editor content
+      const cleanContentHTML = document.createElement('div');
+      cleanContentHTML.className = 'report-content';
+      
+      // Process each node in the editor content
+      const processNode = (node: any) => {
+        if (node.type === 'chart') {
+          // For chart nodes, create a placeholder with a unique ID
+          const chartPlaceholder = document.createElement('div');
+          chartPlaceholder.setAttribute('data-type', 'chart');
+          chartPlaceholder.setAttribute('data-chart-id', `chart-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`);
+          chartPlaceholder.className = 'chart-container my-4 border rounded-lg p-4';
+          chartPlaceholder.style.height = '300px';
+
+          return chartPlaceholder;
+        } else if (node.type === 'paragraph') {
+          const p = document.createElement('p');
+          if (node.content) {
+            node.content.forEach((child: any) => {
+              if (child.type === 'text') {
+                const textNode = document.createTextNode(child.text);
+                if (child.marks) {
+                  let currentNode: globalThis.Node = textNode;
+                  child.marks.forEach((mark: any) => {
+                    const wrapper = document.createElement(mark.type === 'bold' ? 'strong' : mark.type === 'italic' ? 'em' : 'span');
+                    wrapper.appendChild(currentNode);
+                    currentNode = wrapper;
+                  });
+                  p.appendChild(currentNode);
+                } else {
+                  p.appendChild(textNode);
+                }
+              }
+            });
+          }
+          return p;
+        } else if (node.type === 'heading') {
+          const heading = document.createElement(`h${node.attrs.level}`);
+          if (node.content) {
+            node.content.forEach((child: any) => {
+              if (child.type === 'text') {
+                heading.textContent = child.text;
+              }
+            });
+          }
+          return heading;
+        } else if (node.type === 'bulletList') {
+          const ul = document.createElement('ul');
+          if (node.content) {
+            node.content.forEach((listItem: any) => {
+              if (listItem.type === 'listItem' && listItem.content) {
+                const li = document.createElement('li');
+                listItem.content.forEach((itemContent: any) => {
+                  const processedNode = processNode(itemContent);
+                  if (processedNode) li.appendChild(processedNode);
+                });
+                ul.appendChild(li);
+              }
+            });
+          }
+          return ul;
+        } else if (node.type === 'orderedList') {
+          const ol = document.createElement('ol');
+          if (node.content) {
+            node.content.forEach((listItem: any) => {
+              if (listItem.type === 'listItem' && listItem.content) {
+                const li = document.createElement('li');
+                listItem.content.forEach((itemContent: any) => {
+                  const processedNode = processNode(itemContent);
+                  if (processedNode) li.appendChild(processedNode);
+                });
+                ol.appendChild(li);
+              }
+            });
+          }
+          return ol;
+        }
+        return null;
+      };
+
+      // Process all nodes
+      editorContent.content?.forEach(node => {
+        const processedNode = processNode(node);
+        if (processedNode) {
+          cleanContentHTML.appendChild(processedNode);
+        }
+      });
+      
+      tempRenderContainer.appendChild(cleanContentHTML);
+      document.body.appendChild(tempRenderContainer);
+      
+      // Process chart placeholders
+      const chartPlaceholders = Array.from(
+        cleanContentHTML.querySelectorAll('div[data-type="chart"]')
+      );
+      
+      console.log(`Found ${chartPlaceholders.length} chart placeholders to process.`);
+      
+      for (const placeholder of chartPlaceholders) {
+        if (!reportData) {
+          placeholder.innerHTML = '[Chart data not available]';
+          continue;
+        }
+  
+        const chartRenderDiv = document.createElement('div');
+        chartRenderDiv.style.width = '100%';
+        chartRenderDiv.style.height = '300px'; 
+        chartRenderDiv.style.overflow = 'visible'; 
+        placeholder.innerHTML = '';
+        placeholder.appendChild(chartRenderDiv);
+  
+        // Render chart with a unique key
+        const chartId = placeholder.getAttribute('data-chart-id');
+        const root = ReactDOM.createRoot(chartRenderDiv);
+        root.render(
+          <ResponsiveContainer width="100%" height="100%" key={chartId}>
+            {renderChartContent(reportData)}
+          </ResponsiveContainer>
+        );
+        
+        // Wait for chart rendering
+        await new Promise(resolve => setTimeout(resolve, 2000));
+  
+        try {
+          // Capture chart
+          const canvas = await html2canvas(placeholder as HTMLElement, {
+            scale: 2,
+            useCORS: true,
+            logging: true,
+            background: '#ffffff',
+          } as any);
+          
+          const imgDataUrl = canvas.toDataURL('image/png');
+          
+          // Create image
+          const img = document.createElement('img');
+          img.src = imgDataUrl;
+          img.alt = `Chart (${reportData.chartType})`;
+          img.style.width = '100%';
+          img.style.maxWidth = '650px';
+          img.style.display = 'block';
+          img.style.margin = '1rem auto';
+          
+          // Replace placeholder with image
+          placeholder.replaceWith(img);
+          
+          // Unmount React component
+          root.unmount();
+        } catch (chartError) {
+          console.error('Error capturing chart:', chartError);
+          placeholder.innerHTML = '[Error rendering chart]';
+        }
+      }
+  
+      // Wait for all rendering to complete
+      await new Promise(resolve => setTimeout(resolve, 1000));
+  
+      // Generate PDF
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
+      // Use html2canvas to capture the entire content
+      const contentCanvas = await html2canvas(tempRenderContainer, {
+        scale: 2,
+        useCORS: true,
+        background: '#ffffff',
+      } as any);
+      
+      const contentImgData = contentCanvas.toDataURL('image/png', 0.7);
+      
+      // Add content to PDF
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = contentCanvas.width;
+      const imgHeight = contentCanvas.height;
+      
+      // Calculate ratio
+      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight) * 0.9;
+      const imgX = (pdfWidth - imgWidth * ratio) / 2;
+      
+      // Add image to PDF with compression options
+      pdf.addImage(contentImgData, 'PNG', imgX, 10, imgWidth * ratio, imgHeight * ratio, '', 'FAST', 0);
+      
+      // Handle multi-page content if needed
+      let heightLeft = imgHeight * ratio - pdfHeight + 20; // 20mm padding
+      let position = pdfHeight - 20; // Initial position
+      
+      while (heightLeft > 0) {
+        pdf.addPage();
+        pdf.addImage(contentImgData, 'PNG', imgX, -(position), imgWidth * ratio, imgHeight * ratio, '', 'FAST', 0);
+        heightLeft -= (pdfHeight - 20);
+        position += (pdfHeight - 20);
+      }
+      
+      // Set PDF compression
+      const compressedPDF = pdf.output('arraybuffer');
+      const blob = new Blob([compressedPDF], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${reportName}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      
+      toast({ title: "Success", description: "PDF downloaded.", duration: 3000 });
+  
+    } catch (error) {
+      console.error('Error during PDF generation:', error);
+      toast({
+        title: "Error Generating PDF",
+        description: `Failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: "destructive",
+        duration: 5000,
+      });
+    } finally {
+      // Cleanup
+      if (tempRenderContainer && document.body.contains(tempRenderContainer)) {
+        document.body.removeChild(tempRenderContainer);
+      }
+      setIsGeneratingPDF(false);
+    }
+  };
+
   const handleReportNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setReportName(e.target.value)
   }
@@ -584,10 +832,16 @@ export function ChartReport() {
               placeholder="Enter report name"
             />
           </div>
-          <Button onClick={handleSaveReport} className="flex items-center gap-2">
-            <Save className="h-4 w-4" />
-            Save Report
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={handleExportPDF} className="flex items-center gap-2" disabled={isGeneratingPDF}>
+              <FileDown className="h-4 w-4" />
+              {isGeneratingPDF ? 'Generating...' : 'Export PDF'}
+            </Button>
+            <Button onClick={handleSaveReport} className="flex items-center gap-2">
+              <Save className="h-4 w-4" />
+              Save Report
+            </Button>
+          </div>
         </div>
 
         <Card>
