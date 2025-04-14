@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Upload, ArrowLeft, BarChart, PieChart, LineChart, ArrowLeftRight, Layers, Waves, ChevronDown, Plus, Trash2, Settings, Calculator, HelpCircle, Undo, Download, X, Group, Calendar as CalendarIcon } from "lucide-react"
+import { Upload, ArrowLeft, BarChart, PieChart, LineChart, ArrowLeftRight, Layers, Waves, ChevronDown, Plus, Trash2, Settings, Calculator, HelpCircle, Undo, Download, X, Group, Calendar as CalendarIcon, FileText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -730,6 +730,7 @@ export function Charting() {
         title: 'Error',
         description: 'Invalid JSON data. Please check the format.',
         variant: 'destructive',
+        duration: 2000,
       });
     }
   };
@@ -962,6 +963,7 @@ export function Charting() {
         title: "Formula Error",
         description: "There was an error applying the formula. Please check your formula syntax.",
         variant: "destructive",
+        duration: 2000,
       });
     }
   };
@@ -1008,12 +1010,14 @@ export function Charting() {
       toast({
         title: "Changes Undone",
         description: "Cell value has been restored to its previous state.",
+        duration: 2000,
       });
     } else {
       toast({
         title: "Cannot Undo",
         description: "Undo is only available for 30 seconds after applying a formula.",
         variant: "destructive",
+        duration: 2000,
       });
     }
   };
@@ -1073,6 +1077,7 @@ export function Charting() {
         title: "Formula Error",
         description: "There was an error applying the formula. Please check your formula syntax.",
         variant: "destructive",
+        duration: 2000,
       });
     }
   };
@@ -1243,6 +1248,7 @@ export function Charting() {
     toast({
       title: "Grouping Cleared",
       description: "Showing original ungrouped data.",
+      duration: 2000,
     });
   };
 
@@ -1761,6 +1767,7 @@ export function Charting() {
       toast({
         title: "Export Successful",
         description: "Your data has been exported to CSV format.",
+        duration: 2000,
       });
     } catch (error) {
       console.error('Error exporting CSV:', error);
@@ -1768,6 +1775,7 @@ export function Charting() {
         title: "Export Failed",
         description: "There was an error exporting your data. Please try again.",
         variant: "destructive",
+        duration: 2000,
       });
     }
   };
@@ -1976,6 +1984,24 @@ export function Charting() {
     setChartData(newData);
   };
 
+  const handleCreateReport = () => {
+    // Store current chart configuration and data
+    const reportData = {
+      chartType,
+      chartData: groupedData || chartData,
+      chartStyles,
+      columns,
+      groupByConfig
+    };
+    
+    // Store the report data in localStorage for now
+    localStorage.setItem('chartReport', JSON.stringify(reportData));
+    
+    // Navigate to the report page
+    navigate('/rdm/document-insights/report');
+    
+  };
+
   return (
     <div className="container mx-auto py-6 pr-6">
       <div className="flex flex-col gap-6">
@@ -2033,7 +2059,7 @@ export function Charting() {
                         onClick={handleApplyCustomData}
                         className="text-sm"
                       >
-                        Apply
+                        Apply JSON
                       </Button>
                     </div>
                   </div>
@@ -2116,264 +2142,274 @@ export function Charting() {
                     Visualize your data with interactive charts
                   </CardDescription>
                 </div>
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button variant="ghost" size="icon">
-                      <Settings className="h-5 w-5" />
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-2xl">
-                    <DialogHeader>
-                      <DialogTitle>Chart Settings</DialogTitle>
-                    </DialogHeader>
-                    <Tabs defaultValue="colors" className="w-full">
-                      <TabsList className="w-full">
-                        <TabsTrigger value="colors" className="flex-1">Colors</TabsTrigger>
-                        <TabsTrigger value="style" className="flex-1">Style</TabsTrigger>
-                        <TabsTrigger value="axis" className="flex-1">Axis</TabsTrigger>
-                      </TabsList>
-                      <TabsContent value="colors" className="space-y-4">
-                        <div className="space-y-4">
-                          <div className="space-y-2">
-                            <Label>Color Theme</Label>
-                            <div className="grid grid-cols-2 gap-2">
-                              {(Object.entries(COLOR_THEMES) as Array<[keyof typeof COLOR_THEMES, string[]]>).map(([theme, colors]) => (
-                                <Button
-                                  key={theme}
-                                  variant="ghost"
-                                  className="flex items-center justify-between p-2 h-auto"
-                                  onClick={() => {
-                                    handleStyleChange('colorTheme', theme);
-                                    handleStyleChange('colors', [...colors]);
-                                  }}
-                                >
-                                  <span className="capitalize text-sm">{theme}</span>
-                                  <ColorThemePreview colors={colors} selected={chartStyles.colorTheme === theme} />
-                                </Button>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Checkbox
-                              id="useMultiColor"
-                              checked={chartStyles.useMultiColor}
-                              onCheckedChange={(checked) => handleStyleChange('useMultiColor', !!checked)}
-                            />
-                            <Label htmlFor="useMultiColor">
-                              Use multiple colors for single-series charts
-                            </Label>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6">
-                                    <HelpCircle className="h-4 w-4" />
+                <div className="flex items-center gap-2">
+                  <Button 
+                    variant="default" 
+                    className="flex items-center gap-2"
+                    onClick={handleCreateReport}
+                  >
+                    <FileText className="h-4 w-4" />
+                    Create Report
+                  </Button>
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button variant="ghost" size="icon">
+                        <Settings className="h-5 w-5" />
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-2xl">
+                      <DialogHeader>
+                        <DialogTitle>Chart Settings</DialogTitle>
+                      </DialogHeader>
+                      <Tabs defaultValue="colors" className="w-full">
+                        <TabsList className="w-full">
+                          <TabsTrigger value="colors" className="flex-1">Colors</TabsTrigger>
+                          <TabsTrigger value="style" className="flex-1">Style</TabsTrigger>
+                          <TabsTrigger value="axis" className="flex-1">Axis</TabsTrigger>
+                        </TabsList>
+                        <TabsContent value="colors" className="space-y-4">
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <Label>Color Theme</Label>
+                              <div className="grid grid-cols-2 gap-2">
+                                {(Object.entries(COLOR_THEMES) as Array<[keyof typeof COLOR_THEMES, string[]]>).map(([theme, colors]) => (
+                                  <Button
+                                    key={theme}
+                                    variant="ghost"
+                                    className="flex items-center justify-between p-2 h-auto"
+                                    onClick={() => {
+                                      handleStyleChange('colorTheme', theme);
+                                      handleStyleChange('colors', [...colors]);
+                                    }}
+                                  >
+                                    <span className="capitalize text-sm">{theme}</span>
+                                    <ColorThemePreview colors={colors} selected={chartStyles.colorTheme === theme} />
                                   </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  When enabled, each bar or segment will use a different color from the theme.
-                                  This only affects single-series charts like bar charts and pie charts.
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                          </div>
-                          <Collapsible>
-                            <CollapsibleTrigger asChild>
-                              <Button variant="ghost" className="flex items-center gap-2 w-full justify-between">
-                                <span>Custom Colors</span>
-                                <ChevronDown className="h-4 w-4" />
-                              </Button>
-                            </CollapsibleTrigger>
-                            <CollapsibleContent className="space-y-4 pt-4">
-                              {chartStyles.colors.map((color, index) => (
-                                <div key={index} className="flex items-center gap-2">
-                                  <Label className="w-24">Color {index + 1}</Label>
-                                  <div className="flex-1 flex items-center gap-2">
-                                    <Input
-                                      type="color"
-                                      value={color}
-                                      onChange={(e) => {
-                                        const newColors = [...chartStyles.colors];
-                                        newColors[index] = e.target.value;
-                                        handleStyleChange('colors', newColors);
-                                        handleStyleChange('colorTheme', 'default');
-                                      }}
-                                      className="w-20 h-8 p-1"
-                                    />
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => {
-                                        const newColors = chartStyles.colors.filter((_, i) => i !== index);
-                                        handleStyleChange('colors', newColors);
-                                      }}
-                                      className="h-8 w-8"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              ))}
-                              <Button
-                                onClick={() => {
-                                  const newColors = [...chartStyles.colors, '#000000'];
-                                  handleStyleChange('colors', newColors);
-                                  handleStyleChange('colorTheme', 'default');
-                                }}
-                                variant="outline"
-                                className="w-full"
-                              >
-                                Add Color
-                              </Button>
-                            </CollapsibleContent>
-                          </Collapsible>
-                        </div>
-                      </TabsContent>
-                      <TabsContent value="style" className="space-y-4">
-                        <div className="grid gap-4">
-                          <div className="space-y-2">
-                            <Label>Stroke Width</Label>
-                            <Slider
-                              value={[chartStyles.strokeWidth]}
-                              onValueChange={(values: number[]) => handleStyleChange('strokeWidth', values[0])}
-                              min={1}
-                              max={5}
-                              step={0.5}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Bar Corner Radius</Label>
-                            <Slider
-                              value={[chartStyles.barRadius]}
-                              onValueChange={(values: number[]) => handleStyleChange('barRadius', values[0])}
-                              min={0}
-                              max={8}
-                              step={1}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Opacity</Label>
-                            <Slider
-                              value={[chartStyles.opacity * 100]}
-                              onValueChange={(values: number[]) => handleStyleChange('opacity', values[0] / 100)}
-                              min={20}
-                              max={100}
-                              step={5}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Font Size</Label>
-                            <Slider
-                              value={[chartStyles.fontSize]}
-                              onValueChange={(values: number[]) => handleStyleChange('fontSize', values[0])}
-                              min={8}
-                              max={16}
-                              step={1}
-                            />
-                          </div>
-                          <div className="flex flex-col space-y-2">
-                            <div className="flex items-center space-x-4">
-                              <div className="flex items-center space-x-2">
-                                <Label>Show Grid</Label>
-                                <Input
-                                  type="checkbox"
-                                  checked={chartStyles.showGrid}
-                                  onChange={(e) => handleStyleChange('showGrid', e.target.checked)}
-                                  className="w-4 h-4"
-                                />
+                                ))}
                               </div>
-                              {chartStyles.showGrid && (
-                                <>
-                                  <div className="flex items-center space-x-2">
-                                    <Label>Style</Label>
-                                    <Select
-                                      value={chartStyles.gridStyle}
-                                      onValueChange={(value: 'solid' | 'dashed') => 
-                                        handleStyleChange('gridStyle', value)
-                                      }
-                                    >
-                                      <SelectTrigger className="w-24">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="solid">Solid</SelectItem>
-                                        <SelectItem value="dashed">Dashed</SelectItem>
-                                      </SelectContent>
-                                    </Select>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Checkbox
+                                id="useMultiColor"
+                                checked={chartStyles.useMultiColor}
+                                onCheckedChange={(checked) => handleStyleChange('useMultiColor', !!checked)}
+                              />
+                              <Label htmlFor="useMultiColor">
+                                Use multiple colors for single-series charts
+                              </Label>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-6 w-6">
+                                      <HelpCircle className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    When enabled, each bar or segment will use a different color from the theme.
+                                    This only affects single-series charts like bar charts and pie charts.
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </div>
+                            <Collapsible>
+                              <CollapsibleTrigger asChild>
+                                <Button variant="ghost" className="flex items-center gap-2 w-full justify-between">
+                                  <span>Custom Colors</span>
+                                  <ChevronDown className="h-4 w-4" />
+                                </Button>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent className="space-y-4 pt-4">
+                                {chartStyles.colors.map((color, index) => (
+                                  <div key={index} className="flex items-center gap-2">
+                                    <Label className="w-24">Color {index + 1}</Label>
+                                    <div className="flex-1 flex items-center gap-2">
+                                      <Input
+                                        type="color"
+                                        value={color}
+                                        onChange={(e) => {
+                                          const newColors = [...chartStyles.colors];
+                                          newColors[index] = e.target.value;
+                                          handleStyleChange('colors', newColors);
+                                          handleStyleChange('colorTheme', 'default');
+                                        }}
+                                        className="w-20 h-8 p-1"
+                                      />
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => {
+                                          const newColors = chartStyles.colors.filter((_, i) => i !== index);
+                                          handleStyleChange('colors', newColors);
+                                        }}
+                                        className="h-8 w-8"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
                                   </div>
-                                  <div className="flex items-center space-x-2">
-                                    <Label>Direction</Label>
-                                    <Select
-                                      value={chartStyles.gridDirection}
-                                      onValueChange={(value: 'both' | 'horizontal' | 'vertical') => 
-                                        handleStyleChange('gridDirection', value)
-                                      }
-                                    >
-                                      <SelectTrigger className="w-28">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="both">Both</SelectItem>
-                                        <SelectItem value="horizontal">Horizontal</SelectItem>
-                                        <SelectItem value="vertical">Vertical</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                </>
-                              )}
+                                ))}
+                                <Button
+                                  onClick={() => {
+                                    const newColors = [...chartStyles.colors, '#000000'];
+                                    handleStyleChange('colors', newColors);
+                                    handleStyleChange('colorTheme', 'default');
+                                  }}
+                                  variant="outline"
+                                  className="w-full"
+                                >
+                                  Add Color
+                                </Button>
+                              </CollapsibleContent>
+                            </Collapsible>
+                          </div>
+                        </TabsContent>
+                        <TabsContent value="style" className="space-y-4">
+                          <div className="grid gap-4">
+                            <div className="space-y-2">
+                              <Label>Stroke Width</Label>
+                              <Slider
+                                value={[chartStyles.strokeWidth]}
+                                onValueChange={(values: number[]) => handleStyleChange('strokeWidth', values[0])}
+                                min={1}
+                                max={5}
+                                step={0.5}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Bar Corner Radius</Label>
+                              <Slider
+                                value={[chartStyles.barRadius]}
+                                onValueChange={(values: number[]) => handleStyleChange('barRadius', values[0])}
+                                min={0}
+                                max={8}
+                                step={1}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Opacity</Label>
+                              <Slider
+                                value={[chartStyles.opacity * 100]}
+                                onValueChange={(values: number[]) => handleStyleChange('opacity', values[0] / 100)}
+                                min={20}
+                                max={100}
+                                step={5}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Font Size</Label>
+                              <Slider
+                                value={[chartStyles.fontSize]}
+                                onValueChange={(values: number[]) => handleStyleChange('fontSize', values[0])}
+                                min={8}
+                                max={16}
+                                step={1}
+                              />
                             </div>
                             <div className="flex flex-col space-y-2">
-                              <div className="flex items-center space-x-2">
-                                <Label>Show Legend</Label>
-                                <Input
-                                  type="checkbox"
-                                  checked={chartStyles.showLegend}
-                                  onChange={(e) => handleStyleChange('showLegend', e.target.checked)}
-                                  className="w-4 h-4"
-                                />
+                              <div className="flex items-center space-x-4">
+                                <div className="flex items-center space-x-2">
+                                  <Label>Show Grid</Label>
+                                  <Input
+                                    type="checkbox"
+                                    checked={chartStyles.showGrid}
+                                    onChange={(e) => handleStyleChange('showGrid', e.target.checked)}
+                                    className="w-4 h-4"
+                                  />
+                                </div>
+                                {chartStyles.showGrid && (
+                                  <>
+                                    <div className="flex items-center space-x-2">
+                                      <Label>Style</Label>
+                                      <Select
+                                        value={chartStyles.gridStyle}
+                                        onValueChange={(value: 'solid' | 'dashed') => 
+                                          handleStyleChange('gridStyle', value)
+                                        }
+                                      >
+                                        <SelectTrigger className="w-24">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="solid">Solid</SelectItem>
+                                          <SelectItem value="dashed">Dashed</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <Label>Direction</Label>
+                                      <Select
+                                        value={chartStyles.gridDirection}
+                                        onValueChange={(value: 'both' | 'horizontal' | 'vertical') => 
+                                          handleStyleChange('gridDirection', value)
+                                        }
+                                      >
+                                        <SelectTrigger className="w-28">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="both">Both</SelectItem>
+                                          <SelectItem value="horizontal">Horizontal</SelectItem>
+                                          <SelectItem value="vertical">Vertical</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                  </>
+                                )}
                               </div>
-                              <div className="flex items-center space-x-2">
-                                <Label>Show Single Series Legend</Label>
-                                <Input
-                                  type="checkbox"
-                                  checked={chartStyles.showSingleSeriesLegend}
-                                  onChange={(e) => handleStyleChange('showSingleSeriesLegend', e.target.checked)}
-                                  className="w-4 h-4"
-                                  disabled={!chartStyles.showLegend}
-                                />
+                              <div className="flex flex-col space-y-2">
+                                <div className="flex items-center space-x-2">
+                                  <Label>Show Legend</Label>
+                                  <Input
+                                    type="checkbox"
+                                    checked={chartStyles.showLegend}
+                                    onChange={(e) => handleStyleChange('showLegend', e.target.checked)}
+                                    className="w-4 h-4"
+                                  />
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <Label>Show Single Series Legend</Label>
+                                  <Input
+                                    type="checkbox"
+                                    checked={chartStyles.showSingleSeriesLegend}
+                                    onChange={(e) => handleStyleChange('showSingleSeriesLegend', e.target.checked)}
+                                    className="w-4 h-4"
+                                    disabled={!chartStyles.showLegend}
+                                  />
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      </TabsContent>
-                      <TabsContent value="axis" className="space-y-4">
-                        <div className="space-y-2">
-                          <Label>Axis Labels Sorting</Label>
-                          <Select
-                            defaultValue="none"
-                            value={axisSorting}
-                            onValueChange={(value: 'none' | 'asc' | 'desc' | 'chronological') => {
-                              setAxisSorting(value);
-                              // Trigger regrouping if grouping is active
-                              if (groupByConfig) {
-                                handleGroupBy(groupByConfig);
-                              }
-                            }}
-                          >
-                            <SelectTrigger>
-                              <SelectValue defaultValue="none" placeholder="None (Default Order)" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">None (Default Order)</SelectItem>
-                              <SelectItem value="asc">Ascending (ASC)</SelectItem>
-                              <SelectItem value="desc">Descending (DESC)</SelectItem>
-                              <SelectItem value="chronological">Chronological (for dates)</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </TabsContent>
-                    </Tabs>
-                  </DialogContent>
-                </Dialog>
+                        </TabsContent>
+                        <TabsContent value="axis" className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>Axis Labels Sorting</Label>
+                            <Select
+                              defaultValue="none"
+                              value={axisSorting}
+                              onValueChange={(value: 'none' | 'asc' | 'desc' | 'chronological') => {
+                                setAxisSorting(value);
+                                // Trigger regrouping if grouping is active
+                                if (groupByConfig) {
+                                  handleGroupBy(groupByConfig);
+                                }
+                              }}
+                            >
+                              <SelectTrigger>
+                                <SelectValue defaultValue="none" placeholder="None (Default Order)" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">None (Default Order)</SelectItem>
+                                <SelectItem value="asc">Ascending (ASC)</SelectItem>
+                                <SelectItem value="desc">Descending (DESC)</SelectItem>
+                                <SelectItem value="chronological">Chronological (for dates)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </TabsContent>
+                      </Tabs>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </div>
             </CardHeader>
             <CardContent>

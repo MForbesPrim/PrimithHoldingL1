@@ -34,6 +34,7 @@ import { DiDashboard } from "@/components/pages/rdm/documentInsights/diDashboard
 import { TableExtraction } from "@/components/pages/rdm/documentInsights/tableExtraction";
 import { DocumentChat } from "@/components/pages/rdm/documentInsights/documentChat";
 import { Charting } from "@/components/pages/rdm/documentInsights/charting";
+import { ChartReport } from "@/components/pages/rdm/documentInsights/chartReport";
 import { ProtectedRdmLayout } from "@/components/pages/rdm/layouts/protected-rdm-layout";
 import { HelpPage } from "@/components/pages/helpCenterPage";
 import { ServicesPage as MainServicesPage } from "@/components/pages/servicesPage"
@@ -100,6 +101,7 @@ function App() {
                     <Route path="/rdm/document-insights/table-extraction" element={<TableExtraction />} />
                     <Route path="/rdm/document-insights/document-chat" element={<DocumentChat />} />
                     <Route path="/rdm/document-insights/charting" element={<Charting />} />
+                    <Route path="/rdm/document-insights/report" element={<ChartReport />} />
                     <Route path="/rdm/collaborators" element={<CollaboratorsPage />} />
                     <Route path="/rdm/create-template" element={<CreateTemplate />} />
                     <Route path="/rdm/pages/templates/edit/:id" element={<EditTemplate />} />
