@@ -1,6 +1,6 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, ChevronDown, Plus, FileText, Pencil, Trash2, Edit2 } from "lucide-react"
+import { ArrowLeft, ChevronDown, Plus, FileText, Pencil, Trash2, Edit2, Eye } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { Charting } from "./charting"
 import {
@@ -23,6 +23,14 @@ import { Input } from "@/components/ui/input"
 import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 
 interface ChartItem {
   id: string;
@@ -345,6 +353,32 @@ export function ChartDashboard() {
                             <p className="text-sm text-muted-foreground">{chart.chartType} Chart</p>
                           </div>
                           <div className="flex items-center gap-2">
+                            <Dialog>
+                              <DialogTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                              </DialogTrigger>
+                              <DialogContent className="max-w-4xl h-[600px]">
+                                <DialogHeader>
+                                  <DialogTitle>{chart.name}</DialogTitle>
+                                  <DialogDescription>
+                                    {chart.chartType} Chart
+                                  </DialogDescription>
+                                </DialogHeader>
+                                <div className="flex-1 min-h-[450px]">
+                                  <Charting 
+                                    chartName={chart.name}
+                                    savedChartData={chart}
+                                    viewOnly={true}
+                                  />
+                                </div>
+                              </DialogContent>
+                            </Dialog>
                             <Button
                               variant="ghost"
                               size="sm"

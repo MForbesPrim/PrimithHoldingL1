@@ -256,10 +256,11 @@ interface SavedChart {
   savedAt: string;
 }
 
-export function Charting({ chartName, savedChartData, originalSavedAt }: { 
+export function Charting({ chartName, savedChartData, originalSavedAt, viewOnly = false }: { 
   chartName?: string;
   savedChartData?: SavedChart;
   originalSavedAt?: string;
+  viewOnly?: boolean;
 }) {
   const [_file, _setFile] = useState<File | null>(null)
   const [isLoading, _setIsLoading] = useState(false)
@@ -2098,584 +2099,568 @@ export function Charting({ chartName, savedChartData, originalSavedAt }: {
     return 'right';
   };
 
-  return (
-    <div className="container mx-auto py-0">
-      <div className="flex flex-col gap-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="md:col-span-1">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Upload className="h-5 w-5" />
-                Data Source
-              </CardTitle>
-              <CardDescription>
-                Upload a file or enter custom data for visualization
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col space-y-4">
-                  <div className="flex flex-col space-y-2">
-                    <Label>Upload File</Label>
-                    <Input
-                      id="file"
-                      type="file"
-                      accept=".csv,.json"
-                      onChange={handleFileChange}
-                    />
-                    <p className="text-sm text-muted-foreground">
-                      Upload a CSV or JSON file to visualize your data
-                    </p>
-                  </div>
+  // Render only the chart in view-only mode
+  if (viewOnly && savedChartData) {
+    return (
+      <div className="w-full h-full">
+        {renderChart()}
+      </div>
+    );
+  }
 
-                  <div className="flex flex-col space-y-2">
-                    <Label>Custom JSON Data</Label>
-                    <Textarea
-                      placeholder={`JSON example: [{"name":"Jan","value":400},...]`}
-                      value={customData}
-                      onChange={(e) => setCustomData(e.target.value)}
-                      className="min-h-[100px]"
-                    />
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={handleClearData}
-                        className="text-sm"
-                      >
-                        Clear Data
-                      </Button>
-                      <Button
-                        onClick={handleApplyCustomData}
-                        className="text-sm"
-                      >
-                        Apply JSON
-                      </Button>
+  return (
+    <div className="space-y-4">
+      <div className="container mx-auto py-0">
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <Card className="md:col-span-1">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Upload className="h-5 w-5" />
+                    Data Source
+                  </CardTitle>
+                  <CardDescription>
+                    Upload a file or enter custom data for visualization
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col gap-4">
+                    <div className="flex flex-col space-y-4">
+                      <div className="flex flex-col space-y-2">
+                        <Label>Upload File</Label>
+                        <Input
+                          id="file"
+                          type="file"
+                          accept=".csv,.json"
+                          onChange={handleFileChange}
+                        />
+                        <p className="text-sm text-muted-foreground">
+                          Upload a CSV or JSON file to visualize your data
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col space-y-2">
+                        <Label>Custom JSON Data</Label>
+                        <Textarea
+                          placeholder={`JSON example: [{"name":"Jan","value":400},...]`}
+                          value={customData}
+                          onChange={(e) => setCustomData(e.target.value)}
+                          className="min-h-[100px]"
+                        />
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={handleClearData}
+                            className="text-sm"
+                          >
+                            Clear Data
+                          </Button>
+                          <Button
+                            onClick={handleApplyCustomData}
+                            className="text-sm"
+                          >
+                            Apply JSON
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="grid w-full items-center gap-1.5">
+                      <Label htmlFor="chartType">Chart Type</Label>
+                      <Select value={chartType} onValueChange={handleChartTypeChange}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select chart type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="bar">
+                            <div className="flex items-center gap-2">
+                              <BarChart className="h-4 w-4" />
+                              <span>Bar Chart</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="horizontal-bar">
+                            <div className="flex items-center gap-2">
+                              <ArrowLeftRight className="h-4 w-4" />
+                              <span>Horizontal Bar</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="stacked-horizontal-bar">
+                            <div className="flex items-center gap-2">
+                              <Layers className="h-4 w-4 rotate-90" />
+                              <span>Stacked Horizontal Bar</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="stacked-bar">
+                            <div className="flex items-center gap-2">
+                              <Layers className="h-4 w-4" />
+                              <span>Stacked Vertical Bar</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="line">
+                            <div className="flex items-center gap-2">
+                              <LineChart className="h-4 w-4" />
+                              <span>Line Chart</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="area">
+                            <div className="flex items-center gap-2">
+                              <Waves className="h-4 w-4" />
+                              <span>Area Chart</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="stacked-area">
+                            <div className="flex items-center gap-2">
+                              <Layers className="h-4 w-4" />
+                              <span>Stacked Area</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="pie">
+                            <div className="flex items-center gap-2">
+                              <PieChart className="h-4 w-4" />
+                              <span>Pie Chart</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="donut">
+                            <div className="flex items-center gap-2">
+                              <PieChart className="h-4 w-4" />
+                              <span>Donut Chart</span>
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
-                </div>
-                
-                <div className="grid w-full items-center gap-1.5">
-                  <Label htmlFor="chartType">Chart Type</Label>
-                  <Select value={chartType} onValueChange={handleChartTypeChange}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select chart type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="bar">
-                        <div className="flex items-center gap-2">
-                          <BarChart className="h-4 w-4" />
-                          <span>Bar Chart</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="horizontal-bar">
-                        <div className="flex items-center gap-2">
-                          <ArrowLeftRight className="h-4 w-4" />
-                          <span>Horizontal Bar</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="stacked-horizontal-bar">
-                        <div className="flex items-center gap-2">
-                          <Layers className="h-4 w-4 rotate-90" />
-                          <span>Stacked Horizontal Bar</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="stacked-bar">
-                        <div className="flex items-center gap-2">
-                          <Layers className="h-4 w-4" />
-                          <span>Stacked Vertical Bar</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="line">
-                        <div className="flex items-center gap-2">
-                          <LineChart className="h-4 w-4" />
-                          <span>Line Chart</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="area">
-                        <div className="flex items-center gap-2">
-                          <Waves className="h-4 w-4" />
-                          <span>Area Chart</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="stacked-area">
-                        <div className="flex items-center gap-2">
-                          <Layers className="h-4 w-4" />
-                          <span>Stacked Area</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="pie">
-                        <div className="flex items-center gap-2">
-                          <PieChart className="h-4 w-4" />
-                          <span>Pie Chart</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="donut">
-                        <div className="flex items-center gap-2">
-                          <PieChart className="h-4 w-4" />
-                          <span>Donut Chart</span>
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
 
-          <Card className="md:col-span-2">
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <div>
-                  <CardTitle>Chart Preview</CardTitle>
-                  <CardDescription>
-                    Visualize your data with interactive charts
-                  </CardDescription>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button 
-                    variant="outline"
-                    className="flex items-center gap-2"
-                    onClick={handleSaveChart}
-                  >
-                    <Save className="h-4 w-4" />
-                    Save Chart
-                  </Button>
-                  <Dialog>
-                    <DialogTrigger asChild>
-                      <Button variant="ghost" size="icon">
-                        <Settings className="h-5 w-5" />
+              <Card className="md:col-span-2">
+                <CardHeader>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <CardTitle>Chart Preview</CardTitle>
+                      <CardDescription>
+                        Visualize your data with interactive charts
+                      </CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button 
+                        variant="outline"
+                        className="flex items-center gap-2"
+                        onClick={handleSaveChart}
+                      >
+                        <Save className="h-4 w-4" />
+                        Save Chart
                       </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
-                      <DialogHeader>
-                        <DialogTitle>Chart Settings</DialogTitle>
-                      </DialogHeader>
-                      <Tabs defaultValue="colors" className="w-full">
-                        <TabsList className="w-full">
-                          <TabsTrigger value="colors" className="flex-1">Colors</TabsTrigger>
-                          <TabsTrigger value="style" className="flex-1">Style</TabsTrigger>
-                          <TabsTrigger value="axis" className="flex-1">Axis</TabsTrigger>
-                        </TabsList>
-                        <TabsContent value="colors" className="space-y-4">
-                          <div className="space-y-4">
-                            <div className="space-y-2">
-                              <Label>Color Theme</Label>
-                              <div className="grid grid-cols-2 gap-2">
-                                {(Object.entries(COLOR_THEMES) as Array<[keyof typeof COLOR_THEMES, string[]]>).map(([theme, colors]) => (
-                                  <Button
-                                    key={theme}
-                                    variant="ghost"
-                                    className="flex items-center justify-between p-2 h-auto"
-                                    onClick={() => {
-                                      handleStyleChange('colorTheme', theme);
-                                      handleStyleChange('colors', [...colors]);
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <Settings className="h-5 w-5" />
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-2xl">
+                          <DialogHeader>
+                            <DialogTitle>Chart Settings</DialogTitle>
+                          </DialogHeader>
+                          <Tabs defaultValue="colors" className="w-full">
+                            <TabsList className="w-full">
+                              <TabsTrigger value="colors" className="flex-1">Colors</TabsTrigger>
+                              <TabsTrigger value="style" className="flex-1">Style</TabsTrigger>
+                              <TabsTrigger value="axis" className="flex-1">Axis</TabsTrigger>
+                            </TabsList>
+                            <TabsContent value="colors" className="space-y-4">
+                              <div className="space-y-4">
+                                <div className="space-y-2">
+                                  <Label>Color Theme</Label>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {(Object.entries(COLOR_THEMES) as Array<[keyof typeof COLOR_THEMES, string[]]>).map(([theme, colors]) => (
+                                      <Button
+                                        key={theme}
+                                        variant="ghost"
+                                        className="flex items-center justify-between p-2 h-auto"
+                                        onClick={() => {
+                                          handleStyleChange('colorTheme', theme);
+                                          handleStyleChange('colors', [...colors]);
+                                        }}
+                                      >
+                                        <span className="capitalize text-sm">{theme}</span>
+                                        <ColorThemePreview colors={colors} selected={chartStyles.colorTheme === theme} />
+                                      </Button>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <Checkbox
+                                    id="useMultiColor"
+                                    checked={chartStyles.useMultiColor}
+                                    onCheckedChange={(checked) => handleStyleChange('useMultiColor', !!checked)}
+                                  />
+                                  <Label htmlFor="useMultiColor">
+                                    Use multiple colors for single-series charts
+                                  </Label>
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-6 w-6">
+                                          <HelpCircle className="h-4 w-4" />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        When enabled, each bar or segment will use a different color from the theme.
+                                        This only affects single-series charts like bar charts and pie charts.
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                </div>
+                                <Collapsible>
+                                  <CollapsibleTrigger asChild>
+                                    <Button variant="ghost" className="flex items-center gap-2 w-full justify-between">
+                                      <span>Custom Colors</span>
+                                      <ChevronDown className="h-4 w-4" />
+                                    </Button>
+                                  </CollapsibleTrigger>
+                                  <CollapsibleContent className="space-y-4 pt-4">
+                                    {chartStyles.colors.map((color, index) => (
+                                      <div key={index} className="flex items-center gap-2">
+                                        <Label className="w-24">Color {index + 1}</Label>
+                                        <div className="flex-1 flex items-center gap-2">
+                                          <Input
+                                            type="color"
+                                            value={color}
+                                            onChange={(e) => {
+                                              const newColors = [...chartStyles.colors];
+                                              newColors[index] = e.target.value;
+                                              handleStyleChange('colors', newColors);
+                                              handleStyleChange('colorTheme', 'default');
+                                            }}
+                                            className="w-20 h-8 p-1"
+                                          />
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={() => {
+                                              const newColors = chartStyles.colors.filter((_, i) => i !== index);
+                                              handleStyleChange('colors', newColors);
+                                            }}
+                                            className="h-8 w-8"
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                    <Button
+                                      onClick={() => {
+                                        const newColors = [...chartStyles.colors, '#000000'];
+                                        handleStyleChange('colors', newColors);
+                                        handleStyleChange('colorTheme', 'default');
+                                      }}
+                                      variant="outline"
+                                      className="w-full"
+                                    >
+                                      Add Color
+                                    </Button>
+                                  </CollapsibleContent>
+                                </Collapsible>
+                              </div>
+                            </TabsContent>
+                            <TabsContent value="style" className="space-y-4">
+                              <div className="grid gap-4">
+                                <div className="space-y-2">
+                                  <Label>Stroke Width</Label>
+                                  <Slider
+                                    value={[chartStyles.strokeWidth]}
+                                    onValueChange={(values: number[]) => handleStyleChange('strokeWidth', values[0])}
+                                    min={1}
+                                    max={5}
+                                    step={0.5}
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Bar Corner Radius</Label>
+                                  <Slider
+                                    value={[chartStyles.barRadius]}
+                                    onValueChange={(values: number[]) => handleStyleChange('barRadius', values[0])}
+                                    min={0}
+                                    max={8}
+                                    step={1}
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Opacity</Label>
+                                  <Slider
+                                    value={[chartStyles.opacity * 100]}
+                                    onValueChange={(values: number[]) => handleStyleChange('opacity', values[0] / 100)}
+                                    min={20}
+                                    max={100}
+                                    step={5}
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Font Size</Label>
+                                  <Slider
+                                    value={[chartStyles.fontSize]}
+                                    onValueChange={(values: number[]) => handleStyleChange('fontSize', values[0])}
+                                    min={8}
+                                    max={16}
+                                    step={1}
+                                  />
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                  <label className="text-sm font-medium">Legend Position</label>
+                                  <Select
+                                    defaultValue="bottom"
+                                    value={getSimpleLegendPosition(chartStyles.legendPosition)}
+                                    onValueChange={(value: SimpleLegendPosition) => {
+                                      setChartStyles({
+                                        ...chartStyles,
+                                        legendPosition: getLegendPositionSettings(value)
+                                      });
                                     }}
                                   >
-                                    <span className="capitalize text-sm">{theme}</span>
-                                    <ColorThemePreview colors={colors} selected={chartStyles.colorTheme === theme} />
-                                  </Button>
-                                ))}
-                              </div>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Checkbox
-                                id="useMultiColor"
-                                checked={chartStyles.useMultiColor}
-                                onCheckedChange={(checked) => handleStyleChange('useMultiColor', !!checked)}
-                              />
-                              <Label htmlFor="useMultiColor">
-                                Use multiple colors for single-series charts
-                              </Label>
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-6 w-6">
-                                      <HelpCircle className="h-4 w-4" />
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    When enabled, each bar or segment will use a different color from the theme.
-                                    This only affects single-series charts like bar charts and pie charts.
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            </div>
-                            <Collapsible>
-                              <CollapsibleTrigger asChild>
-                                <Button variant="ghost" className="flex items-center gap-2 w-full justify-between">
-                                  <span>Custom Colors</span>
-                                  <ChevronDown className="h-4 w-4" />
-                                </Button>
-                              </CollapsibleTrigger>
-                              <CollapsibleContent className="space-y-4 pt-4">
-                                {chartStyles.colors.map((color, index) => (
-                                  <div key={index} className="flex items-center gap-2">
-                                    <Label className="w-24">Color {index + 1}</Label>
-                                    <div className="flex-1 flex items-center gap-2">
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="bottom">Bottom</SelectItem>
+                                      <SelectItem value="top">Top</SelectItem>
+                                      <SelectItem value="left">Left</SelectItem>
+                                      <SelectItem value="right">Right</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="flex flex-col space-y-2">
+                                  <div className="flex items-center space-x-4">
+                                    <div className="flex items-center space-x-2">
+                                      <Label>Show Grid</Label>
                                       <Input
-                                        type="color"
-                                        value={color}
-                                        onChange={(e) => {
-                                          const newColors = [...chartStyles.colors];
-                                          newColors[index] = e.target.value;
-                                          handleStyleChange('colors', newColors);
-                                          handleStyleChange('colorTheme', 'default');
-                                        }}
-                                        className="w-20 h-8 p-1"
+                                        type="checkbox"
+                                        checked={chartStyles.showGrid}
+                                        onChange={(e) => handleStyleChange('showGrid', e.target.checked)}
+                                        className="w-4 h-4"
                                       />
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => {
-                                          const newColors = chartStyles.colors.filter((_, i) => i !== index);
-                                          handleStyleChange('colors', newColors);
-                                        }}
-                                        className="h-8 w-8"
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
+                                    </div>
+                                    {chartStyles.showGrid && (
+                                      <>
+                                        <div className="flex items-center space-x-2">
+                                          <Label>Style</Label>
+                                          <Select
+                                            value={chartStyles.gridStyle}
+                                            onValueChange={(value: 'solid' | 'dashed') => 
+                                              handleStyleChange('gridStyle', value)
+                                            }
+                                          >
+                                            <SelectTrigger className="w-24">
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="solid">Solid</SelectItem>
+                                              <SelectItem value="dashed">Dashed</SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                          <Label>Direction</Label>
+                                          <Select
+                                            value={chartStyles.gridDirection}
+                                            onValueChange={(value: 'both' | 'horizontal' | 'vertical') => 
+                                              handleStyleChange('gridDirection', value)
+                                            }
+                                          >
+                                            <SelectTrigger className="w-28">
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="both">Both</SelectItem>
+                                              <SelectItem value="horizontal">Horizontal</SelectItem>
+                                              <SelectItem value="vertical">Vertical</SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-col space-y-2">
+                                    <div className="flex items-center space-x-2">
+                                      <Label>Show Legend</Label>
+                                      <Input
+                                        type="checkbox"
+                                        checked={chartStyles.showLegend}
+                                        onChange={(e) => handleStyleChange('showLegend', e.target.checked)}
+                                        className="w-4 h-4"
+                                      />
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <Label>Show Single Series Legend</Label>
+                                      <Input
+                                        type="checkbox"
+                                        checked={chartStyles.showSingleSeriesLegend}
+                                        onChange={(e) => handleStyleChange('showSingleSeriesLegend', e.target.checked)}
+                                        className="w-4 h-4"
+                                        disabled={!chartStyles.showLegend}
+                                      />
                                     </div>
                                   </div>
-                                ))}
-                                <Button
-                                  onClick={() => {
-                                    const newColors = [...chartStyles.colors, '#000000'];
-                                    handleStyleChange('colors', newColors);
-                                    handleStyleChange('colorTheme', 'default');
+                                </div>
+                              </div>
+                            </TabsContent>
+                            <TabsContent value="axis" className="space-y-4">
+                              <div className="space-y-2">
+                                <Label>Axis Labels Sorting</Label>
+                                <Select
+                                  defaultValue="none"
+                                  value={axisSorting}
+                                  onValueChange={(value: 'none' | 'asc' | 'desc' | 'chronological') => {
+                                    setAxisSorting(value);
+                                    // Trigger regrouping if grouping is active
+                                    if (groupByConfig) {
+                                      handleGroupBy(groupByConfig);
+                                    }
                                   }}
-                                  variant="outline"
-                                  className="w-full"
                                 >
-                                  Add Color
-                                </Button>
-                              </CollapsibleContent>
-                            </Collapsible>
-                          </div>
-                        </TabsContent>
-                        <TabsContent value="style" className="space-y-4">
-                          <div className="grid gap-4">
-                            <div className="space-y-2">
-                              <Label>Stroke Width</Label>
-                              <Slider
-                                value={[chartStyles.strokeWidth]}
-                                onValueChange={(values: number[]) => handleStyleChange('strokeWidth', values[0])}
-                                min={1}
-                                max={5}
-                                step={0.5}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Bar Corner Radius</Label>
-                              <Slider
-                                value={[chartStyles.barRadius]}
-                                onValueChange={(values: number[]) => handleStyleChange('barRadius', values[0])}
-                                min={0}
-                                max={8}
-                                step={1}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Opacity</Label>
-                              <Slider
-                                value={[chartStyles.opacity * 100]}
-                                onValueChange={(values: number[]) => handleStyleChange('opacity', values[0] / 100)}
-                                min={20}
-                                max={100}
-                                step={5}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Font Size</Label>
-                              <Slider
-                                value={[chartStyles.fontSize]}
-                                onValueChange={(values: number[]) => handleStyleChange('fontSize', values[0])}
-                                min={8}
-                                max={16}
-                                step={1}
-                              />
-                            </div>
-                            <div className="flex flex-col gap-2">
-                              <label className="text-sm font-medium">Legend Position</label>
-                              <Select
-                                defaultValue="bottom"
-                                value={getSimpleLegendPosition(chartStyles.legendPosition)}
-                                onValueChange={(value: SimpleLegendPosition) => {
-                                  setChartStyles({
-                                    ...chartStyles,
-                                    legendPosition: getLegendPositionSettings(value)
-                                  });
-                                }}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="bottom">Bottom</SelectItem>
-                                  <SelectItem value="top">Top</SelectItem>
-                                  <SelectItem value="left">Left</SelectItem>
-                                  <SelectItem value="right">Right</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="flex flex-col space-y-2">
-                              <div className="flex items-center space-x-4">
-                                <div className="flex items-center space-x-2">
-                                  <Label>Show Grid</Label>
-                                  <Input
-                                    type="checkbox"
-                                    checked={chartStyles.showGrid}
-                                    onChange={(e) => handleStyleChange('showGrid', e.target.checked)}
-                                    className="w-4 h-4"
-                                  />
-                                </div>
-                                {chartStyles.showGrid && (
-                                  <>
-                                    <div className="flex items-center space-x-2">
-                                      <Label>Style</Label>
-                                      <Select
-                                        value={chartStyles.gridStyle}
-                                        onValueChange={(value: 'solid' | 'dashed') => 
-                                          handleStyleChange('gridStyle', value)
-                                        }
-                                      >
-                                        <SelectTrigger className="w-24">
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="solid">Solid</SelectItem>
-                                          <SelectItem value="dashed">Dashed</SelectItem>
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                    <div className="flex items-center space-x-2">
-                                      <Label>Direction</Label>
-                                      <Select
-                                        value={chartStyles.gridDirection}
-                                        onValueChange={(value: 'both' | 'horizontal' | 'vertical') => 
-                                          handleStyleChange('gridDirection', value)
-                                        }
-                                      >
-                                        <SelectTrigger className="w-28">
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="both">Both</SelectItem>
-                                          <SelectItem value="horizontal">Horizontal</SelectItem>
-                                          <SelectItem value="vertical">Vertical</SelectItem>
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                  </>
-                                )}
+                                  <SelectTrigger>
+                                    <SelectValue defaultValue="none" placeholder="None (Default Order)" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">None (Default Order)</SelectItem>
+                                    <SelectItem value="asc">Ascending (ASC)</SelectItem>
+                                    <SelectItem value="desc">Descending (DESC)</SelectItem>
+                                    <SelectItem value="chronological">Chronological (for dates)</SelectItem>
+                                  </SelectContent>
+                                </Select>
                               </div>
-                              <div className="flex flex-col space-y-2">
-                                <div className="flex items-center space-x-2">
-                                  <Label>Show Legend</Label>
-                                  <Input
-                                    type="checkbox"
-                                    checked={chartStyles.showLegend}
-                                    onChange={(e) => handleStyleChange('showLegend', e.target.checked)}
-                                    className="w-4 h-4"
-                                  />
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                  <Label>Show Single Series Legend</Label>
-                                  <Input
-                                    type="checkbox"
-                                    checked={chartStyles.showSingleSeriesLegend}
-                                    onChange={(e) => handleStyleChange('showSingleSeriesLegend', e.target.checked)}
-                                    className="w-4 h-4"
-                                    disabled={!chartStyles.showLegend}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </TabsContent>
-                        <TabsContent value="axis" className="space-y-4">
-                          <div className="space-y-2">
-                            <Label>Axis Labels Sorting</Label>
-                            <Select
-                              defaultValue="none"
-                              value={axisSorting}
-                              onValueChange={(value: 'none' | 'asc' | 'desc' | 'chronological') => {
-                                setAxisSorting(value);
-                                // Trigger regrouping if grouping is active
-                                if (groupByConfig) {
-                                  handleGroupBy(groupByConfig);
-                                }
-                              }}
-                            >
-                              <SelectTrigger>
-                                <SelectValue defaultValue="none" placeholder="None (Default Order)" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">None (Default Order)</SelectItem>
-                                <SelectItem value="asc">Ascending (ASC)</SelectItem>
-                                <SelectItem value="desc">Descending (DESC)</SelectItem>
-                                <SelectItem value="chronological">Chronological (for dates)</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </TabsContent>
-                      </Tabs>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col h-[350px]">
-                {isLoading ? (
-                  <div className="flex items-center justify-center h-full">
-                    <Spinner className="h-8 w-8" />
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center h-full">
-                    {renderChart()}
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="md:col-span-3">
-            <Collapsible>
-              <CollapsibleTrigger asChild>
-                <Button variant="ghost" className="w-full flex justify-between p-4">
-                  <span>Data Table Editor</span>
-                  <ChevronDown className="h-4 w-4" />
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <CardContent>
-                  <div className="flex flex-col gap-4 mt-4">
-                    <div className="flex justify-between items-center">
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={() => {
-                            const newRow = columns.reduce((acc, col) => ({
-                              ...acc,
-                              [col.key]: col.type === 'number' ? 0 : ''
-                            }), {});
-                            setChartData([...chartData, newRow]);
-                          }}
-                          className="flex items-center gap-2"
-                        >
-                          <Plus className="h-4 w-4" />
-                          Add Row
-                        </Button>
-                        <Button
-                          onClick={handleAddColumn}
-                          variant="outline"
-                          className="flex items-center gap-2"
-                        >
-                          <Plus className="h-4 w-4" />
-                          Add Column
-                        </Button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                onClick={() => setShowGroupBy(!showGroupBy)}
-                                className={showGroupBy ? "bg-accent" : ""}
-                              >
-                                <Group className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top">
-                              {showGroupBy ? "Hide Grouping Options" : "Show Grouping Options"}
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        <Button
-                          onClick={handleExportCSV}
-                          variant="outline"
-                          className="flex items-center gap-2"
-                        >
-                          <Download className="h-4 w-4" />
-                          Export CSV
-                        </Button>
-                      </div>
+                            </TabsContent>
+                          </Tabs>
+                        </DialogContent>
+                      </Dialog>
                     </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col h-[350px]">
+                    {isLoading ? (
+                      <div className="flex items-center justify-center h-full">
+                        <Spinner className="h-8 w-8" />
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center h-full">
+                        {renderChart()}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
 
-                    {showGroupBy && (
-                      <div className="border rounded-lg p-4 bg-muted/50">
-                        <div className="flex items-center gap-4">
-                          <Label>Group By:</Label>
-                          <Select
-                            value={groupByConfig?.column || "none"}
-                            onValueChange={(value) => {
-                              if (value === "none") {
-                                clearGrouping();
-                                return;
-                              }
-                              const col = columns.find(c => c.key === value);
-                              const isDateLike = col && chartData.some(row => {
-                                const val = row[col.key];
-                                return !isNaN(new Date(val).getTime());
-                              });
-                              
-                              handleGroupBy({
-                                column: value,
-                                aggregation: groupByConfig?.aggregation || 'sum',
-                                dateFormat: isDateLike ? 'day' : 'none'
-                              });
-                            }}
-                          >
-                            <SelectTrigger className="w-[200px]">
-                              <SelectValue placeholder="Select column" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">None</SelectItem>
-                              {columns.map(col => (
-                                <SelectItem key={col.key} value={col.key}>
-                                  {col.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+              <Card className="md:col-span-3">
+                <Collapsible>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" className="w-full flex justify-between p-4">
+                      <span>Data Table Editor</span>
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <CardContent>
+                      <div className="flex flex-col gap-4 mt-4">
+                        <div className="flex justify-between items-center">
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={() => {
+                                const newRow = columns.reduce((acc, col) => ({
+                                  ...acc,
+                                  [col.key]: col.type === 'number' ? 0 : ''
+                                }), {});
+                                setChartData([...chartData, newRow]);
+                              }}
+                              className="flex items-center gap-2"
+                            >
+                              <Plus className="h-4 w-4" />
+                              Add Row
+                            </Button>
+                            <Button
+                              onClick={handleAddColumn}
+                              variant="outline"
+                              className="flex items-center gap-2"
+                            >
+                              <Plus className="h-4 w-4" />
+                              Add Column
+                            </Button>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => setShowGroupBy(!showGroupBy)}
+                                    className={showGroupBy ? "bg-accent" : ""}
+                                  >
+                                    <Group className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="top">
+                                  {showGroupBy ? "Hide Grouping Options" : "Show Grouping Options"}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                            <Button
+                              onClick={handleExportCSV}
+                              variant="outline"
+                              className="flex items-center gap-2"
+                            >
+                              <Download className="h-4 w-4" />
+                              Export CSV
+                            </Button>
+                          </div>
+                        </div>
 
-                          {groupByConfig && (
-                            <>
-                              <Label>Aggregate:</Label>
+                        {showGroupBy && (
+                          <div className="border rounded-lg p-4 bg-muted/50">
+                            <div className="flex items-center gap-4">
+                              <Label>Group By:</Label>
                               <Select
-                                value={groupByConfig.aggregation}
-                                onValueChange={(value: 'sum' | 'average' | 'count' | 'min' | 'max') => {
+                                value={groupByConfig?.column || "none"}
+                                onValueChange={(value) => {
+                                  if (value === "none") {
+                                    clearGrouping();
+                                    return;
+                                  }
+                                  const col = columns.find(c => c.key === value);
+                                  const isDateLike = col && chartData.some(row => {
+                                    const val = row[col.key];
+                                    return !isNaN(new Date(val).getTime());
+                                  });
+                                  
                                   handleGroupBy({
-                                    ...groupByConfig,
-                                    aggregation: value
+                                    column: value,
+                                    aggregation: groupByConfig?.aggregation || 'sum',
+                                    dateFormat: isDateLike ? 'day' : 'none'
                                   });
                                 }}
                               >
-                                <SelectTrigger className="w-[150px]">
-                                  <SelectValue />
+                                <SelectTrigger className="w-[200px]">
+                                  <SelectValue placeholder="Select column" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="sum">Sum</SelectItem>
-                                  <SelectItem value="average">Average</SelectItem>
-                                  <SelectItem value="count">Count</SelectItem>
-                                  <SelectItem value="min">Minimum</SelectItem>
-                                  <SelectItem value="max">Maximum</SelectItem>
+                                  <SelectItem value="none">None</SelectItem>
+                                  {columns.map(col => (
+                                    <SelectItem key={col.key} value={col.key}>
+                                      {col.label}
+                                    </SelectItem>
+                                  ))}
                                 </SelectContent>
                               </Select>
 
-                              {groupByConfig && chartData.some(row => {
-                                const val = row[groupByConfig.column];
-                                return !isNaN(new Date(val).getTime());
-                              }) && (
+                              {groupByConfig && (
                                 <>
-                                  <Label>Date Format:</Label>
+                                  <Label>Aggregate:</Label>
                                   <Select
-                                    value={groupByConfig.dateFormat || 'none'}
-                                    onValueChange={(value: 'year' | 'month' | 'day' | 'quarter' | 'none') => {
+                                    value={groupByConfig.aggregation}
+                                    onValueChange={(value: 'sum' | 'average' | 'count' | 'min' | 'max') => {
                                       handleGroupBy({
                                         ...groupByConfig,
-                                        dateFormat: value
+                                        aggregation: value
                                       });
                                     }}
                                   >
@@ -2683,193 +2668,222 @@ export function Charting({ chartName, savedChartData, originalSavedAt }: {
                                       <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="none">No Format</SelectItem>
-                                      <SelectItem value="year">Year</SelectItem>
-                                      <SelectItem value="quarter">Quarter</SelectItem>
-                                      <SelectItem value="month">Month</SelectItem>
-                                      <SelectItem value="day">Day</SelectItem>
+                                      <SelectItem value="sum">Sum</SelectItem>
+                                      <SelectItem value="average">Average</SelectItem>
+                                      <SelectItem value="count">Count</SelectItem>
+                                      <SelectItem value="min">Minimum</SelectItem>
+                                      <SelectItem value="max">Maximum</SelectItem>
                                     </SelectContent>
                                   </Select>
-                                </>
-                              )}
 
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={clearGrouping}
-                                className="h-8 w-8"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="border rounded-lg">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            {columns.map((col) => (
-                              <TableHead key={col.key} className="min-w-[150px]">
-                                <div className="flex flex-col gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <div className="flex-1">
-                                      <Input
-                                        value={tempColumnLabels[col.key] ?? col.label}
-                                        onChange={(e) => handleColumnLabelInput(col.key, e.target.value)}
-                                        onBlur={() => handleColumnLabelBlur(col.key)}
-                                        className="h-7 w-full"
-                                      />
-                                    </div>
-                                    <div className="flex items-center gap-1">
+                                  {groupByConfig && chartData.some(row => {
+                                    const val = row[groupByConfig.column];
+                                    return !isNaN(new Date(val).getTime());
+                                  }) && (
+                                    <>
+                                      <Label>Date Format:</Label>
                                       <Select
-                                        value={col.type}
-                                        onValueChange={(value: 'text' | 'number' | 'date') => 
-                                          handleColumnTypeChange(col.key, value)
-                                        }
+                                        value={groupByConfig.dateFormat || 'none'}
+                                        onValueChange={(value: 'year' | 'month' | 'day' | 'quarter' | 'none') => {
+                                          handleGroupBy({
+                                            ...groupByConfig,
+                                            dateFormat: value
+                                          });
+                                        }}
                                       >
-                                        <SelectTrigger className="h-7 w-[100px]">
+                                        <SelectTrigger className="w-[150px]">
                                           <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                          <SelectItem value="text">Text</SelectItem>
-                                          <SelectItem value="number">Number</SelectItem>
-                                          <SelectItem value="date">Date</SelectItem>
+                                          <SelectItem value="none">No Format</SelectItem>
+                                          <SelectItem value="year">Year</SelectItem>
+                                          <SelectItem value="quarter">Quarter</SelectItem>
+                                          <SelectItem value="month">Month</SelectItem>
+                                          <SelectItem value="day">Day</SelectItem>
                                         </SelectContent>
                                       </Select>
-                                      <TooltipProvider>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <Button
-                                              variant={col.isAxisColumn ? "secondary" : "ghost"}
-                                              size="icon"
-                                              onClick={() => col.isAxisColumn ? null : handleSetAxisColumn(col.key)}
-                                              className={`h-7 w-7 ${col.isAxisColumn ? 'bg-blue-100 text-blue-700 hover:bg-blue-200 hover:text-blue-800' : ''}`}
-                                              disabled={col.isAxisColumn}
-                                            >
-                                              <ArrowLeftRight className="h-4 w-4" />
-                                            </Button>
-                                          </TooltipTrigger>
-                                          <TooltipContent side="top">
-                                            {col.isAxisColumn ? "Current Axis Labels Column" : "Set as Axis Labels Column"}
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      </TooltipProvider>
-                                      {col.type === 'number' && (
-                                        <TooltipProvider>
-                                          <Tooltip>
-                                            <TooltipTrigger asChild>
-                                              <Button
-                                                variant={columnFormulaMode[col.key] ? "secondary" : "ghost"}
-                                                size="icon"
-                                                onClick={() => toggleColumnFormulaMode(col.key)}
-                                                className="h-7 w-7"
-                                              >
-                                                <Calculator className="h-4 w-4" />
-                                              </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="top">
-                                              Column Formula
-                                            </TooltipContent>
-                                          </Tooltip>
-                                        </TooltipProvider>
-                                      )}
-                                      {col.key !== 'name' && col.key !== 'value' && (
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          onClick={() => handleRemoveColumn(col.key)}
-                                          className="h-7 w-7"
-                                        >
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                      )}
-                                    </div>
-                                  </div>
-                                  {col.type === 'number' && columnFormulaMode[col.key] && (
-                                    <div className="flex items-center gap-1 px-1">
-                                      <Input
-                                        type="text"
-                                        value={columnFormulaInput[col.key] || ''}
-                                        onChange={(e) => handleColumnFormulaInput(col.key, e.target.value)}
-                                        placeholder="Enter formula for entire column"
-                                        className="h-7 text-xs bg-secondary/50"
-                                      />
-                                      <TooltipProvider>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
+                                    </>
+                                  )}
+
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={clearGrouping}
+                                    className="h-8 w-8"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="border rounded-lg">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                {columns.map((col) => (
+                                  <TableHead key={col.key} className="min-w-[150px]">
+                                    <div className="flex flex-col gap-2">
+                                      <div className="flex items-center gap-2">
+                                        <div className="flex-1">
+                                          <Input
+                                            value={tempColumnLabels[col.key] ?? col.label}
+                                            onChange={(e) => handleColumnLabelInput(col.key, e.target.value)}
+                                            onBlur={() => handleColumnLabelBlur(col.key)}
+                                            className="h-7 w-full"
+                                          />
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          <Select
+                                            value={col.type}
+                                            onValueChange={(value: 'text' | 'number' | 'date') => 
+                                              handleColumnTypeChange(col.key, value)
+                                            }
+                                          >
+                                            <SelectTrigger className="h-7 w-[100px]">
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="text">Text</SelectItem>
+                                              <SelectItem value="number">Number</SelectItem>
+                                              <SelectItem value="date">Date</SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                          <TooltipProvider>
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <Button
+                                                  variant={col.isAxisColumn ? "secondary" : "ghost"}
+                                                  size="icon"
+                                                  onClick={() => col.isAxisColumn ? null : handleSetAxisColumn(col.key)}
+                                                  className={`h-7 w-7 ${col.isAxisColumn ? 'bg-blue-100 text-blue-700 hover:bg-blue-200 hover:text-blue-800' : ''}`}
+                                                  disabled={col.isAxisColumn}
+                                                >
+                                                  <ArrowLeftRight className="h-4 w-4" />
+                                                </Button>
+                                              </TooltipTrigger>
+                                              <TooltipContent side="top">
+                                                {col.isAxisColumn ? "Current Axis Labels Column" : "Set as Axis Labels Column"}
+                                              </TooltipContent>
+                                            </Tooltip>
+                                          </TooltipProvider>
+                                          {col.type === 'number' && (
+                                            <TooltipProvider>
+                                              <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                  <Button
+                                                    variant={columnFormulaMode[col.key] ? "secondary" : "ghost"}
+                                                    size="icon"
+                                                    onClick={() => toggleColumnFormulaMode(col.key)}
+                                                    className="h-7 w-7"
+                                                  >
+                                                    <Calculator className="h-4 w-4" />
+                                                  </Button>
+                                                </TooltipTrigger>
+                                                <TooltipContent side="top">
+                                                  Column Formula
+                                                </TooltipContent>
+                                              </Tooltip>
+                                            </TooltipProvider>
+                                          )}
+                                          {col.key !== 'name' && col.key !== 'value' && (
                                             <Button
                                               variant="ghost"
                                               size="icon"
+                                              onClick={() => handleRemoveColumn(col.key)}
                                               className="h-7 w-7"
                                             >
-                                              <HelpCircle className="h-3 w-3" />
+                                              <Trash2 className="h-4 w-4" />
                                             </Button>
-                                          </TooltipTrigger>
-                                          <TooltipContent side="right" className="bg-white border-gray-200 shadow-md">
-                                            {formulaHelpContent}
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      </TooltipProvider>
-                                      {columnHistory[col.key] && columnHistory[col.key].timestamp > Date.now() - 30000 && (
-                                        <TooltipProvider>
-                                          <Tooltip>
-                                            <TooltipTrigger asChild>
-                                              <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                onClick={() => handleUndoColumnFormula(col.key)}
-                                                className="h-7 w-7"
-                                              >
-                                                <Undo className="h-3 w-3" />
-                                              </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="top">
-                                              Undo formula changes (available for 30 seconds)
-                                            </TooltipContent>
-                                          </Tooltip>
-                                        </TooltipProvider>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {col.type === 'number' && columnFormulaMode[col.key] && (
+                                        <div className="flex items-center gap-1 px-1">
+                                          <Input
+                                            type="text"
+                                            value={columnFormulaInput[col.key] || ''}
+                                            onChange={(e) => handleColumnFormulaInput(col.key, e.target.value)}
+                                            placeholder="Enter formula for entire column"
+                                            className="h-7 text-xs bg-secondary/50"
+                                          />
+                                          <TooltipProvider>
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="icon"
+                                                  className="h-7 w-7"
+                                                >
+                                                  <HelpCircle className="h-3 w-3" />
+                                                </Button>
+                                              </TooltipTrigger>
+                                              <TooltipContent side="right" className="bg-white border-gray-200 shadow-md">
+                                                {formulaHelpContent}
+                                              </TooltipContent>
+                                            </Tooltip>
+                                          </TooltipProvider>
+                                          {columnHistory[col.key] && columnHistory[col.key].timestamp > Date.now() - 30000 && (
+                                            <TooltipProvider>
+                                              <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={() => handleUndoColumnFormula(col.key)}
+                                                    className="h-7 w-7"
+                                                  >
+                                                    <Undo className="h-3 w-3" />
+                                                  </Button>
+                                                </TooltipTrigger>
+                                                <TooltipContent side="top">
+                                                  Undo formula changes (available for 30 seconds)
+                                                </TooltipContent>
+                                              </Tooltip>
+                                            </TooltipProvider>
+                                          )}
+                                        </div>
                                       )}
                                     </div>
-                                  )}
-                                </div>
-                              </TableHead>
-                            ))}
-                            <TableHead className="w-[50px]">Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {chartData.map((row: DataRow, index: number) => (
-                            <TableRow key={index}>
-                              {columns.map((col) => (
-                                <TableCell key={col.key}>
-                                  {renderCell(row, index, col)}
-                                </TableCell>
+                                  </TableHead>
+                                ))}
+                                <TableHead className="w-[50px]">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {chartData.map((row: DataRow, index: number) => (
+                                <TableRow key={index}>
+                                  {columns.map((col) => (
+                                    <TableCell key={col.key}>
+                                      {renderCell(row, index, col)}
+                                    </TableCell>
+                                  ))}
+                                  <TableCell>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => {
+                                        const newData = chartData.filter((_: DataRow, i: number) => i !== index);
+                                        setChartData(newData);
+                                      }}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
                               ))}
-                              <TableCell>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => {
-                                    const newData = chartData.filter((_: DataRow, i: number) => i !== index);
-                                    setChartData(newData);
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
-                </CardContent>
-              </CollapsibleContent>
-            </Collapsible>
-          </Card>
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </CollapsibleContent>
+                </Collapsible>
+              </Card>
+            </div>
+          </div>
         </div>
       </div>
     </div>
