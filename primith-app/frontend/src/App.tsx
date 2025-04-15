@@ -49,6 +49,7 @@ import { ForgotPasswordPage } from "@/components/pages/forgotPasswordPage";
 import { ResetPasswordPage } from "@/components/pages/resetPasswordPage";
 import { CollaboratorsPage } from "@/components/pages/rdm/collaborators/collaboratorsPage"
 import { AcceptInvitePage } from "@/components/pages/acceptInvitePage"
+import { ChartDashboard } from "@/components/pages/rdm/documentInsights/chartDashboard";
 
 
 function App() {
@@ -100,6 +101,7 @@ function App() {
                     <Route path="/rdm/document-insights" element={<DiDashboard />} />
                     <Route path="/rdm/document-insights/table-extraction" element={<TableExtraction />} />
                     <Route path="/rdm/document-insights/document-chat" element={<DocumentChat />} />
+                    <Route path="/rdm/document-insights/chart-dashboard" element={<ChartDashboard />} />
                     <Route path="/rdm/document-insights/charting" element={<Charting />} />
                     <Route path="/rdm/document-insights/report" element={<ChartReport />} />
                     <Route path="/rdm/collaborators" element={<CollaboratorsPage />} />

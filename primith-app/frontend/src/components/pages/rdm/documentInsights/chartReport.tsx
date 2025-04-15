@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, ReactElement } from "react"
 import { ArrowLeft, Bold, Italic, List, ListOrdered, Heading2, ChevronDown, Save, BarChart, FileDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -39,8 +39,17 @@ import { Separator } from "@/components/ui/separator"
 import ReactDOM from "react-dom/client"
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 
 interface ChartReport {
+  name: string;
   chartType: string;
   chartData: any[];
   chartStyles: {
@@ -56,6 +65,11 @@ interface ChartReport {
     showSingleSeriesLegend: boolean;
     colorTheme: string;
     useMultiColor: boolean;
+    legendPosition: {
+      vertical: 'top' | 'middle' | 'bottom';
+      horizontal: 'left' | 'center' | 'right';
+      layout: 'horizontal' | 'vertical';
+    };
   };
   columns: Array<{
     key: string;
@@ -65,9 +79,20 @@ interface ChartReport {
     isAxisColumn?: boolean;
   }>;
   groupByConfig: any;
+  savedAt: string;
 }
 
-function renderChartContent(reportData: ChartReport) {
+function renderChartContent(reportData: ChartReport): ReactElement {
+  if (!reportData) {
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <div className="flex items-center justify-center h-full text-muted-foreground">
+          No chart data available
+        </div>
+      </ResponsiveContainer>
+    );
+  }
+
   const { chartType, chartData, chartStyles, columns } = reportData;
 
   // Find the axis column and get its key
@@ -85,6 +110,14 @@ function renderChartContent(reportData: ChartReport) {
     [col.key]: col.label
   }), {} as Record<string, string>);
 
+  // For pie/donut charts, transform the data if needed
+  const pieChartData = (chartType === "pie" || chartType === "donut") 
+    ? chartData.map(item => ({
+        name: item[axisKey],
+        value: typeof item.value === 'number' ? item.value : Number(item[dataKeys[0]])
+      }))
+    : chartData;
+
   const gridComponent = chartStyles.showGrid && (
     <CartesianGrid 
       strokeDasharray={chartStyles.gridStyle === 'dashed' ? "3 3" : "0"} 
@@ -95,263 +128,281 @@ function renderChartContent(reportData: ChartReport) {
     />
   );
 
-  // For pie/donut charts, transform the data if needed
-  const pieChartData = (chartType === "pie" || chartType === "donut") 
-    ? chartData.map(item => ({
-        name: item[axisKey],
-        value: typeof item.value === 'number' ? item.value : Number(item[dataKeys[0]])
-      }))
-    : chartData;
+  console.log('Rendering chart with type:', chartType); // Debug log
 
-  switch (chartType) {
-    case "bar":
-      return (
-        <ChartContainer config={{ value: { label: keyToLabel[dataKeys[0]] || "Value", color: chartStyles.colors[0] } } satisfies ChartConfig}>
-          <RechartsBarChart data={chartData} margin={{ top: 20, right: 20, bottom: 30, left: 20 }}>
-            {gridComponent}
-            <XAxis
-              dataKey={axisKey}
-              tick={{ fontSize: chartStyles.fontSize }}
-              axisLine={false}
-              tickLine={false}
-            />
-            <YAxis
-              axisLine={false}
-              tickLine={false}
-              tick={{ fontSize: chartStyles.fontSize }}
-            />
-            <ChartTooltip content={<ChartTooltipContent />} />
-            {chartStyles.showLegend && (dataKeys.length > 1 || chartStyles.showSingleSeriesLegend) && (
-              <Legend
-                verticalAlign="top"
-                align="right"
-                wrapperStyle={{
-                  paddingBottom: "20px",
-                  fontSize: `${chartStyles.fontSize}px`
-                }}
+  const renderInnerContent = () => {
+    switch (chartType) {
+      case "horizontal-bar":
+        return (
+          <ChartContainer config={{ value: { label: keyToLabel[dataKeys[0]] || "Value", color: chartStyles.colors[0] } } satisfies ChartConfig}>
+            <RechartsBarChart layout="vertical" data={chartData} margin={{ top: 20, right: 50, left: 20, bottom: 20 }}>
+              {gridComponent}
+              <XAxis type="number" axisLine={false} tickLine={false} />
+              <YAxis
+                dataKey={axisKey}
+                type="category"
+                tick={{ fontSize: chartStyles.fontSize }}
+                axisLine={false}
+                tickLine={false}
               />
-            )}
-            {dataKeys.map((key, index) => (
-              <Bar
-                key={key}
-                name={keyToLabel[key] || key}
-                dataKey={key}
-                fill={chartStyles.colors[index % chartStyles.colors.length]}
-                radius={[chartStyles.barRadius, chartStyles.barRadius, 0, 0]}
-                fillOpacity={chartStyles.opacity}
-              >
-                {chartStyles.useMultiColor && dataKeys.length === 1 && chartData.map((_, entryIndex) => (
-                  <Cell
-                    key={`cell-${entryIndex}`}
-                    fill={chartStyles.colors[entryIndex % chartStyles.colors.length]}
-                  />
-                ))}
-              </Bar>
-            ))}
-          </RechartsBarChart>
-        </ChartContainer>
-      );
+              <ChartTooltip content={<ChartTooltipContent />} />
+              {chartStyles.showLegend && (dataKeys.length > 1 || chartStyles.showSingleSeriesLegend) && (
+                <Legend
+                  verticalAlign={chartStyles.legendPosition?.vertical || 'bottom'}
+                  align={chartStyles.legendPosition?.horizontal || 'center'}
+                  layout={chartStyles.legendPosition?.layout || 'horizontal'}
+                  wrapperStyle={{
+                    fontSize: `${chartStyles.fontSize}px`,
+                    padding: '10px'
+                  }}
+                />
+              )}
+              {dataKeys.map((key, index) => (
+                <Bar
+                  key={key}
+                  name={keyToLabel[key] || key}
+                  dataKey={key}
+                  fill={chartStyles.colors[index % chartStyles.colors.length]}
+                  radius={[0, chartStyles.barRadius, chartStyles.barRadius, 0]}
+                  fillOpacity={chartStyles.opacity}
+                >
+                  {chartStyles.useMultiColor && dataKeys.length === 1 && chartData.map((_, entryIndex) => (
+                    <Cell
+                      key={`cell-${entryIndex}`}
+                      fill={chartStyles.colors[entryIndex % chartStyles.colors.length]}
+                    />
+                  ))}
+                </Bar>
+              ))}
+            </RechartsBarChart>
+          </ChartContainer>
+        );
 
-    case "horizontal-bar":
-      return (
-        <ChartContainer config={{ value: { label: keyToLabel[dataKeys[0]] || "Value", color: chartStyles.colors[0] } } satisfies ChartConfig}>
-          <RechartsBarChart layout="vertical" data={chartData} margin={{ top: 20, right: 50, left: 20, bottom: 20 }}>
-            {gridComponent}
-            <XAxis type="number" axisLine={false} tickLine={false} />
-            <YAxis
-              dataKey={axisKey}
-              type="category"
-              tick={{ fontSize: chartStyles.fontSize }}
-              axisLine={false}
-              tickLine={false}
-            />
-            <ChartTooltip content={<ChartTooltipContent />} />
-            {chartStyles.showLegend && (dataKeys.length > 1 || chartStyles.showSingleSeriesLegend) && <Legend />}
-            {dataKeys.map((key, index) => (
-              <Bar
-                key={key}
-                name={keyToLabel[key] || key}
-                dataKey={key}
-                fill={chartStyles.colors[index % chartStyles.colors.length]}
-                radius={[0, chartStyles.barRadius, chartStyles.barRadius, 0]}
-                fillOpacity={chartStyles.opacity}
-              >
-                {chartStyles.useMultiColor && dataKeys.length === 1 && chartData.map((_, entryIndex) => (
-                  <Cell
-                    key={`cell-${entryIndex}`}
-                    fill={chartStyles.colors[entryIndex % chartStyles.colors.length]}
-                  />
-                ))}
-              </Bar>
-            ))}
-          </RechartsBarChart>
-        </ChartContainer>
-      );
-
-    case "line":
-      return (
-        <ChartContainer config={{ value: { label: keyToLabel[dataKeys[0]] || "Value", color: chartStyles.colors[0] } } satisfies ChartConfig}>
-          <RechartsLineChart data={chartData} margin={{ top: 20, right: 20, bottom: 30, left: 20 }}>
-            {gridComponent}
-            <XAxis
-              dataKey={axisKey}
-              tick={{ fontSize: chartStyles.fontSize }}
-              axisLine={false}
-              tickLine={false}
-            />
-            <YAxis
-              axisLine={false}
-              tickLine={false}
-              tick={{ fontSize: chartStyles.fontSize }}
-            />
-            <ChartTooltip content={<ChartTooltipContent />} />
-            {chartStyles.showLegend && (dataKeys.length > 1 || chartStyles.showSingleSeriesLegend) && (
-              <Legend
-                verticalAlign="top"
-                align="right"
-                wrapperStyle={{
-                  paddingBottom: "20px",
-                  fontSize: `${chartStyles.fontSize}px`
-                }}
+      case "line":
+        return (
+          <ChartContainer config={{ value: { label: keyToLabel[dataKeys[0]] || "Value", color: chartStyles.colors[0] } } satisfies ChartConfig}>
+            <RechartsLineChart data={chartData} margin={{ top: 20, right: 20, bottom: 30, left: 20 }}>
+              {gridComponent}
+              <XAxis
+                dataKey={axisKey}
+                tick={{ fontSize: chartStyles.fontSize }}
+                axisLine={false}
+                tickLine={false}
               />
-            )}
-            {dataKeys.map((key, index) => (
-              <Line
-                key={key}
-                name={keyToLabel[key] || key}
-                type="monotone"
-                dataKey={key}
-                stroke={chartStyles.colors[index % chartStyles.colors.length]}
-                strokeWidth={chartStyles.strokeWidth}
-                dot={{ fill: chartStyles.colors[index % chartStyles.colors.length], r: 4 }}
-                strokeOpacity={chartStyles.opacity}
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fontSize: chartStyles.fontSize }}
               />
-            ))}
-          </RechartsLineChart>
-        </ChartContainer>
-      );
-
-    case "pie":
-    case "donut":
-      return (
-        <ChartContainer config={{ value: { label: "Value", color: chartStyles.colors[0] } } satisfies ChartConfig}>
-          <RechartsPieChart margin={{ top: 40, right: 20, bottom: 30, left: 20 }}>
-            <Pie
-              data={pieChartData}
-              cx="50%"
-              cy="50%"
-              labelLine={true}
-              innerRadius={chartType === "donut" ? 60 : 0}
-              outerRadius={100}
-              fill="var(--color-value)"
-              dataKey="value"
-              nameKey="name"
-              label={({ name, value, percent }) =>
-                `${name}: ${value} (${(percent * 100).toFixed(0)}%)`
-              }
-              style={{
-                fontSize: `${chartStyles.fontSize}px`
-              }}
-              opacity={chartStyles.opacity}
-            >
-              {pieChartData.map((_entry, index) => (
-                <Cell
-                  key={`cell-${index}`}
-                  fill={chartStyles.useMultiColor 
-                    ? chartStyles.colors[index % chartStyles.colors.length]
-                    : chartStyles.colors[0]
-                  }
+              <ChartTooltip content={<ChartTooltipContent />} />
+              {chartStyles.showLegend && (dataKeys.length > 1 || chartStyles.showSingleSeriesLegend) && (
+                <Legend
+                  verticalAlign={chartStyles.legendPosition?.vertical || 'bottom'}
+                  align={chartStyles.legendPosition?.horizontal || 'center'}
+                  layout={chartStyles.legendPosition?.layout || 'horizontal'}
+                  wrapperStyle={{
+                    fontSize: `${chartStyles.fontSize}px`,
+                    padding: '10px'
+                  }}
+                />
+              )}
+              {dataKeys.map((key, index) => (
+                <Line
+                  key={key}
+                  name={keyToLabel[key] || key}
+                  type="monotone"
+                  dataKey={key}
+                  stroke={chartStyles.colors[index % chartStyles.colors.length]}
+                  strokeWidth={chartStyles.strokeWidth}
+                  dot={{ fill: chartStyles.colors[index % chartStyles.colors.length], r: 4 }}
+                  strokeOpacity={chartStyles.opacity}
                 />
               ))}
-            </Pie>
-            <ChartTooltip content={<ChartTooltipContent />} />
-            {chartStyles.showLegend && (
-              <Legend
-                verticalAlign="bottom"
-                align="center"
-                layout="horizontal"
-                wrapperStyle={{
-                  paddingTop: "20px",
-                  fontSize: `${chartStyles.fontSize}px`,
-                  width: '100%'
-                }}
-              />
-            )}
-          </RechartsPieChart>
-        </ChartContainer>
-      );
+            </RechartsLineChart>
+          </ChartContainer>
+        );
 
-    case "area":
-    case "stacked-area":
-      return (
-        <ChartContainer config={{ value: { label: keyToLabel[dataKeys[0]] || "Value", color: chartStyles.colors[0] } } satisfies ChartConfig}>
-          <AreaChart
-            data={chartData}
-            margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-          >
-            <defs>
+      case "pie":
+      case "donut":
+        return (
+          <ChartContainer config={{ value: { label: "Value", color: chartStyles.colors[0] } } satisfies ChartConfig}>
+            <RechartsPieChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+              <Pie
+                data={pieChartData}
+                cx="50%"
+                cy="50%"
+                labelLine={{ 
+                  stroke: '#666666', 
+                  strokeWidth: 1,
+                  strokeDasharray: "2 2"
+                }}
+                label={({ name, value, percent }) => (
+                  `${name}: ${value.toLocaleString()} (${(percent * 100).toFixed(0)}%)`
+                )}
+                innerRadius={chartType === "donut" ? "50%" : 0}
+                outerRadius="80%"
+                dataKey="value"
+                nameKey="name"
+                isAnimationActive={true}
+              >
+                {pieChartData.map((_entry, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={chartStyles.colors[index % chartStyles.colors.length]}
+                    opacity={chartStyles.opacity}
+                    stroke="white"
+                    strokeWidth={1}
+                  />
+                ))}
+              </Pie>
+              <ChartTooltip 
+                content={<ChartTooltipContent />}
+                formatter={(value: any) => value.toLocaleString()}
+              />
+              {chartStyles.showLegend && (
+                <Legend
+                  verticalAlign={chartStyles.legendPosition?.vertical || 'bottom'}
+                  align={chartStyles.legendPosition?.horizontal || 'center'}
+                  layout={chartStyles.legendPosition?.layout || 'horizontal'}
+                  wrapperStyle={{
+                    fontSize: `${chartStyles.fontSize}px`,
+                    padding: '10px'
+                  }}
+                />
+              )}
+            </RechartsPieChart>
+          </ChartContainer>
+        );
+
+      case "area":
+      case "stacked-area":
+        return (
+          <ChartContainer config={{ value: { label: keyToLabel[dataKeys[0]] || "Value", color: chartStyles.colors[0] } } satisfies ChartConfig}>
+            <AreaChart
+              data={chartData}
+              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+            >
+              <defs>
+                {dataKeys.map((key, index) => (
+                  <linearGradient key={`gradient-${key}`} id={`gradient-${key}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={chartStyles.colors[index % chartStyles.colors.length]} stopOpacity={chartStyles.opacity * 0.8}/>
+                    <stop offset="95%" stopColor={chartStyles.colors[index % chartStyles.colors.length]} stopOpacity={chartStyles.opacity * 0.1}/>
+                  </linearGradient>
+                ))}
+              </defs>
+              {gridComponent}
+              <XAxis
+                dataKey={axisKey}
+                tick={{ fontSize: chartStyles.fontSize }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fontSize: chartStyles.fontSize }}
+              />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              {chartStyles.showLegend && (dataKeys.length > 1 || chartStyles.showSingleSeriesLegend) && (
+                <Legend
+                  verticalAlign={chartStyles.legendPosition?.vertical || 'bottom'}
+                  align={chartStyles.legendPosition?.horizontal || 'center'}
+                  layout={chartStyles.legendPosition?.layout || 'horizontal'}
+                  wrapperStyle={{
+                    fontSize: `${chartStyles.fontSize}px`,
+                    padding: '10px'
+                  }}
+                />
+              )}
               {dataKeys.map((key, index) => (
-                <linearGradient key={`gradient-${key}`} id={`gradient-${key}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={chartStyles.colors[index % chartStyles.colors.length]} stopOpacity={chartStyles.opacity * 0.8}/>
-                  <stop offset="95%" stopColor={chartStyles.colors[index % chartStyles.colors.length]} stopOpacity={chartStyles.opacity * 0.1}/>
-                </linearGradient>
+                <Area
+                  key={key}
+                  name={keyToLabel[key] || key}
+                  type="monotone"
+                  dataKey={key}
+                  stroke={chartStyles.colors[index % chartStyles.colors.length]}
+                  strokeWidth={chartStyles.strokeWidth}
+                  fill={`url(#gradient-${key})`}
+                  fillOpacity={1}
+                  strokeOpacity={chartStyles.opacity}
+                  stackId={chartType === "stacked-area" ? "stack" : undefined}
+                />
               ))}
-            </defs>
-            {gridComponent}
-            <XAxis
-              dataKey={axisKey}
-              tick={{ fontSize: chartStyles.fontSize }}
-              axisLine={false}
-              tickLine={false}
-            />
-            <YAxis
-              axisLine={false}
-              tickLine={false}
-              tick={{ fontSize: chartStyles.fontSize }}
-            />
-            <ChartTooltip content={<ChartTooltipContent />} />
-            {chartStyles.showLegend && (dataKeys.length > 1 || chartStyles.showSingleSeriesLegend) && (
-              <Legend
-                verticalAlign="top"
-                align="right"
-                wrapperStyle={{
-                  paddingBottom: "20px",
-                  fontSize: `${chartStyles.fontSize}px`
-                }}
-              />
-            )}
-            {dataKeys.map((key, index) => (
-              <Area
-                key={key}
-                name={keyToLabel[key] || key}
-                type="monotone"
-                dataKey={key}
-                stroke={chartStyles.colors[index % chartStyles.colors.length]}
-                strokeWidth={chartStyles.strokeWidth}
-                fill={`url(#gradient-${key})`}
-                fillOpacity={1}
-                strokeOpacity={chartStyles.opacity}
-                stackId={chartType === "stacked-area" ? "stack" : undefined}
-              />
-            ))}
-          </AreaChart>
-        </ChartContainer>
-      );
+            </AreaChart>
+          </ChartContainer>
+        );
 
-    default:
-      return (
-        <div className="flex items-center justify-center h-full text-muted-foreground">
-          Unsupported chart type: {chartType}
-        </div>
-      );
-  }
+      case "bar":
+      default:
+        return (
+          <ChartContainer config={{ value: { label: keyToLabel[dataKeys[0]] || "Value", color: chartStyles.colors[0] } } satisfies ChartConfig}>
+            <RechartsBarChart data={chartData} margin={{ top: 20, right: 20, bottom: 30, left: 20 }}>
+              {gridComponent}
+              <XAxis
+                dataKey={axisKey}
+                tick={{ fontSize: chartStyles.fontSize }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fontSize: chartStyles.fontSize }}
+              />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              {chartStyles.showLegend && (dataKeys.length > 1 || chartStyles.showSingleSeriesLegend) && (
+                <Legend
+                  verticalAlign={chartStyles.legendPosition?.vertical || 'bottom'}
+                  align={chartStyles.legendPosition?.horizontal || 'center'}
+                  layout={chartStyles.legendPosition?.layout || 'horizontal'}
+                  wrapperStyle={{
+                    fontSize: `${chartStyles.fontSize}px`,
+                    padding: '10px'
+                  }}
+                />
+              )}
+              {dataKeys.map((key, index) => (
+                <Bar
+                  key={key}
+                  name={keyToLabel[key] || key}
+                  dataKey={key}
+                  fill={chartStyles.colors[index % chartStyles.colors.length]}
+                  radius={[chartStyles.barRadius, chartStyles.barRadius, 0, 0]}
+                  fillOpacity={chartStyles.opacity}
+                >
+                  {chartStyles.useMultiColor && dataKeys.length === 1 && chartData.map((_, entryIndex) => (
+                    <Cell
+                      key={`cell-${entryIndex}`}
+                      fill={chartStyles.colors[entryIndex % chartStyles.colors.length]}
+                    />
+                  ))}
+                </Bar>
+              ))}
+            </RechartsBarChart>
+          </ChartContainer>
+        );
+    }
+  };
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      {renderInnerContent()}
+    </ResponsiveContainer>
+  );
 }
 
-// Define ChartNode after renderChartContent
 const ChartNode = Node.create({
   name: 'chart',
   group: 'block',
   atom: true, // Makes the node a single unit
+
+  addAttributes() {
+    return {
+      chartData: {
+        default: null
+      }
+    }
+  },
 
   parseHTML() {
     return [
@@ -366,13 +417,13 @@ const ChartNode = Node.create({
   },
 
   addNodeView() {
-    return ({ editor }) => {
+    return ({ node, editor }) => {
       const container = document.createElement('div')
       container.classList.add('chart-container', 'my-4', 'border', 'rounded-lg', 'p-4')
       container.style.height = '300px'
 
-      // Get the chart data from the editor's storage
-      const reportData = editor.storage.chart?.reportData
+      // Get the chart data from the node's attributes or editor's storage
+      const reportData = node.attrs.chartData || editor.storage.chart?.reportData
 
       if (reportData) {
         // Create a new container for Recharts
@@ -381,13 +432,17 @@ const ChartNode = Node.create({
         chartContainer.style.height = '100%'
         container.appendChild(chartContainer)
 
+        // Log the chart data for debugging
+        console.log('Chart data in node view:', reportData);
+
+        // Create a deep clone of the report data to avoid any reference issues
+        const clonedReportData = JSON.parse(JSON.stringify(reportData));
+
         // Render the chart using React
         const root = ReactDOM.createRoot(chartContainer)
-        root.render(
-          <ResponsiveContainer width="100%" height="100%">
-            {renderChartContent(reportData)}
-          </ResponsiveContainer>
-        )
+        root.render(renderChartContent(clonedReportData))
+      } else {
+        container.textContent = 'No chart data available'
       }
 
       return {
@@ -401,6 +456,64 @@ const ChartNode = Node.create({
 })
 
 const MenuBar = ({ editor }: { editor: any }) => {
+  const [savedCharts, setSavedCharts] = useState<ChartReport[]>([])
+  const { toast } = useToast()
+
+  useEffect(() => {
+    // Load saved charts from localStorage
+    const loadSavedCharts = () => {
+      const storedCharts = localStorage.getItem('savedCharts')
+      if (storedCharts) {
+        try {
+          setSavedCharts(JSON.parse(storedCharts))
+        } catch (error) {
+          console.error('Error loading saved charts:', error)
+        }
+      }
+    }
+
+    // Load initial data
+    loadSavedCharts()
+
+    // Set up storage event listener for cross-tab updates
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'savedCharts') {
+        loadSavedCharts()
+      }
+    }
+
+    window.addEventListener('storage', handleStorageChange)
+
+    // Custom event for same-tab updates
+    const handleCustomEvent = () => loadSavedCharts()
+    window.addEventListener('savedChartsUpdated', handleCustomEvent)
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange)
+      window.removeEventListener('savedChartsUpdated', handleCustomEvent)
+    }
+  }, [])
+
+  const handleInsertChart = (chart: ChartReport) => {
+    if (editor) {
+      // Create a deep clone of the chart data to avoid any reference issues
+      const clonedChart = JSON.parse(JSON.stringify(chart));
+      
+      editor.chain().focus().insertContent({
+        type: 'chart',
+        attrs: {
+          chartData: clonedChart
+        }
+      }).run()
+  
+      toast({
+        title: "Chart Inserted",
+        description: `Chart "${chart.name}" has been inserted into your report.`,
+        duration: 2000,
+      })
+    }
+  }
+
   if (!editor) {
     return null
   }
@@ -454,20 +567,53 @@ const MenuBar = ({ editor }: { editor: any }) => {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => {
-          editor.chain().focus().insertContent({
-            type: 'chart',
-            attrs: {}
-          }).run()
-        }}
-        className="gap-2"
-      >
-        <BarChart className="h-4 w-4" />
-        Insert Chart
-      </Button>
+      <Dialog>
+        <DialogTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-2"
+          >
+            <BarChart className="h-4 w-4" />
+            Insert Chart
+          </Button>
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Insert Chart</DialogTitle>
+            <DialogDescription>
+              Select a saved chart to insert into your report.
+            </DialogDescription>
+          </DialogHeader>
+          {savedCharts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <p className="text-muted-foreground mb-2">No saved charts found</p>
+              <p className="text-sm text-muted-foreground">
+                Create and save a chart first to insert it into your report.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 py-4">
+              {savedCharts.map((chart, index) => (
+                <Card
+                  key={index}
+                  className="cursor-pointer hover:bg-accent transition-colors"
+                  onClick={() => handleInsertChart(chart)}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex flex-col gap-2">
+                      <h3 className="font-medium">{chart.name}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        {chart.chartType} Chart • {new Date(chart.savedAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -525,12 +671,7 @@ export function ChartReport() {
         })
       }
     } else {
-      toast({
-        title: "No Report Data",
-        description: "No chart report data was found.",
-        variant: "destructive",
-        duration: 2000,
-      })
+      console.log("No report data found")
     }
   }, [editor])
 
@@ -544,7 +685,7 @@ export function ChartReport() {
   }, [editor, reportData])
 
   const handleBack = () => {
-    navigate("/rdm/document-insights/charting")
+    navigate("/rdm/document-insights/chart-dashboard")
   }
 
   const handleSaveReport = () => {
@@ -701,13 +842,8 @@ export function ChartReport() {
         placeholder.appendChild(chartRenderDiv);
   
         // Render chart with a unique key
-        const chartId = placeholder.getAttribute('data-chart-id');
         const root = ReactDOM.createRoot(chartRenderDiv);
-        root.render(
-          <ResponsiveContainer width="100%" height="100%" key={chartId}>
-            {renderChartContent(reportData)}
-          </ResponsiveContainer>
-        );
+        root.render(renderChartContent(reportData));
         
         // Wait for chart rendering
         await new Promise(resolve => setTimeout(resolve, 2000));

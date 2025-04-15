@@ -16,7 +16,7 @@ export function DiDashboard() {
   }
 
   const handleNavigateToCharting = () => {
-    navigate("/rdm/document-insights/charting")
+    navigate("/rdm/document-insights/chart-dashboard")
   }
 
   return (

@@ -1,12 +1,11 @@
 import { useState, useEffect } from "react"
-import { Upload, ArrowLeft, BarChart, PieChart, LineChart, ArrowLeftRight, Layers, Waves, ChevronDown, Plus, Trash2, Settings, Calculator, HelpCircle, Undo, Download, X, Group, Calendar as CalendarIcon, FileText } from "lucide-react"
+import { Upload, BarChart, PieChart, LineChart, ArrowLeftRight, Layers, Waves, ChevronDown, Plus, Trash2, Settings, Calculator, HelpCircle, Undo, Download, X, Group, Calendar as CalendarIcon, Save } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
 import { Spinner } from "@/components/ui/spinner"
-import { useNavigate } from "react-router-dom"
 import { Textarea } from "@/components/ui/textarea"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -90,17 +89,10 @@ const sampleData = [
 ]
 
 const COLOR_THEMES = {
-  default: [
-    "#3B82F6", // blue-500
-    "#8B5CF6", // purple-500
-    "#14B8A6", // turquoise (teal-500)
-    "#7DD3FC", // light blue (sky-300)
-    "#4ADE80", // light green (green-400)
-    "#38BDF8"  // sky blue (sky-400)
-  ] as string[],
+  default: ["#1E293B", "#334155", "#64748B", "#94A3B8", "#CBD5E1", "#E2E8F0"] as string[], // Slate colors
+  primary: ["#3B82F6", "#8B5CF6", "#14B8A6", "#7DD3FC", "#4ADE80", "#38BDF8"] as string[], // Previous default colors
   ocean: ["#006D77", "#83C5BE", "#EDF6F9", "#FFDDD2", "#E29578", "#006466"] as string[],
   forest: ["#2D6A4F", "#40916C", "#52B788", "#74C69D", "#95D5B2", "#B7E4C7"] as string[],
-  slate: ["#1E293B", "#334155", "#64748B", "#94A3B8", "#CBD5E1", "#E2E8F0"] as string[],
   berry: ["#7B2CBF", "#9D4EDD", "#C77DFF", "#E0AAFF", "#E6B8FF", "#ECC5FF"] as string[],
   earth: ["#553939", "#704F4F", "#A77979", "#C5B0B0", "#D4C1C1", "#E3D3D3"] as string[],
   neon: ["#FF0080", "#FF00FF", "#8000FF", "#0000FF", "#0080FF", "#00FFFF"] as string[],
@@ -121,6 +113,11 @@ interface ChartStyles {
   showSingleSeriesLegend: boolean;
   colorTheme: keyof typeof COLOR_THEMES;
   useMultiColor: boolean;
+  legendPosition: {
+    vertical: 'top' | 'middle' | 'bottom';
+    horizontal: 'left' | 'center' | 'right';
+    layout: 'horizontal' | 'vertical';
+  };
 }
 
 // Add interface for column definition with formula support
@@ -249,16 +246,15 @@ const evaluateFormula = (formula: string, rowData: any, allData: any[]): number 
     }
 };
 
-export function Charting() {
+export function Charting({ chartName }: { chartName?: string }) {
   const [_file, _setFile] = useState<File | null>(null)
   const [isLoading, _setIsLoading] = useState(false)
   const [chartType, setChartType] = useState<string>("bar")
   const [chartData, setChartData] = useState<any[]>(sampleData)
   const [customData, setCustomData] = useState<string>("")
   const { toast } = useToast()
-  const navigate = useNavigate()
   const [chartStyles, setChartStyles] = useState<ChartStyles>({
-    colors: COLOR_THEMES.default,
+    colors: [...COLOR_THEMES.default],
     strokeWidth: 2,
     barRadius: 4,
     showGrid: false,
@@ -269,7 +265,12 @@ export function Charting() {
     showLegend: true,
     showSingleSeriesLegend: false,
     colorTheme: 'default',
-    useMultiColor: false
+    useMultiColor: true,
+    legendPosition: {
+      vertical: 'top',
+      horizontal: 'center',
+      layout: 'horizontal'
+    }
   })
 
   // Add state for columns
@@ -361,10 +362,6 @@ export function Charting() {
       </ul>
     </div>
   );
-
-  const handleBack = () => {
-    navigate("/rdm/document-insights")
-  }
 
   const isDataValidForChartType = (data: any[], chartType: string): boolean => {
     if (!data || data.length === 0) return false;
@@ -1328,11 +1325,12 @@ export function Charting() {
                   <ChartTooltip content={<ChartTooltipContent />} />
                   {chartStyles.showLegend && (dataKeys.length > 1 || chartStyles.showSingleSeriesLegend) && (
                     <Legend
-                      verticalAlign="top"
-                      align="right"
+                      verticalAlign={chartStyles.legendPosition.vertical}
+                      align={chartStyles.legendPosition.horizontal}
+                      layout={chartStyles.legendPosition.layout}
                       wrapperStyle={{
-                        paddingBottom: "20px",
-                        fontSize: `${chartStyles.fontSize}px`
+                        fontSize: `${chartStyles.fontSize}px`,
+                        padding: '10px'
                       }}
                     />
                   )}
@@ -1540,11 +1538,12 @@ export function Charting() {
                   <ChartTooltip content={<ChartTooltipContent />} />
                   {chartStyles.showLegend && (dataKeys.length > 1 || chartStyles.showSingleSeriesLegend) && (
                     <Legend
-                      verticalAlign="top"
-                      align="right"
+                      verticalAlign={chartStyles.legendPosition.vertical}
+                      align={chartStyles.legendPosition.horizontal}
+                      layout={chartStyles.legendPosition.layout}
                       wrapperStyle={{
-                        paddingBottom: "20px",
-                        fontSize: `${chartStyles.fontSize}px`
+                        fontSize: `${chartStyles.fontSize}px`,
+                        padding: '10px'
                       }}
                     />
                   )}
@@ -1604,13 +1603,12 @@ export function Charting() {
                   <ChartTooltip content={<ChartTooltipContent />} />
                   {chartStyles.showLegend && (
                     <Legend
-                      verticalAlign="bottom"
-                      align="center"
-                      layout="horizontal"
+                      verticalAlign={chartStyles.legendPosition.vertical}
+                      align={chartStyles.legendPosition.horizontal}
+                      layout={chartStyles.legendPosition.layout}
                       wrapperStyle={{
-                        paddingTop: "20px",
                         fontSize: `${chartStyles.fontSize}px`,
-                        width: '100%'
+                        padding: '10px'
                       }}
                     />
                   )}
@@ -1653,11 +1651,12 @@ export function Charting() {
                   <ChartTooltip content={<ChartTooltipContent />} />
                   {chartStyles.showLegend && (dataKeys.length > 1 || chartStyles.showSingleSeriesLegend) && (
                     <Legend
-                      verticalAlign="top"
-                      align="right"
+                      verticalAlign={chartStyles.legendPosition.vertical}
+                      align={chartStyles.legendPosition.horizontal}
+                      layout={chartStyles.legendPosition.layout}
                       wrapperStyle={{
-                        paddingBottom: "20px",
-                        fontSize: `${chartStyles.fontSize}px`
+                        fontSize: `${chartStyles.fontSize}px`,
+                        padding: '10px'
                       }}
                     />
                   )}
@@ -1984,34 +1983,61 @@ export function Charting() {
     setChartData(newData);
   };
 
-  const handleCreateReport = () => {
+  const handleSaveChart = () => {
     // Store current chart configuration and data
-    const reportData = {
+    const chartConfig = {
+      name: chartName || 'Untitled Chart',
       chartType,
       chartData: groupedData || chartData,
       chartStyles,
       columns,
-      groupByConfig
+      groupByConfig,
+      savedAt: new Date().toISOString()
     };
     
-    // Store the report data in localStorage for now
-    localStorage.setItem('chartReport', JSON.stringify(reportData));
+    // Store the chart configuration in localStorage
+    const savedCharts = JSON.parse(localStorage.getItem('savedCharts') || '[]');
+    savedCharts.push(chartConfig);
+    localStorage.setItem('savedCharts', JSON.stringify(savedCharts));
     
-    // Navigate to the report page
-    navigate('/rdm/document-insights/report');
+    // Dispatch event to notify other components
+    window.dispatchEvent(new Event('savedChartsUpdated'));
     
+    toast({
+      title: "Chart Saved",
+      description: `Chart "${chartName || 'Untitled Chart'}" has been saved successfully.`,
+      duration: 3000
+    });
+  };
+
+  // Add new type for simplified legend position
+  type SimpleLegendPosition = 'bottom' | 'top' | 'left' | 'right';
+
+  // Add helper function to convert simple position to detailed settings
+  const getLegendPositionSettings = (position: SimpleLegendPosition): ChartStyles['legendPosition'] => {
+    switch (position) {
+      case 'bottom':
+        return { vertical: 'bottom', horizontal: 'center', layout: 'horizontal' };
+      case 'top':
+        return { vertical: 'top', horizontal: 'center', layout: 'horizontal' };
+      case 'left':
+        return { vertical: 'middle', horizontal: 'left', layout: 'vertical' };
+      case 'right':
+        return { vertical: 'middle', horizontal: 'right', layout: 'vertical' };
+    }
+  };
+
+  // Add helper function to get simple position from detailed settings
+  const getSimpleLegendPosition = (position: ChartStyles['legendPosition']): SimpleLegendPosition => {
+    if (position.vertical === 'bottom') return 'bottom';
+    if (position.vertical === 'top') return 'top';
+    if (position.horizontal === 'left') return 'left';
+    return 'right';
   };
 
   return (
-    <div className="container mx-auto py-6 pr-6">
+    <div className="container mx-auto py-0">
       <div className="flex flex-col gap-6">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={handleBack}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <h1 className="text-3xl font-bold">Data Visualization</h1>
-        </div>
-
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card className="md:col-span-1">
             <CardHeader>
@@ -2144,12 +2170,12 @@ export function Charting() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Button 
-                    variant="default" 
+                    variant="outline"
                     className="flex items-center gap-2"
-                    onClick={handleCreateReport}
+                    onClick={handleSaveChart}
                   >
-                    <FileText className="h-4 w-4" />
-                    Create Report
+                    <Save className="h-4 w-4" />
+                    Save Chart
                   </Button>
                   <Dialog>
                     <DialogTrigger asChild>
@@ -2304,6 +2330,29 @@ export function Charting() {
                                 max={16}
                                 step={1}
                               />
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              <label className="text-sm font-medium">Legend Position</label>
+                              <Select
+                                defaultValue="bottom"
+                                value={getSimpleLegendPosition(chartStyles.legendPosition)}
+                                onValueChange={(value: SimpleLegendPosition) => {
+                                  setChartStyles({
+                                    ...chartStyles,
+                                    legendPosition: getLegendPositionSettings(value)
+                                  });
+                                }}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="bottom">Bottom</SelectItem>
+                                  <SelectItem value="top">Top</SelectItem>
+                                  <SelectItem value="left">Left</SelectItem>
+                                  <SelectItem value="right">Right</SelectItem>
+                                </SelectContent>
+                              </Select>
                             </div>
                             <div className="flex flex-col space-y-2">
                               <div className="flex items-center space-x-4">
