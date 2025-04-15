@@ -1,6 +1,6 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, ChevronDown, Plus, FileText, Pencil, Trash2 } from "lucide-react"
+import { ArrowLeft, ChevronDown, Plus, FileText, Pencil, Trash2, Edit2 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { Charting } from "./charting"
 import {
@@ -29,6 +29,8 @@ interface ChartItem {
   name: string;
   isOpen: boolean;
   isEditing: boolean;
+  savedChartData?: SavedChart;
+  originalSavedAt?: string;
 }
 
 interface SavedChart {
@@ -47,6 +49,7 @@ export function ChartDashboard() {
     { id: '1', name: 'New Chart', isOpen: true, isEditing: false }
   ])
   const [savedCharts, setSavedCharts] = useState<SavedChart[]>([])
+  const [activeTab, setActiveTab] = useState("create-chart")
   const { toast } = useToast()
 
   // Load saved charts initially and set up localStorage event listener
@@ -77,15 +80,39 @@ export function ChartDashboard() {
       }
     }
 
-    window.addEventListener('storage', handleStorageChange)
+    // Handle chart updates
+    const handleChartUpdate = (e: CustomEvent<{ savedAt: string; updatedChart: SavedChart }>) => {
+      const { savedAt, updatedChart } = e.detail;
+      
+      // Update savedCharts state
+      setSavedCharts(current => 
+        current.map(chart => chart.savedAt === savedAt ? updatedChart : chart)
+      );
 
-    // Custom event for same-tab updates
-    const handleCustomEvent = () => loadSavedCharts()
-    window.addEventListener('savedChartsUpdated', handleCustomEvent)
+      // Update charts state (for currently open charts)
+      setCharts(current =>
+        current.map(chart => {
+          if (chart.originalSavedAt === savedAt) {
+            return {
+              ...chart,
+              name: updatedChart.name,
+              savedChartData: updatedChart
+            };
+          }
+          return chart;
+        })
+      );
+    };
+
+    // Set up event listeners
+    window.addEventListener('storage', handleStorageChange)
+    window.addEventListener('savedChartsUpdated', loadSavedCharts)
+    window.addEventListener('chartUpdated', handleChartUpdate as EventListener)
 
     return () => {
       window.removeEventListener('storage', handleStorageChange)
-      window.removeEventListener('savedChartsUpdated', handleCustomEvent)
+      window.removeEventListener('savedChartsUpdated', loadSavedCharts)
+      window.removeEventListener('chartUpdated', handleChartUpdate as EventListener)
     }
   }, [])
 
@@ -157,6 +184,34 @@ export function ChartDashboard() {
     })
   }
 
+  const handleEditSavedChart = (chart: SavedChart) => {
+    // Check if this chart is already open
+    const existingChartIndex = charts.findIndex(c => c.originalSavedAt === chart.savedAt);
+    
+    if (existingChartIndex !== -1) {
+      // Chart is already open, just focus it and close others
+      setCharts(charts.map((c, index) => ({
+        ...c,
+        isOpen: index === existingChartIndex
+      })));
+    } else {
+      // Create a new chart instance with the saved chart data
+      const newChart = {
+        id: `chart-${Date.now()}`,
+        name: chart.name,
+        isOpen: true,
+        isEditing: false,
+        savedChartData: chart,
+        originalSavedAt: chart.savedAt
+      }
+      // Close all existing charts and add the new one
+      setCharts([...charts.map(c => ({ ...c, isOpen: false })), newChart])
+    }
+    
+    // Switch to the create-chart tab
+    setActiveTab("create-chart")
+  }
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
@@ -189,7 +244,7 @@ export function ChartDashboard() {
           </div>
         </div>
 
-        <Tabs defaultValue="create-chart" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="create-chart">Create Chart</TabsTrigger>
             <TabsTrigger value="saved-charts">Saved Charts</TabsTrigger>
@@ -264,7 +319,11 @@ export function ChartDashboard() {
                 </div>
                 
                 <CollapsibleContent className="mt-1">
-                  <Charting chartName={chart.name} />
+                  <Charting 
+                    chartName={chart.name} 
+                    savedChartData={chart.savedChartData} 
+                    originalSavedAt={chart.originalSavedAt}
+                  />
                 </CollapsibleContent>
               </Collapsible>
             ))}
@@ -285,14 +344,24 @@ export function ChartDashboard() {
                             <h3 className="font-medium">{chart.name}</h3>
                             <p className="text-sm text-muted-foreground">{chart.chartType} Chart</p>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteChart(index)}
-                            className="h-8 w-8 p-0"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditSavedChart(chart)}
+                              className="h-8 w-8 p-0"
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteChart(index)}
+                              className="h-8 w-8 p-0"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
                         <p className="text-sm text-muted-foreground">
                           Saved on {formatDate(chart.savedAt)}

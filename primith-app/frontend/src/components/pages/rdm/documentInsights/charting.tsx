@@ -246,7 +246,21 @@ const evaluateFormula = (formula: string, rowData: any, allData: any[]): number 
     }
 };
 
-export function Charting({ chartName }: { chartName?: string }) {
+interface SavedChart {
+  name: string;
+  chartType: string;
+  chartData: any[];
+  chartStyles: any;
+  columns: any[];
+  groupByConfig: any;
+  savedAt: string;
+}
+
+export function Charting({ chartName, savedChartData, originalSavedAt }: { 
+  chartName?: string;
+  savedChartData?: SavedChart;
+  originalSavedAt?: string;
+}) {
   const [_file, _setFile] = useState<File | null>(null)
   const [isLoading, _setIsLoading] = useState(false)
   const [chartType, setChartType] = useState<string>("bar")
@@ -306,6 +320,19 @@ export function Charting({ chartName }: { chartName?: string }) {
 
   // Add new state for axis sorting
   const [axisSorting, setAxisSorting] = useState<'none' | 'asc' | 'desc' | 'chronological'>('none');
+
+  // Initialize state with saved chart data if available
+  useEffect(() => {
+    if (savedChartData) {
+      setChartType(savedChartData.chartType);
+      setChartData(savedChartData.chartData);
+      setChartStyles(savedChartData.chartStyles);
+      setColumns(savedChartData.columns);
+      if (savedChartData.groupByConfig) {
+        setGroupByConfig(savedChartData.groupByConfig);
+      }
+    }
+  }, [savedChartData]);
 
   // Add sorting function
   const sortData = (data: any[]) => {
@@ -1984,31 +2011,67 @@ export function Charting({ chartName }: { chartName?: string }) {
   };
 
   const handleSaveChart = () => {
-    // Store current chart configuration and data
-    const chartConfig = {
+    if (!chartData.length || !columns.length) {
+      toast({
+        title: "Cannot Save Chart",
+        description: "Please add some data and configure columns before saving.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Get existing saved charts
+    const existingSavedCharts = JSON.parse(localStorage.getItem('savedCharts') || '[]')
+    
+    const chartToSave = {
       name: chartName || 'Untitled Chart',
       chartType,
-      chartData: groupedData || chartData,
+      chartData,
       chartStyles,
       columns,
       groupByConfig,
-      savedAt: new Date().toISOString()
-    };
+      savedAt: originalSavedAt || new Date().toISOString()
+    }
+
+    let updatedCharts
+    if (originalSavedAt) {
+      // Update existing chart
+      updatedCharts = existingSavedCharts.map((chart: SavedChart) => 
+        chart.savedAt === originalSavedAt ? chartToSave : chart
+      )
+      toast({
+        title: "Chart Updated",
+        description: "Your changes have been saved.",
+        duration: 2000,
+      })
+    } else {
+      // Save new chart
+      updatedCharts = [...existingSavedCharts, chartToSave]
+      toast({
+        title: "Chart Saved",
+        description: "Your chart has been saved successfully.",
+        duration: 2000,
+      })
+    }
+
+    // Save to localStorage
+    localStorage.setItem('savedCharts', JSON.stringify(updatedCharts))
     
-    // Store the chart configuration in localStorage
-    const savedCharts = JSON.parse(localStorage.getItem('savedCharts') || '[]');
-    savedCharts.push(chartConfig);
-    localStorage.setItem('savedCharts', JSON.stringify(savedCharts));
-    
-    // Dispatch event to notify other components
-    window.dispatchEvent(new Event('savedChartsUpdated'));
-    
-    toast({
-      title: "Chart Saved",
-      description: `Chart "${chartName || 'Untitled Chart'}" has been saved successfully.`,
-      duration: 3000
-    });
-  };
+    // Update the current savedChartData if this was an edit
+    if (originalSavedAt) {
+      // Create and dispatch a custom event with the updated chart data
+      const updateEvent = new CustomEvent('chartUpdated', {
+        detail: {
+          savedAt: originalSavedAt,
+          updatedChart: chartToSave
+        }
+      });
+      window.dispatchEvent(updateEvent);
+    } else {
+      // For new charts, just trigger the regular update
+      window.dispatchEvent(new Event('savedChartsUpdated'))
+    }
+  }
 
   // Add new type for simplified legend position
   type SimpleLegendPosition = 'bottom' | 'top' | 'left' | 'right';
