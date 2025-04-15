@@ -8,6 +8,17 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
@@ -89,7 +100,17 @@ export function ChartDashboard() {
       isOpen: true,
       isEditing: false
     }
-    setCharts([...charts, newChart])
+    // Close all existing charts and add the new one
+    setCharts([...charts.map(chart => ({ ...chart, isOpen: false })), newChart])
+  }
+
+  const handleRemoveChart = (chartId: string) => {
+    setCharts(charts.filter(chart => chart.id !== chartId))
+    toast({
+      title: "Chart Removed",
+      description: "The chart has been removed from the dashboard.",
+      duration: 2000,
+    })
   }
 
   const toggleChart = (chartId: string) => {
@@ -206,6 +227,31 @@ export function ChartDashboard() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete Chart</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to delete this chart? This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => handleRemoveChart(chart.id)}>
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                     <CollapsibleTrigger asChild>
                       <Button variant="ghost" size="sm" className="w-9 p-0">
                         <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${
