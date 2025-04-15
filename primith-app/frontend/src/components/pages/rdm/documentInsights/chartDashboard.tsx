@@ -296,7 +296,7 @@ export function ChartDashboard() {
                         <AlertDialogHeader>
                           <AlertDialogTitle>Delete Chart</AlertDialogTitle>
                           <AlertDialogDescription>
-                            Are you sure you want to delete this chart? This action cannot be undone.
+                            Are you sure you want to proceed? Any unsaved changes will be lost.
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
