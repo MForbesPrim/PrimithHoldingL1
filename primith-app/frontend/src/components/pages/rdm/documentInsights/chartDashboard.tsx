@@ -20,6 +20,7 @@ interface ChartItem {
   isEditing: boolean;
   savedChartData?: ChartData & { savedAt: string };
   originalSavedAt?: string;
+  chartId?: string;
 }
 
 export function ChartDashboard() {
@@ -114,12 +115,12 @@ export function ChartDashboard() {
 
   // Event listener for chart updates
   useEffect(() => {
-    const handleChartUpdate = (e: CustomEvent<{ savedAt: string; updatedChart: ChartData & { savedAt: string } }>) => {
-      const { savedAt, updatedChart } = e.detail;
+    const handleChartUpdate = (e: CustomEvent<{ savedAt: string; chartId: string; updatedChart: ChartData & { savedAt: string } }>) => {
+      const { savedAt, chartId, updatedChart } = e.detail;
 
       // Update savedCharts state
       setSavedCharts(current =>
-        current.map(chart => chart.savedAt === savedAt ? updatedChart : chart)
+        current.map(chart => chart.savedAt === savedAt ? { ...updatedChart, id: chartId } : chart)
       );
 
       // Update charts state (for currently open charts)
@@ -129,7 +130,8 @@ export function ChartDashboard() {
             return {
               ...chart,
               name: updatedChart.name,
-              savedChartData: updatedChart
+              savedChartData: { ...updatedChart, id: chartId },
+              chartId: chartId
             };
           }
           return chart;
@@ -222,7 +224,7 @@ export function ChartDashboard() {
   };
 
   const handleEditSavedChart = (chart: ChartData & { savedAt: string }) => {
-    if (!chart.savedAt) return;
+    if (!chart.savedAt || !chart.id) return;  // Check for both savedAt and id
 
     // Check if this chart is already open
     const existingChartIndex = charts.findIndex(c => c.originalSavedAt === chart.savedAt);
@@ -241,7 +243,8 @@ export function ChartDashboard() {
         isOpen: true,
         isEditing: false,
         savedChartData: chart,
-        originalSavedAt: chart.savedAt
+        originalSavedAt: chart.savedAt,
+        chartId: chart.id  // Add chartId
       };
       // Close all existing charts and add the new one
       setCharts([...charts.map(c => ({ ...c, isOpen: false })), newChart]);
@@ -395,6 +398,7 @@ export function ChartDashboard() {
                     chartName={chart.name}
                     savedChartData={chart.savedChartData}
                     originalSavedAt={chart.originalSavedAt}
+                    chartId={chart.chartId}
                     organizationId={selectedOrgId}
                     onSave={loadSavedCharts}
                   />

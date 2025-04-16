@@ -1,5 +1,5 @@
 import { useEffect, useState, ReactElement } from "react"
-import { ArrowLeft, Bold, Italic, List, ListOrdered, Heading2, ChevronDown, Save, BarChart, FileDown } from "lucide-react"
+import { ArrowLeft, Bold, Italic, List, ListOrdered, Heading2, ChevronDown, Save, BarChart, FileDown, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { useNavigate, useParams } from "react-router-dom"
@@ -46,7 +46,15 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import ChartService, { ChartData } from '@/services/chartService';
 import { useOrganization } from "@/components/pages/rdm/context/organizationContext";
 
@@ -90,6 +98,36 @@ interface ChartReport {
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+// Add PDF Settings interface after ChartReport interface
+interface PdfSettings {
+  includeTitlePage: boolean;
+  includePageNumbers: boolean;
+  pageNumberFormat: {
+    format: 'Page X of Y' | 'X/Y' | 'X';
+    position: 'bottom-center' | 'bottom-right' | 'bottom-left';
+  };
+  fontSizes: {
+    default: number;
+    heading1: number;
+    heading2: number;
+    heading3: number;
+    paragraph: number;
+    footer: number;
+  };
+  customFooter: {
+    enabled: boolean;
+    text: string;
+    alignment: 'left' | 'center' | 'right';
+  };
+  margins: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+    unit: 'in' | 'cm' | 'mm';
+  };
 }
 
 function renderChartContent(reportData: ChartReport): ReactElement {
@@ -670,6 +708,35 @@ export function ChartReport() {
     const [reportName, setReportName] = useState<string>("Untitled Report");
     const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
     const [insertedCharts, setInsertedCharts] = useState<{ id: string; position: number }[]>([]);
+    const [pdfSettingsOpen, setPdfSettingsOpen] = useState(false);
+    const [pdfSettings, setPdfSettings] = useState<PdfSettings>({
+      includeTitlePage: false,
+      includePageNumbers: true,
+      pageNumberFormat: {
+        format: 'Page X of Y',
+        position: 'bottom-center'
+      },
+      fontSizes: {
+        default: 12,
+        heading1: 18,
+        heading2: 16,
+        heading3: 14,
+        paragraph: 10,
+        footer: 10
+      },
+      customFooter: {
+        enabled: false,
+        text: '',
+        alignment: 'center'
+      },
+      margins: {
+        top: 1,
+        right: 1,
+        bottom: 1,
+        left: 1,
+        unit: 'in'
+      }
+    });
     const navigate = useNavigate();
     const { toast } = useToast();
     const { selectedOrgId } = useOrganization();
@@ -943,7 +1010,7 @@ export function ChartReport() {
       setIsGeneratingPDF(true);
       toast({ title: "Generating PDF...", description: "Preparing report...", duration: 5000 });
   
-      let tempRenderContainer = null;
+      let tempRenderContainer: HTMLDivElement | null = null;
   
       try {
         if (!editor) {
@@ -983,7 +1050,7 @@ export function ChartReport() {
             return chartPlaceholder;
           } else if (node.type === 'paragraph') {
             const p = document.createElement('p');
-            if (node.content) {
+            if (node.content && node.content.length > 0) {
               node.content.forEach((child: any) => {
                 if (child.type === 'text') {
                   const textNode = document.createTextNode(child.text);
@@ -1000,6 +1067,12 @@ export function ChartReport() {
                   }
                 }
               });
+            } else {
+              // For empty paragraphs, add a non-breaking space and set min-height
+              const nbsp = document.createTextNode('\u00A0');
+              p.appendChild(nbsp);
+              p.style.minHeight = '1em';
+              p.style.marginBottom = '1em';
             }
             return p;
           } else if (node.type === 'heading') {
@@ -1122,7 +1195,7 @@ export function ChartReport() {
             img.style.width = '100%';
             img.style.maxWidth = '650px';
             img.style.display = 'block';
-            img.style.margin = '1rem auto';
+            img.style.margin = '0.5rem auto';
 
             // Replace placeholder with image
             placeholder.replaceWith(img);
@@ -1140,38 +1213,385 @@ export function ChartReport() {
   
         // Generate PDF
         const pdf = new jsPDF('p', 'mm', 'a4');
-  
-        // Use html2canvas to capture the entire content
-        const contentCanvas = await html2canvas(tempRenderContainer, {
-          scale: 2,
-          useCORS: true,
-          background: '#ffffff',
-        } as any);
-  
-        const contentImgData = contentCanvas.toDataURL('image/png', 0.7);
-  
-        // Add content to PDF
         const pdfWidth = pdf.internal.pageSize.getWidth();
         const pdfHeight = pdf.internal.pageSize.getHeight();
-        const imgWidth = contentCanvas.width;
-        const imgHeight = contentCanvas.height;
-  
-        // Calculate ratio
-        const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight) * 0.9;
-        const imgX = (pdfWidth - imgWidth * ratio) / 2;
-  
-        // Add image to PDF with compression options
-        pdf.addImage(contentImgData, 'PNG', imgX, 10, imgWidth * ratio, imgHeight * ratio, '', 'FAST', 0);
-  
-        // Handle multi-page content if needed
-        let heightLeft = imgHeight * ratio - pdfHeight + 20; // 20mm padding
-        let position = pdfHeight - 20; // Initial position
-  
-        while (heightLeft > 0) {
-          pdf.addPage();
-          pdf.addImage(contentImgData, 'PNG', imgX, -(position), imgWidth * ratio, imgHeight * ratio, '', 'FAST', 0);
-          heightLeft -= (pdfHeight - 20);
-          position += (pdfHeight - 20);
+        
+        // Convert margins to mm if they're in inches
+        const marginConversion = (() => {
+          switch (pdfSettings.margins.unit) {
+            case 'in': return 25.4;  // inches to mm
+            case 'cm': return 10;    // cm to mm
+            default: return 1;       // mm to mm
+          }
+        })();
+        const margins = {
+          top: pdfSettings.margins.top * marginConversion,
+          right: pdfSettings.margins.right * marginConversion,
+          bottom: pdfSettings.margins.bottom * marginConversion,
+          left: pdfSettings.margins.left * marginConversion
+        };
+        
+        // Define content width based on custom margins
+        const contentWidth = pdfWidth - (margins.left + margins.right);
+        
+        // Add title page if enabled
+        if (pdfSettings.includeTitlePage) {
+          // Title page
+          pdf.setFontSize(24);
+          pdf.text(reportName, pdfWidth / 2, margins.top + 25, { align: 'center' });
+          pdf.setFontSize(12);
+          pdf.text(`Generated on ${new Date().toLocaleDateString()}`, pdfWidth / 2, margins.top + 35, { align: 'center' });
+          pdf.addPage(); // Add a new page after title page
+        }
+        
+        // Split content into chunks for pagination
+        const contentElements = Array.from(tempRenderContainer.children[0].children);
+        let currentPage = pdfSettings.includeTitlePage ? 2 : 1;
+        
+        let yPosition = margins.top;
+        
+        // Process each top-level element
+        for (let i = 0; i < contentElements.length; i++) {
+          const element = contentElements[i];
+          
+          // For headings, paragraphs, and lists - add as text
+          if (element.tagName === 'H1' || element.tagName === 'H2' || element.tagName === 'H3') {
+            // Add headings
+            const fontSize = element.tagName === 'H1' 
+              ? pdfSettings.fontSizes.heading1 
+              : element.tagName === 'H2' 
+                ? pdfSettings.fontSizes.heading2 
+                : pdfSettings.fontSizes.heading3;
+            
+            // Calculate base line height for this heading
+            const headingBaseHeight = fontSize * 0.352778; // Convert pt to mm
+            
+            console.log('Processing heading:', {
+              content: element.textContent,
+              type: element.tagName,
+              fontSize,
+              baseHeight: headingBaseHeight,
+              currentY: yPosition
+            });
+            
+            pdf.setFontSize(fontSize);
+            pdf.setFont('helvetica', 'bold');
+            
+            // Check if we need a new page
+            if (yPosition + headingBaseHeight > pdfHeight - margins.bottom) {
+              pdf.addPage();
+              currentPage++;
+              yPosition = margins.top;
+            }
+            
+            const oldY = yPosition;
+            
+            // Add same spacing as paragraphs
+            const paragraphBaseHeight = pdfSettings.fontSizes.paragraph * 0.352778;
+            yPosition += paragraphBaseHeight * 0.6;
+            
+            pdf.text(element.textContent || '', margins.left, yPosition);
+            
+            // Add proportional space after heading
+            yPosition += headingBaseHeight * 1.0;
+            
+            console.log('Heading spacing calculation:', {
+              oldY,
+              newY: yPosition,
+              spaceBefore: paragraphBaseHeight * 0.6,
+              spaceAfter: headingBaseHeight * 1.0,
+              fontSize,
+              headingBaseHeight
+            });
+            
+            pdf.setFont('helvetica', 'normal');
+            pdf.setFontSize(pdfSettings.fontSizes.paragraph);
+          } 
+          else if (element.tagName === 'P') {
+            // Add paragraphs
+            pdf.setFontSize(pdfSettings.fontSizes.paragraph);
+            pdf.setFont('helvetica', 'normal');
+            
+            // Calculate base line height based on font size
+            const baseLineHeight = pdfSettings.fontSizes.paragraph * 0.352778; // Convert pt to mm
+            
+            console.log('Processing paragraph:', {
+              content: element.textContent,
+              currentYPosition: yPosition,
+              baseLineHeight,
+              fontSize: pdfSettings.fontSizes.paragraph,
+              isEmpty: element.textContent === '\u00A0' || !element.textContent?.trim()
+            });
+            
+            // Check if paragraph is empty (just contains a non-breaking space)
+            if (element.textContent === '\u00A0' || !element.textContent?.trim()) {
+              const oldY = yPosition;
+              // For empty paragraphs, add space
+              yPosition += baseLineHeight * 1.2;
+              
+              console.log('Empty paragraph spacing:', {
+                oldY,
+                newY: yPosition,
+                addedSpace: baseLineHeight * 1.2,
+                baseLineHeight
+              });
+              
+              // Check if we need a new page
+              if (yPosition > pdfHeight - margins.bottom) {
+                console.log('New page needed for empty paragraph at y:', yPosition);
+                pdf.addPage();
+                currentPage++;
+                yPosition = margins.top;
+              }
+              continue;
+            }
+            
+            // Split paragraph text to fit width
+            const textLines = pdf.splitTextToSize(element.textContent || '', contentWidth);
+            
+            console.log('Paragraph text split:', {
+              numberOfLines: textLines.length,
+              lines: textLines,
+              contentWidth
+            });
+            
+            // Calculate space needed for each line including line spacing
+            const lineSpacing = baseLineHeight * 1.2;
+            let remainingLines = [...textLines];
+            
+            while (remainingLines.length > 0) {
+              // Calculate remaining space on current page
+              const remainingSpace = pdfHeight - margins.bottom - yPosition;
+              const linesOnThisPage = Math.floor(remainingSpace / lineSpacing);
+              
+              console.log('Page space calculation:', {
+                remainingSpace,
+                lineSpacing,
+                linesOnThisPage,
+                totalRemainingLines: remainingLines.length,
+                currentY: yPosition
+              });
+              
+              if (linesOnThisPage <= 0) {
+                // No space for even one line, move to next page
+                pdf.addPage();
+                currentPage++;
+                yPosition = margins.top;
+                continue;
+              }
+              
+              // Get lines that fit on this page
+              const linesToRender = remainingLines.slice(0, linesOnThisPage);
+              remainingLines = remainingLines.slice(linesOnThisPage);
+              
+              // Render lines for this page
+              pdf.text(linesToRender, margins.left, yPosition);
+              
+              // Update position
+              yPosition += linesToRender.length * lineSpacing;
+              
+              // If there are more lines, add a new page
+              if (remainingLines.length > 0) {
+                pdf.addPage();
+                currentPage++;
+                yPosition = margins.top;
+              } else {
+                // Add paragraph margin after the last line
+                const paragraphMargin = baseLineHeight * 0.6;
+                yPosition += paragraphMargin;
+              }
+              
+              console.log('Lines rendered:', {
+                pageNumber: currentPage,
+                linesOnThisPage: linesToRender.length,
+                remainingLines: remainingLines.length,
+                newY: yPosition
+              });
+            }
+          }
+          else if (element.tagName === 'UL' || element.tagName === 'OL') {
+            // Add lists
+            pdf.setFontSize(pdfSettings.fontSizes.paragraph);
+            const listItems = Array.from(element.children);
+            
+            // Calculate base line height for consistent spacing
+            const baseLineHeight = pdfSettings.fontSizes.paragraph * 0.352778;
+            
+            // Don't add extra spacing before list since paragraphs and other elements already add spacing after themselves
+            const listStartY = yPosition;
+            
+            for (let j = 0; j < listItems.length; j++) {
+              const item = listItems[j];
+              const prefix = element.tagName === 'OL' ? `${j + 1}. ` : '• ';
+              const listItemText = prefix + (item.textContent || '');
+              
+              // Split list item text to fit width (accounting for indentation)
+              const textLines = pdf.splitTextToSize(listItemText, contentWidth - 5);
+              
+              // Check if we need a new page
+              if (yPosition + (textLines.length * baseLineHeight) > pdfHeight - margins.bottom) {
+                pdf.addPage();
+                currentPage++;
+                yPosition = margins.top;
+              }
+              
+              // Render lines for this list item
+              pdf.text(textLines, margins.left + 5, yPosition);
+              
+              // Add space between list items (normal line spacing plus small gap)
+              yPosition += textLines.length * baseLineHeight;
+              
+              // Add small gap between list items (except after the last item)
+              if (j < listItems.length - 1) {
+                yPosition += baseLineHeight * 0.3;
+              }
+            }
+            
+            // Add spacing after list (same as paragraph spacing)
+            const paragraphSpacing = baseLineHeight * 0.6;
+            yPosition += paragraphSpacing;
+            
+            console.log('List spacing:', {
+              listStartY,
+              listEndY: yPosition,
+              spacingUsed: paragraphSpacing,
+              baseLineHeight
+            });
+          }
+          else if (element.tagName === 'IMG') {
+            // For images (charts)
+            const img = element as HTMLImageElement;
+            
+            // Ensure image is loaded
+            if (!img.complete) {
+              await new Promise(resolve => {
+                img.onload = resolve;
+              });
+            }
+            
+            // Calculate image dimensions to fit page width
+            const imgRatio = img.naturalHeight / img.naturalWidth;
+            const imgWidthMM = contentWidth;
+            const imgHeightMM = imgWidthMM * imgRatio;
+            
+            // Check if we need a new page
+            if (yPosition + imgHeightMM > pdfHeight - margins.bottom) {
+              pdf.addPage();
+              currentPage++;
+              yPosition = margins.top;
+            }
+            
+            // Add the image
+            pdf.addImage(
+              img.src,
+              'PNG',
+              margins.left,
+              yPosition,
+              imgWidthMM,
+              imgHeightMM,
+              '',
+              'FAST'
+            );
+            
+            // Calculate base line height from paragraph font size and add more generous spacing
+            const chartSpacing = pdfSettings.fontSizes.paragraph * 0.352778 * 2.5;
+            yPosition += imgHeightMM + chartSpacing;
+          }
+          
+          // Add page numbers and custom footer
+          if (pdfSettings.includePageNumbers || pdfSettings.customFooter.enabled) {
+            for (let pageNum = 1; pageNum <= currentPage; pageNum++) {
+              pdf.setPage(pageNum);
+              pdf.setFontSize(pdfSettings.fontSizes.footer);
+              pdf.setTextColor(100, 100, 100);
+
+              // Calculate footer position - respect bottom margin
+              const footerY = pdfHeight - (margins.bottom / 2); // Position footer halfway in bottom margin
+              
+              // Clear footer area
+              const footerHeight = 10; // height of footer area in mm
+              pdf.setFillColor(255, 255, 255); // white
+              pdf.rect(0, footerY - footerHeight, pdfWidth, footerHeight, 'F');
+
+              // Handle both page numbers and custom footer if both are enabled
+              if (pdfSettings.includePageNumbers && pdfSettings.customFooter.enabled) {
+                let pageNumberText = '';
+                switch (pdfSettings.pageNumberFormat.format) {
+                  case 'X/Y':
+                    pageNumberText = `${pageNum}/${currentPage}`;
+                    break;
+                  case 'X':
+                    pageNumberText = `${pageNum}`;
+                    break;
+                  default:
+                    pageNumberText = `Page ${pageNum.toString()} of ${currentPage.toString()}`;
+                }
+
+                // Calculate available width for footer and page number
+                const availableWidth = pdfWidth - (margins.left + margins.right);
+                const halfWidth = availableWidth / 2;
+
+                // Position page numbers
+                const pageNumberX = pdfSettings.pageNumberFormat.position === 'bottom-left' ? margins.left :
+                                  pdfSettings.pageNumberFormat.position === 'bottom-right' ? pdfWidth - margins.right :
+                                  pdfWidth / 2;
+
+                // Position footer based on its alignment
+                const footerX = pdfSettings.customFooter.alignment === 'left' ? margins.left + halfWidth :
+                               pdfSettings.customFooter.alignment === 'right' ? pdfWidth - margins.right :
+                               pdfWidth / 2; // center alignment
+
+                // Render page numbers
+                pdf.text(pageNumberText, pageNumberX, footerY, {
+                  align: pdfSettings.pageNumberFormat.position === 'bottom-left' ? 'left' :
+                         pdfSettings.pageNumberFormat.position === 'bottom-right' ? 'right' : 'center',
+                  maxWidth: halfWidth
+                });
+
+                // Render footer with proper alignment
+                pdf.text(pdfSettings.customFooter.text, footerX, footerY, {
+                  align: pdfSettings.customFooter.alignment,
+                  maxWidth: halfWidth
+                });
+
+              } else if (pdfSettings.includePageNumbers) {
+                // Only page numbers
+                let pageNumberText = '';
+                switch (pdfSettings.pageNumberFormat.format) {
+                  case 'X/Y':
+                    pageNumberText = `${pageNum}/${currentPage}`;
+                    break;
+                  case 'X':
+                    pageNumberText = `${pageNum}`;
+                    break;
+                  default:
+                    pageNumberText = `Page ${pageNum.toString()} of ${currentPage.toString()}`;
+                }
+
+                const pageNumberX = pdfSettings.pageNumberFormat.position === 'bottom-left' ? margins.left :
+                                  pdfSettings.pageNumberFormat.position === 'bottom-right' ? pdfWidth - margins.right :
+                                  pdfWidth / 2;
+
+                pdf.text(pageNumberText, pageNumberX, footerY, {
+                  align: pdfSettings.pageNumberFormat.position === 'bottom-left' ? 'left' :
+                         pdfSettings.pageNumberFormat.position === 'bottom-right' ? 'right' :
+                         'center'
+                });
+
+              } else if (pdfSettings.customFooter.enabled) {
+                // Only custom footer
+                const footerX = pdfSettings.customFooter.alignment === 'left' ? margins.left :
+                               pdfSettings.customFooter.alignment === 'right' ? pdfWidth - margins.right :
+                               pdfWidth / 2;
+
+                pdf.text(pdfSettings.customFooter.text, footerX, footerY, {
+                  align: pdfSettings.customFooter.alignment,
+                  maxWidth: pdfWidth - (margins.left + margins.right)
+                });
+              }
+            }
+            pdf.setTextColor(0, 0, 0);
+          }
         }
   
         // Set PDF compression
@@ -1207,6 +1627,14 @@ export function ChartReport() {
     const handleReportNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       setReportName(e.target.value);
     };
+
+    // Handle PDF settings change
+    const handlePdfSettingsChange = (newSettings: Partial<PdfSettings>) => {
+      setPdfSettings(prev => ({
+        ...prev,
+        ...newSettings,
+      }));
+    };
   
     return (
       <div className="container mx-auto py-6 pr-6">
@@ -1225,6 +1653,304 @@ export function ChartReport() {
               />
             </div>
             <div className="flex items-center gap-2">
+              <Dialog open={pdfSettingsOpen} onOpenChange={setPdfSettingsOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="icon" className="rounded-md" title="PDF Settings">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader className="px-2">
+                    <DialogTitle>PDF Export Settings</DialogTitle>
+                    <DialogDescription>
+                      Configure how your PDF report will be exported
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="max-h-[60vh] overflow-y-auto px-2">
+                    <div className="grid gap-4 py-4">
+                      <div className="space-y-4">
+                        {/* Title Page and Page Numbers Section */}
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id="includeTitlePage"
+                              checked={pdfSettings.includeTitlePage}
+                              onChange={(e) => handlePdfSettingsChange({ includeTitlePage: e.target.checked })}
+                              className="rounded border-gray-300 text-primary focus:ring-primary"
+                            />
+                            <label htmlFor="includeTitlePage" className="text-sm font-medium">
+                              Include Title Page
+                            </label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id="includePageNumbers"
+                              checked={pdfSettings.includePageNumbers}
+                              onChange={(e) => handlePdfSettingsChange({ includePageNumbers: e.target.checked })}
+                              className="rounded border-gray-300 text-primary focus:ring-primary"
+                            />
+                            <label htmlFor="includePageNumbers" className="text-sm font-medium">
+                              Include Page Numbers
+                            </label>
+                          </div>
+                        </div>
+
+                        {/* Page Number Settings */}
+                        {pdfSettings.includePageNumbers && (
+                          <div className="grid grid-cols-2 gap-4 pl-0">
+                            <div>
+                              <label className="text-xs text-muted-foreground">Format</label>
+                              <Select
+                                value={pdfSettings.pageNumberFormat.format}
+                                onValueChange={(value) => handlePdfSettingsChange({
+                                  pageNumberFormat: {
+                                    ...pdfSettings.pageNumberFormat,
+                                    format: value as 'Page X of Y' | 'X/Y' | 'X'
+                                  }
+                                })}
+                              >
+                                <SelectTrigger className="mt-1">
+                                  <SelectValue placeholder="Select format" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="Page X of Y">Page X of Y</SelectItem>
+                                  <SelectItem value="X/Y">X/Y</SelectItem>
+                                  <SelectItem value="X">X</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div>
+                              <label className="text-xs text-muted-foreground">Position</label>
+                              <Select
+                                value={pdfSettings.pageNumberFormat.position}
+                                onValueChange={(value) => handlePdfSettingsChange({
+                                  pageNumberFormat: {
+                                    ...pdfSettings.pageNumberFormat,
+                                    position: value as 'bottom-center' | 'bottom-right' | 'bottom-left'
+                                  }
+                                })}
+                              >
+                                <SelectTrigger className="mt-1">
+                                  <SelectValue placeholder="Select position" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="bottom-center">Bottom Center</SelectItem>
+                                  <SelectItem value="bottom-left">Bottom Left</SelectItem>
+                                  <SelectItem value="bottom-right">Bottom Right</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Margins Section */}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-sm font-medium">Page Margins</label>
+                            <div className="flex items-center gap-2">
+                              <label className="text-sm">Unit:</label>
+                              <Select
+                                value={pdfSettings.margins.unit}
+                                onValueChange={(value: 'in' | 'cm' | 'mm') => {
+                                  const currentMargins = { ...pdfSettings.margins };
+                                  let newMargins;
+                                  
+                                  // Convert current values to millimeters first
+                                  const toMM = (val: number, fromUnit: 'in' | 'cm' | 'mm') => {
+                                    switch (fromUnit) {
+                                      case 'in': return val * 25.4;
+                                      case 'cm': return val * 10;
+                                      default: return val;
+                                    }
+                                  };
+
+                                  // Convert from millimeters to target unit
+                                  const fromMM = (val: number, toUnit: 'in' | 'cm' | 'mm') => {
+                                    switch (toUnit) {
+                                      case 'in': return Number((val / 25.4).toFixed(2));
+                                      case 'cm': return Number((val / 10).toFixed(1));
+                                      default: return Math.round(val);
+                                    }
+                                  };
+
+                                  // Convert all values to the new unit
+                                  const mmValues = {
+                                    top: toMM(currentMargins.top, currentMargins.unit),
+                                    right: toMM(currentMargins.right, currentMargins.unit),
+                                    bottom: toMM(currentMargins.bottom, currentMargins.unit),
+                                    left: toMM(currentMargins.left, currentMargins.unit)
+                                  };
+
+                                  newMargins = {
+                                    ...currentMargins,
+                                    top: fromMM(mmValues.top, value),
+                                    right: fromMM(mmValues.right, value),
+                                    bottom: fromMM(mmValues.bottom, value),
+                                    left: fromMM(mmValues.left, value),
+                                    unit: value
+                                  };
+
+                                  handlePdfSettingsChange({
+                                    margins: newMargins
+                                  });
+                                }}
+                              >
+                                <SelectTrigger className="w-[60px]">
+                                  <SelectValue placeholder="Unit" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="in">in</SelectItem>
+                                  <SelectItem value="cm">cm</SelectItem>
+                                  <SelectItem value="mm">mm</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
+                              <div key={side}>
+                                <label className="text-xs text-muted-foreground capitalize">{side} Margin</label>
+                                <input
+                                  type="number"
+                                  value={pdfSettings.margins[side]}
+                                  onChange={(e) => {
+                                    const value = parseFloat(e.target.value);
+                                    if (!isNaN(value) && value >= 0) {
+                                      handlePdfSettingsChange({
+                                        margins: {
+                                          ...pdfSettings.margins,
+                                          [side]: value
+                                        }
+                                      });
+                                    }
+                                  }}
+                                  min="0"
+                                  step={pdfSettings.margins.unit === 'in' ? '0.1' : pdfSettings.margins.unit === 'cm' ? '0.1' : '1'}
+                                  className="mt-1 w-full rounded-md border border-input px-3 py-2 text-sm"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Custom Footer Section */}
+                        <div className="space-y-3">
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id="enableCustomFooter"
+                              checked={pdfSettings.customFooter.enabled}
+                              onChange={(e) => handlePdfSettingsChange({
+                                customFooter: {
+                                  ...pdfSettings.customFooter,
+                                  enabled: e.target.checked
+                                }
+                              })}
+                              className="rounded border-gray-300 text-primary focus:ring-primary"
+                            />
+                            <label htmlFor="enableCustomFooter" className="text-sm font-medium">
+                              Add Custom Footer
+                            </label>
+                          </div>
+
+                          {pdfSettings.customFooter.enabled && (
+                            <div className="space-y-3 pl-6">
+                              <div>
+                                <label htmlFor="footerText" className="text-xs text-muted-foreground">
+                                  Footer Text
+                                </label>
+                                <input
+                                  type="text"
+                                  id="footerText"
+                                  value={pdfSettings.customFooter.text}
+                                  onChange={(e) => handlePdfSettingsChange({
+                                    customFooter: {
+                                      ...pdfSettings.customFooter,
+                                      text: e.target.value
+                                    }
+                                  })}
+                                  placeholder="Enter footer text"
+                                  className="mt-1 w-full rounded-md border border-input px-3 py-2 text-sm"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs text-muted-foreground block mb-2">Footer Alignment</label>
+                                <div className="flex gap-4">
+                                  {['left', 'center', 'right'].map((align) => (
+                                    <div key={align} className="flex items-center space-x-2">
+                                      <input
+                                        type="radio"
+                                        id={`align${align}`}
+                                        name="footerAlignment"
+                                        checked={pdfSettings.customFooter.alignment === align}
+                                        onChange={() => handlePdfSettingsChange({
+                                          customFooter: {
+                                            ...pdfSettings.customFooter,
+                                            alignment: align as 'left' | 'center' | 'right'
+                                          }
+                                        })}
+                                        className="text-primary focus:ring-primary"
+                                      />
+                                      <label htmlFor={`align${align}`} className="text-sm capitalize">
+                                        {align}
+                                      </label>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Font Sizes Section */}
+                        <div className="space-y-3">
+                          <label className="text-sm font-medium">Font Sizes</label>
+                          <div className="grid grid-cols-2 gap-4">
+                            {[
+                              { label: 'Heading 1', key: 'heading1' as keyof typeof pdfSettings.fontSizes, options: [16, 18, 20, 22, 24, 26, 28, 30] },
+                              { label: 'Heading 2', key: 'heading2' as keyof typeof pdfSettings.fontSizes, options: [14, 16, 18, 20, 22, 24] },
+                              { label: 'Heading 3', key: 'heading3' as keyof typeof pdfSettings.fontSizes, options: [12, 14, 16, 18, 20] },
+                              { label: 'Paragraph', key: 'paragraph' as keyof typeof pdfSettings.fontSizes, options: [8, 9, 10, 11, 12, 13, 14, 16] },
+                              { label: 'Footer', key: 'footer' as keyof typeof pdfSettings.fontSizes, options: [8, 9, 10, 11, 12] }
+                            ].map(({ label, key, options }) => (
+                              <div key={key}>
+                                <label className="text-xs text-muted-foreground">{label}</label>
+                                <Select
+                                  value={pdfSettings.fontSizes[key].toString()}
+                                  onValueChange={(value) => handlePdfSettingsChange({
+                                    fontSizes: {
+                                      ...pdfSettings.fontSizes,
+                                      [key]: Number(value)
+                                    }
+                                  })}
+                                >
+                                  <SelectTrigger className="mt-1">
+                                    <SelectValue placeholder="Select size" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {options.map((size) => (
+                                      <SelectItem key={size} value={size.toString()}>
+                                        {size}pt
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button type="submit" onClick={() => setPdfSettingsOpen(false)}>
+                      Apply Settings
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
               <Button onClick={handleExportPDF} className="flex items-center gap-2" disabled={isGeneratingPDF}>
                 <FileDown className="h-4 w-4" />
                 {isGeneratingPDF ? 'Generating...' : 'Export PDF'}

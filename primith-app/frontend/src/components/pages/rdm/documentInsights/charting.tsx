@@ -126,6 +126,7 @@ interface ChartingProps {
   chartName?: string;
   savedChartData?: ChartData;
   originalSavedAt?: string;
+  chartId?: string;  // Add chartId prop
   viewOnly?: boolean;
   organizationId?: string;
   onSave?: () => void;
@@ -261,6 +262,7 @@ export function Charting({
   chartName, 
   savedChartData, 
   originalSavedAt, 
+  chartId,  // Add chartId prop
   viewOnly = false,
   organizationId,
   onSave
@@ -2046,12 +2048,12 @@ export function Charting({
         groupByConfig,
       };
 
-      let chartId: string;
+      let savedChartId: string;
       
-      if (originalSavedAt) {
+      if (chartId) {  // Use chartId instead of originalSavedAt
         // Update existing chart
-        await ChartService.updateChart(originalSavedAt, chartToSave);
-        chartId = originalSavedAt;
+        await ChartService.updateChart(chartId, chartToSave);
+        savedChartId = chartId;
         toast({
           title: "Chart Updated",
           description: "Your changes have been saved.",
@@ -2059,7 +2061,7 @@ export function Charting({
         });
       } else {
         // Save new chart
-        chartId = await ChartService.createChart(chartToSave, effectiveOrgId);
+        savedChartId = await ChartService.createChart(chartToSave, effectiveOrgId);
         toast({
           title: "Chart Saved",
           description: "Your chart has been saved successfully.",
@@ -2070,10 +2072,11 @@ export function Charting({
       // Create and dispatch a custom event with the updated chart data
       const updateEvent = new CustomEvent('chartUpdated', {
         detail: {
-          savedAt: chartId,
+          savedAt: originalSavedAt,  // Keep using originalSavedAt for timestamp
+          chartId: savedChartId,     // Add chartId to event detail
           updatedChart: {
             ...chartToSave,
-            id: chartId,
+            id: savedChartId,
           }
         }
       });
