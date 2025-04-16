@@ -18220,6 +18220,1231 @@ func handleChatWithDocument(w http.ResponseWriter, r *http.Request) {
 	w.Write(responseBytes)
 }
 
+// Chart-related structs
+type Chart struct {
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description"`
+	ChartType     string          `json:"chartType"`
+	ChartData     json.RawMessage `json:"chartData"`
+	ChartStyles   json.RawMessage `json:"chartStyles"`
+	Columns       json.RawMessage `json:"columns"`
+	GroupByConfig json.RawMessage `json:"groupByConfig,omitempty"`
+	DocumentID    *string         `json:"documentId,omitempty"`
+	FolderID      *string         `json:"folderId,omitempty"`
+	ProjectID     *string         `json:"projectId,omitempty"`
+	CreatedBy     string          `json:"createdBy"`
+	CreatedAt     time.Time       `json:"createdAt"`
+	UpdatedAt     time.Time       `json:"updatedAt"`
+}
+
+type ChartRequest struct {
+	Name          string          `json:"name"`
+	Description   string          `json:"description,omitempty"`
+	ChartType     string          `json:"chartType"`
+	ChartData     json.RawMessage `json:"chartData"`
+	ChartStyles   json.RawMessage `json:"chartStyles"`
+	Columns       json.RawMessage `json:"columns"`
+	GroupByConfig json.RawMessage `json:"groupByConfig,omitempty"`
+	DocumentID    *string         `json:"documentId,omitempty"`
+	FolderID      *string         `json:"folderId,omitempty"`
+	ProjectID     *string         `json:"projectId,omitempty"`
+}
+
+// Report-related structs
+type Report struct {
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Content     string          `json:"content"`
+	ReportData  json.RawMessage `json:"reportData,omitempty"`
+	DocumentID  *string         `json:"documentId,omitempty"`
+	FolderID    *string         `json:"folderId,omitempty"`
+	ProjectID   *string         `json:"projectId,omitempty"`
+	CreatedBy   string          `json:"createdBy"`
+	CreatedAt   time.Time       `json:"createdAt"`
+	UpdatedAt   time.Time       `json:"updatedAt"`
+	ChartCount  int             `json:"chartCount,omitempty"`
+}
+
+type ReportRequest struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Content     string          `json:"content"`
+	ReportData  json.RawMessage `json:"reportData,omitempty"`
+	DocumentID  *string         `json:"documentId,omitempty"`
+	FolderID    *string         `json:"folderId,omitempty"`
+	ProjectID   *string         `json:"projectId,omitempty"`
+}
+
+type ReportChartRequest struct {
+	ChartID  string `json:"chartId"`
+	Position int    `json:"position"`
+}
+
+func handleGetCharts(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	log.Printf("Starting handleGetCharts function")
+
+	// Get organization ID from query parameters
+	organizationId := r.URL.Query().Get("organizationId")
+	if organizationId == "" {
+		log.Printf("Missing organization ID in query parameters")
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Organization ID from query: %s", organizationId)
+
+	// Convert organization ID to UUID
+	orgID, err := uuid.Parse(organizationId)
+	if err != nil {
+		log.Printf("Invalid organization ID format: %v", err)
+		http.Error(w, "Invalid organization ID", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Parsed organization UUID: %s", orgID.String())
+
+	// Get user ID from email
+	var userID uuid.UUID
+	log.Printf("Looking up user ID for email: %s", claims.Username)
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		log.Printf("Failed to retrieve user ID: %v", err)
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Found user ID: %s", userID.String())
+
+	// Query charts directly without using a stored procedure
+	log.Printf("Querying charts for org ID: %s", orgID.String())
+	rows, err := db.Query(`
+        SELECT c.id, c.name, c.description, c.chart_type, 
+               c.chart_data, c.chart_styles, c.columns, c.group_by_config,
+               c.document_id, c.folder_id, c.project_id, 
+               c.created_by, c.created_at, c.updated_at
+        FROM rdm.charts c
+        WHERE c.organization_id = $1 
+        AND c.deleted_at IS NULL
+        ORDER BY c.updated_at DESC
+    `, orgID)
+
+	if err != nil {
+		log.Printf("Error querying charts: %v", err)
+		http.Error(w, "Failed to fetch charts: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var charts []map[string]interface{}
+
+	// Parse rows into charts
+	for rows.Next() {
+		var (
+			id, name, chartType                            string
+			description                                    sql.NullString
+			chartData, chartStyles, columns, groupByConfig []byte
+			documentID, folderID, projectID, createdBy     sql.NullString
+			createdAt, updatedAt                           time.Time
+		)
+
+		err := rows.Scan(
+			&id, &name, &description, &chartType,
+			&chartData, &chartStyles, &columns, &groupByConfig,
+			&documentID, &folderID, &projectID,
+			&createdBy, &createdAt, &updatedAt,
+		)
+
+		if err != nil {
+			log.Printf("Error scanning chart row: %v", err)
+			continue
+		}
+
+		// Create a chart object
+		chart := map[string]interface{}{
+			"id":        id,
+			"name":      name,
+			"chartType": chartType,
+			"createdAt": createdAt,
+			"updatedAt": updatedAt,
+		}
+
+		if description.Valid {
+			chart["description"] = description.String
+		}
+
+		// Parse JSON fields
+		if len(chartData) > 0 {
+			var parsed interface{}
+			if err := json.Unmarshal(chartData, &parsed); err == nil {
+				chart["chartData"] = parsed
+			} else {
+				log.Printf("Error parsing chartData: %v", err)
+			}
+		}
+
+		if len(chartStyles) > 0 {
+			var parsed interface{}
+			if err := json.Unmarshal(chartStyles, &parsed); err == nil {
+				chart["chartStyles"] = parsed
+			} else {
+				log.Printf("Error parsing chartStyles: %v", err)
+			}
+		}
+
+		if len(columns) > 0 {
+			var parsed interface{}
+			if err := json.Unmarshal(columns, &parsed); err == nil {
+				chart["columns"] = parsed
+			} else {
+				log.Printf("Error parsing columns: %v", err)
+			}
+		}
+
+		if len(groupByConfig) > 0 {
+			var parsed interface{}
+			if err := json.Unmarshal(groupByConfig, &parsed); err == nil {
+				chart["groupByConfig"] = parsed
+			} else {
+				log.Printf("Error parsing groupByConfig: %v", err)
+			}
+		}
+
+		// Handle nullable fields
+		if documentID.Valid {
+			chart["documentId"] = documentID.String
+		}
+
+		if folderID.Valid {
+			chart["folderId"] = folderID.String
+		}
+
+		if projectID.Valid {
+			chart["projectId"] = projectID.String
+		}
+
+		if createdBy.Valid {
+			chart["createdBy"] = createdBy.String
+		}
+
+		charts = append(charts, chart)
+	}
+
+	log.Printf("Found %d charts for organization %s", len(charts), orgID.String())
+
+	// Return charts as JSON
+	w.Header().Set("Content-Type", "application/json")
+	err = json.NewEncoder(w).Encode(charts)
+	if err != nil {
+		log.Printf("Error encoding charts to JSON: %v", err)
+		http.Error(w, "Failed to encode charts", http.StatusInternalServerError)
+		return
+	}
+}
+
+func handleCreateChart(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	log.Printf("Starting handleCreateChart function")
+
+	// Parse request body
+	var req ChartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Decoded request body: name=%s, chartType=%s", req.Name, req.ChartType)
+
+	// Get organization ID from query parameters
+	organizationId := r.URL.Query().Get("organizationId")
+	if organizationId == "" {
+		log.Printf("Missing organization ID in query parameters")
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Organization ID from query: %s", organizationId)
+
+	// Convert organization ID to UUID
+	orgID, err := uuid.Parse(organizationId)
+	if err != nil {
+		log.Printf("Invalid organization ID format: %v", err)
+		http.Error(w, "Invalid organization ID", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Parsed organization UUID: %s", orgID.String())
+
+	// Get user ID from email
+	var userID uuid.UUID
+	log.Printf("Looking up user ID for email: %s", claims.Username)
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		log.Printf("Failed to retrieve user ID: %v", err)
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Found user ID: %s", userID.String())
+
+	// Prepare nullable fields
+	var documentID, folderID, projectID interface{}
+	if req.DocumentID != nil {
+		log.Printf("Document ID provided: %s", *req.DocumentID)
+		documentID, err = uuid.Parse(*req.DocumentID)
+		if err != nil {
+			log.Printf("Invalid document ID format: %v", err)
+			http.Error(w, "Invalid document ID", http.StatusBadRequest)
+			return
+		}
+		log.Printf("Parsed document UUID: %s", documentID.(uuid.UUID).String())
+	} else {
+		log.Printf("No document ID provided")
+		documentID = nil
+	}
+
+	if req.FolderID != nil {
+		log.Printf("Folder ID provided: %s", *req.FolderID)
+		folderID, err = uuid.Parse(*req.FolderID)
+		if err != nil {
+			log.Printf("Invalid folder ID format: %v", err)
+			http.Error(w, "Invalid folder ID", http.StatusBadRequest)
+			return
+		}
+		log.Printf("Parsed folder UUID: %s", folderID.(uuid.UUID).String())
+	} else {
+		log.Printf("No folder ID provided")
+		folderID = nil
+	}
+
+	if req.ProjectID != nil {
+		log.Printf("Project ID provided: %s", *req.ProjectID)
+		projectID, err = uuid.Parse(*req.ProjectID)
+		if err != nil {
+			log.Printf("Invalid project ID format: %v", err)
+			http.Error(w, "Invalid project ID", http.StatusBadRequest)
+			return
+		}
+		log.Printf("Parsed project UUID: %s", projectID.(uuid.UUID).String())
+	} else {
+		log.Printf("No project ID provided")
+		projectID = nil
+	}
+
+	// Convert JSON data to JSONB format for PostgreSQL
+	chartDataJSON, err := json.Marshal(req.ChartData)
+	if err != nil {
+		log.Printf("Error marshaling chart data: %v", err)
+		http.Error(w, "Invalid chart data format", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Marshaled chart data JSON length: %d bytes", len(chartDataJSON))
+
+	chartStylesJSON, err := json.Marshal(req.ChartStyles)
+	if err != nil {
+		log.Printf("Error marshaling chart styles: %v", err)
+		http.Error(w, "Invalid chart styles format", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Marshaled chart styles JSON length: %d bytes", len(chartStylesJSON))
+
+	columnsJSON, err := json.Marshal(req.Columns)
+	if err != nil {
+		log.Printf("Error marshaling columns: %v", err)
+		http.Error(w, "Invalid columns format", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Marshaled columns JSON length: %d bytes", len(columnsJSON))
+
+	var groupByConfigJSON []byte
+	if req.GroupByConfig != nil {
+		groupByConfigJSON, err = json.Marshal(req.GroupByConfig)
+		if err != nil {
+			log.Printf("Error marshaling group by config: %v", err)
+			http.Error(w, "Invalid group by config format", http.StatusBadRequest)
+			return
+		}
+		log.Printf("Marshaled group by config JSON length: %d bytes", len(groupByConfigJSON))
+	} else {
+		log.Printf("No group by config provided")
+		// Use an empty JSON object instead of null
+		groupByConfigJSON = []byte("{}")
+	}
+
+	// Execute a two-step process:
+	// 1. CALL the procedure to create the chart
+	// 2. Get the chart ID separately with a SELECT query
+
+	// Generate a unique ID for the chart to use as a reference
+	chartID := uuid.New()
+
+	// Log the SQL statement and parameters we're about to execute
+	log.Printf("Executing SQL: CALL rdm.create_chart($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+	log.Printf("Parameters: chartID=%s, name=%s, desc=%s, type=%s, chartData=JSONB(%d bytes), chartStyles=JSONB(%d bytes), columns=JSONB(%d bytes), groupBy=JSONB(%d bytes), docID=%v, folderID=%v, projectID=%v, orgID=%s, userID=%s",
+		chartID.String(), req.Name, req.Description, req.ChartType, len(chartDataJSON), len(chartStylesJSON), len(columnsJSON), len(groupByConfigJSON),
+		documentID, folderID, projectID, orgID.String(), userID.String())
+
+	// Use CALL instead of SELECT for executing a procedure
+	_, err = db.Exec(`
+        CALL rdm.create_chart($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    `,
+		chartID,
+		req.Name,
+		req.Description,
+		req.ChartType,
+		chartDataJSON,
+		chartStylesJSON,
+		columnsJSON,
+		groupByConfigJSON,
+		documentID,
+		folderID,
+		projectID,
+		orgID,
+		userID,
+	)
+
+	if err != nil {
+		log.Printf("Error creating chart: %v", err)
+
+		// Check if it's a database error we can get more details from
+		if pqErr, ok := err.(*pq.Error); ok {
+			log.Printf("PostgreSQL error details: code=%s, message=%s, detail=%s, hint=%s, position=%s",
+				pqErr.Code, pqErr.Message, pqErr.Detail, pqErr.Hint, pqErr.Position)
+		}
+
+		http.Error(w, "Failed to create chart: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Successfully created chart with ID: %s", chartID.String())
+
+	// Return chart ID
+	w.Header().Set("Content-Type", "application/json")
+	response := map[string]string{"id": chartID.String()}
+	respJSON, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Error marshaling response: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Returning successful response: %s", string(respJSON))
+	w.Write(respJSON)
+}
+
+func handleUpdateChart(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get chart ID from path
+	vars := mux.Vars(r)
+	chartID, err := uuid.Parse(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid chart ID", http.StatusBadRequest)
+		return
+	}
+
+	// Parse request body
+	var req ChartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID from email
+	var userID uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user has permission to update this chart
+	var canUpdate bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM rdm.charts c
+            LEFT JOIN rdm.chart_permissions cp ON c.id = cp.chart_id
+            WHERE c.id = $1 AND (
+                c.created_by = $2 OR 
+                (cp.user_id = $2 AND cp.can_edit = true)
+            )
+        )
+    `, chartID, userID).Scan(&canUpdate)
+
+	if err != nil {
+		http.Error(w, "Failed to check permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !canUpdate {
+		http.Error(w, "Permission denied", http.StatusForbidden)
+		return
+	}
+
+	// Prepare nullable fields
+	var documentID, folderID, projectID interface{}
+	if req.DocumentID != nil {
+		documentID, err = uuid.Parse(*req.DocumentID)
+		if err != nil {
+			http.Error(w, "Invalid document ID", http.StatusBadRequest)
+			return
+		}
+	}
+	if req.FolderID != nil {
+		folderID, err = uuid.Parse(*req.FolderID)
+		if err != nil {
+			http.Error(w, "Invalid folder ID", http.StatusBadRequest)
+			return
+		}
+	}
+	if req.ProjectID != nil {
+		projectID, err = uuid.Parse(*req.ProjectID)
+		if err != nil {
+			http.Error(w, "Invalid project ID", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Update chart
+	_, err = db.Exec(`
+        CALL rdm.update_chart(
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+        )
+    `,
+		chartID, req.Name, req.Description, req.ChartType, req.ChartData, req.ChartStyles,
+		req.Columns, req.GroupByConfig, documentID, folderID, projectID, userID,
+	)
+
+	if err != nil {
+		http.Error(w, "Failed to update chart: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{
+		"success": true,
+	})
+}
+
+func handleDeleteChart(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get chart ID from path
+	vars := mux.Vars(r)
+	chartID, err := uuid.Parse(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid chart ID", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID from email
+	var userID uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user has permission to delete this chart
+	var canDelete bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM rdm.charts c
+            LEFT JOIN rdm.chart_permissions cp ON c.id = cp.chart_id
+            WHERE c.id = $1 AND (
+                c.created_by = $2 OR 
+                (cp.user_id = $2 AND cp.can_delete = true)
+            )
+        )
+    `, chartID, userID).Scan(&canDelete)
+
+	if err != nil {
+		http.Error(w, "Failed to check permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !canDelete {
+		http.Error(w, "Permission denied", http.StatusForbidden)
+		return
+	}
+
+	// Delete chart
+	_, err = db.Exec(`CALL rdm.delete_chart($1, $2)`, chartID, userID)
+
+	if err != nil {
+		http.Error(w, "Failed to delete chart: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{
+		"success": true,
+	})
+}
+
+// Report handlers
+func handleGetReports(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get organization ID from query parameters
+	orgIDStr := r.URL.Query().Get("organizationId")
+	if orgIDStr == "" {
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Convert organization ID to UUID
+	orgID, err := uuid.Parse(orgIDStr)
+	if err != nil {
+		http.Error(w, "Invalid organization ID", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID from email
+	var userID uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Query reports
+	rows, err := db.Query(`
+        SELECT * FROM rdm.get_user_reports($1, $2)
+    `, userID, orgID)
+	if err != nil {
+		http.Error(w, "Failed to fetch reports", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	// Parse rows into reports
+	var reports []Report
+	for rows.Next() {
+		var r Report
+		var docID, folderID, projectID, creatorName sql.NullString
+
+		err := rows.Scan(
+			&r.ID, &r.Name, &r.Description,
+			&docID, &sql.NullString{}, // document_id, document_name
+			&folderID, &sql.NullString{}, // folder_id, folder_name
+			&projectID, &sql.NullString{}, // project_id, project_name
+			&r.CreatedBy, &creatorName,
+			&r.CreatedAt, &r.UpdatedAt,
+			&r.ChartCount,
+		)
+		if err != nil {
+			http.Error(w, "Failed to parse report data", http.StatusInternalServerError)
+			return
+		}
+
+		// Convert nullable fields
+		if docID.Valid {
+			s := docID.String
+			r.DocumentID = &s
+		}
+		if folderID.Valid {
+			s := folderID.String
+			r.FolderID = &s
+		}
+		if projectID.Valid {
+			s := projectID.String
+			r.ProjectID = &s
+		}
+
+		reports = append(reports, r)
+	}
+
+	// Return reports as JSON
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(reports)
+}
+
+func handleGetReport(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get report ID from path
+	vars := mux.Vars(r)
+	reportID, err := uuid.Parse(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid report ID", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID from email
+	var userID uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Get report with charts
+	rows, err := db.Query(`
+        SELECT * FROM rdm.get_report_with_charts($1, $2)
+    `, reportID, userID)
+	if err != nil {
+		http.Error(w, "Failed to fetch report", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var report Report
+	var charts []struct {
+		ID          string          `json:"id"`
+		Name        string          `json:"name"`
+		ChartType   string          `json:"chartType"`
+		ChartData   json.RawMessage `json:"chartData"`
+		ChartStyles json.RawMessage `json:"chartStyles"`
+		Columns     json.RawMessage `json:"columns"`
+		Position    int             `json:"position"`
+	}
+
+	var isFirst = true
+	for rows.Next() {
+		var docID, folderID, projectID, creatorName sql.NullString
+		var chartID, chartName, chartType sql.NullString
+		var chartData, chartStyles, chartColumns []byte
+		var chartPosition sql.NullInt32
+		var reportContent, reportDataBytes []byte
+
+		err := rows.Scan(
+			&report.ID, &report.Name, &report.Description, &reportContent, &reportDataBytes,
+			&docID, &sql.NullString{}, // document_id, document_name
+			&folderID, &sql.NullString{}, // folder_id, folder_name
+			&projectID, &sql.NullString{}, // project_id, project_name
+			&report.CreatedBy, &creatorName,
+			&report.CreatedAt, &report.UpdatedAt,
+			&chartID, &chartName, &chartType, &chartData, &chartStyles, &chartColumns, &chartPosition,
+		)
+		if err != nil {
+			http.Error(w, "Failed to parse report data", http.StatusInternalServerError)
+			return
+		}
+
+		// Only set report fields on first row
+		if isFirst {
+			// Convert nullable fields
+			if docID.Valid {
+				s := docID.String
+				report.DocumentID = &s
+			}
+			if folderID.Valid {
+				s := folderID.String
+				report.FolderID = &s
+			}
+			if projectID.Valid {
+				s := projectID.String
+				report.ProjectID = &s
+			}
+
+			report.Content = string(reportContent)
+			if reportDataBytes != nil {
+				report.ReportData = json.RawMessage(reportDataBytes)
+			}
+
+			isFirst = false
+		}
+
+		// Add chart if it exists
+		if chartID.Valid {
+			charts = append(charts, struct {
+				ID          string          `json:"id"`
+				Name        string          `json:"name"`
+				ChartType   string          `json:"chartType"`
+				ChartData   json.RawMessage `json:"chartData"`
+				ChartStyles json.RawMessage `json:"chartStyles"`
+				Columns     json.RawMessage `json:"columns"`
+				Position    int             `json:"position"`
+			}{
+				ID:          chartID.String,
+				Name:        chartName.String,
+				ChartType:   chartType.String,
+				ChartData:   json.RawMessage(chartData),
+				ChartStyles: json.RawMessage(chartStyles),
+				Columns:     json.RawMessage(chartColumns),
+				Position:    int(chartPosition.Int32),
+			})
+		}
+	}
+
+	// Return report with charts as JSON
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"report": report,
+		"charts": charts,
+	})
+}
+
+func handleCreateReport(w http.ResponseWriter, r *http.Request) {
+	log.Println("handleCreateReport called")
+
+	claims := r.Context().Value(claimsKey).(*Claims)
+	log.Printf("Claims extracted: %+v", claims)
+
+	// Parse request body
+	var req ReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Request body parsed: %+v", req)
+
+	// Get organization ID from query parameters
+	orgIDStr := r.URL.Query().Get("organizationId")
+	if orgIDStr == "" {
+		log.Println("Organization ID is missing in query parameters")
+		http.Error(w, "Organization ID is required", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Organization ID from query: %s", orgIDStr)
+
+	// Convert organization ID to UUID
+	orgID, err := uuid.Parse(orgIDStr)
+	if err != nil {
+		log.Printf("Error parsing organization ID: %v", err)
+		http.Error(w, "Invalid organization ID", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Organization ID parsed: %s", orgID)
+
+	// Get user ID from email
+	var userID uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		log.Printf("Error getting user ID: %v", err)
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("User ID retrieved: %s", userID)
+
+	// Prepare nullable fields
+	var documentID, folderID, projectID *uuid.UUID
+	if req.DocumentID != nil {
+		parsedID, err := uuid.Parse(*req.DocumentID)
+		if err != nil {
+			log.Printf("Error parsing document ID: %v", err)
+			http.Error(w, "Invalid document ID", http.StatusBadRequest)
+			return
+		}
+		documentID = &parsedID
+		log.Printf("Document ID parsed: %s", documentID)
+	}
+	if req.FolderID != nil {
+		parsedID, err := uuid.Parse(*req.FolderID)
+		if err != nil {
+			log.Printf("Error parsing folder ID: %v", err)
+			http.Error(w, "Invalid folder ID", http.StatusBadRequest)
+			return
+		}
+		folderID = &parsedID
+		log.Printf("Folder ID parsed: %s", folderID)
+	}
+	if req.ProjectID != nil {
+		parsedID, err := uuid.Parse(*req.ProjectID)
+		if err != nil {
+			log.Printf("Error parsing project ID: %v", err)
+			http.Error(w, "Invalid project ID", http.StatusBadRequest)
+			return
+		}
+		projectID = &parsedID
+		log.Printf("Project ID parsed: %s", projectID)
+	}
+
+	// Prepare the OUT parameter for the report ID
+	var reportID uuid.UUID
+
+	// Call the procedure
+	err = db.QueryRow(`
+		CALL rdm.create_report(
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+		)
+	`,
+		req.Name, req.Description, req.Content, req.ReportData,
+		documentID, folderID, projectID, orgID, userID, &reportID,
+	).Scan(&reportID)
+
+	if err != nil {
+		log.Printf("Error creating report: %v", err)
+		http.Error(w, "Failed to create report: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Report created with ID: %s", reportID)
+
+	// Return report ID
+	w.Header().Set("Content-Type", "application/json")
+	log.Println("Sending response")
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"id": reportID.String(),
+	}); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
+}
+
+func handleUpdateReport(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get report ID from path
+	vars := mux.Vars(r)
+	reportID, err := uuid.Parse(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid report ID", http.StatusBadRequest)
+		return
+	}
+
+	// Parse request body
+	var req ReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID from email
+	var userID uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user has permission to update this report
+	var canUpdate bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM rdm.reports r
+            LEFT JOIN rdm.report_permissions rp ON r.id = rp.report_id
+            WHERE r.id = $1 AND (
+                r.created_by = $2 OR 
+                (rp.user_id = $2 AND rp.can_edit = true)
+            )
+        )
+    `, reportID, userID).Scan(&canUpdate)
+
+	if err != nil {
+		http.Error(w, "Failed to check permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !canUpdate {
+		http.Error(w, "Permission denied", http.StatusForbidden)
+		return
+	}
+
+	// Prepare nullable fields
+	var documentID, folderID, projectID interface{}
+	if req.DocumentID != nil {
+		documentID, err = uuid.Parse(*req.DocumentID)
+		if err != nil {
+			http.Error(w, "Invalid document ID", http.StatusBadRequest)
+			return
+		}
+	}
+	if req.FolderID != nil {
+		folderID, err = uuid.Parse(*req.FolderID)
+		if err != nil {
+			http.Error(w, "Invalid folder ID", http.StatusBadRequest)
+			return
+		}
+	}
+	if req.ProjectID != nil {
+		projectID, err = uuid.Parse(*req.ProjectID)
+		if err != nil {
+			http.Error(w, "Invalid project ID", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Update report
+	_, err = db.Exec(`
+        CALL rdm.update_report(
+            $1, $2, $3, $4, $5, $6, $7, $8, $9
+        )
+    `,
+		reportID, req.Name, req.Description, req.Content, req.ReportData,
+		documentID, folderID, projectID, userID,
+	)
+
+	if err != nil {
+		http.Error(w, "Failed to update report: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{
+		"success": true,
+	})
+}
+
+func handleDeleteReport(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get report ID from path
+	vars := mux.Vars(r)
+	reportID, err := uuid.Parse(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid report ID", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID from email
+	var userID uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user has permission to delete this report
+	var canDelete bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM rdm.reports r
+            LEFT JOIN rdm.report_permissions rp ON r.id = rp.report_id
+            WHERE r.id = $1 AND (
+                r.created_by = $2 OR 
+                (rp.user_id = $2 AND rp.can_delete = true)
+            )
+        )
+    `, reportID, userID).Scan(&canDelete)
+
+	if err != nil {
+		http.Error(w, "Failed to check permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !canDelete {
+		http.Error(w, "Permission denied", http.StatusForbidden)
+		return
+	}
+
+	// Delete report
+	_, err = db.Exec(`CALL rdm.delete_report($1, $2)`, reportID, userID)
+
+	if err != nil {
+		http.Error(w, "Failed to delete report: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{
+		"success": true,
+	})
+}
+
+func handleAddChartToReport(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get report ID from path
+	vars := mux.Vars(r)
+	reportID, err := uuid.Parse(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid report ID", http.StatusBadRequest)
+		return
+	}
+
+	// Parse request body
+	var req ReportChartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Convert chart ID to UUID
+	chartID, err := uuid.Parse(req.ChartID)
+	if err != nil {
+		http.Error(w, "Invalid chart ID", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID from email
+	var userID uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user has permission to update this report
+	var canUpdate bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM rdm.reports r
+            LEFT JOIN rdm.report_permissions rp ON r.id = rp.report_id
+            WHERE r.id = $1 AND (
+                r.created_by = $2 OR 
+                (rp.user_id = $2 AND rp.can_edit = true)
+            )
+        )
+    `, reportID, userID).Scan(&canUpdate)
+
+	if err != nil {
+		http.Error(w, "Failed to check permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !canUpdate {
+		http.Error(w, "Permission denied", http.StatusForbidden)
+		return
+	}
+
+	// Add chart to report
+	_, err = db.Exec(`
+        CALL rdm.add_chart_to_report($1, $2, $3)
+    `, reportID, chartID, req.Position)
+
+	if err != nil {
+		http.Error(w, "Failed to add chart to report: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{
+		"success": true,
+	})
+}
+
+func handleRemoveChartFromReport(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get report and chart IDs from path
+	vars := mux.Vars(r)
+	reportID, err := uuid.Parse(vars["reportId"])
+	if err != nil {
+		http.Error(w, "Invalid report ID", http.StatusBadRequest)
+		return
+	}
+
+	chartID, err := uuid.Parse(vars["chartId"])
+	if err != nil {
+		http.Error(w, "Invalid chart ID", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID from email
+	var userID uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user has permission to update this report
+	var canUpdate bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM rdm.reports r
+            LEFT JOIN rdm.report_permissions rp ON r.id = rp.report_id
+            WHERE r.id = $1 AND (
+                r.created_by = $2 OR 
+                (rp.user_id = $2 AND rp.can_edit = true)
+            )
+        )
+    `, reportID, userID).Scan(&canUpdate)
+
+	if err != nil {
+		http.Error(w, "Failed to check permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !canUpdate {
+		http.Error(w, "Permission denied", http.StatusForbidden)
+		return
+	}
+
+	// Remove chart from report
+	_, err = db.Exec(`
+        CALL rdm.remove_chart_from_report($1, $2)
+    `, reportID, chartID)
+
+	if err != nil {
+		http.Error(w, "Failed to remove chart from report: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{
+		"success": true,
+	})
+}
+
+func handleReorderReportCharts(w http.ResponseWriter, r *http.Request) {
+	claims := r.Context().Value(claimsKey).(*Claims)
+
+	// Get report ID from path
+	vars := mux.Vars(r)
+	reportID, err := uuid.Parse(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid report ID", http.StatusBadRequest)
+		return
+	}
+
+	// Parse request body - expecting an array of chart positions
+	var positions []ReportChartRequest
+	if err := json.NewDecoder(r.Body).Decode(&positions); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Get user ID from email
+	var userID uuid.UUID
+	err = db.QueryRow("SELECT id FROM auth.users WHERE email = $1", claims.Username).Scan(&userID)
+	if err != nil {
+		http.Error(w, "Failed to get user ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user has permission to update this report
+	var canUpdate bool
+	err = db.QueryRow(`
+        SELECT EXISTS (
+            SELECT 1 FROM rdm.reports r
+            LEFT JOIN rdm.report_permissions rp ON r.id = rp.report_id
+            WHERE r.id = $1 AND (
+                r.created_by = $2 OR 
+                (rp.user_id = $2 AND rp.can_edit = true)
+            )
+        )
+    `, reportID, userID).Scan(&canUpdate)
+
+	if err != nil {
+		http.Error(w, "Failed to check permissions", http.StatusInternalServerError)
+		return
+	}
+
+	if !canUpdate {
+		http.Error(w, "Permission denied", http.StatusForbidden)
+		return
+	}
+
+	// Convert positions to JSON array for DB procedure
+	positionsJSON, err := json.Marshal(positions)
+	if err != nil {
+		http.Error(w, "Failed to marshal positions", http.StatusInternalServerError)
+		return
+	}
+
+	// Reorder charts in report
+	_, err = db.Exec(`
+        CALL rdm.reorder_report_charts($1, $2)
+    `, reportID, positionsJSON)
+
+	if err != nil {
+		http.Error(w, "Failed to reorder charts: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{
+		"success": true,
+	})
+}
+
 // isProjectAdmin checks if a user is an admin of a project
 func isProjectAdmin(email, projectID string) (bool, error) {
 	var isAdmin bool
@@ -18590,6 +19815,19 @@ func main() {
 	// Document Insights
 	r.HandleFunc("/api/extract-tables", authMiddleware(handleExtractTables)).Methods("POST")
 	r.HandleFunc("/api/chat-with-document", authMiddleware(handleChatWithDocument)).Methods("POST")
+	r.HandleFunc("/api/charts", authMiddleware(handleGetCharts)).Methods("GET")
+	r.HandleFunc("/api/charts", authMiddleware(handleCreateChart)).Methods("POST")
+	r.HandleFunc("/api/charts/{id}", authMiddleware(handleUpdateChart)).Methods("PUT")
+	r.HandleFunc("/api/charts/{id}", authMiddleware(handleDeleteChart)).Methods("DELETE")
+
+	r.HandleFunc("/api/reports", authMiddleware(handleGetReports)).Methods("GET")
+	r.HandleFunc("/api/reports", authMiddleware(handleCreateReport)).Methods("POST")
+	r.HandleFunc("/api/reports/{id}", authMiddleware(handleGetReport)).Methods("GET")
+	r.HandleFunc("/api/reports/{id}", authMiddleware(handleUpdateReport)).Methods("PUT")
+	r.HandleFunc("/api/reports/{id}", authMiddleware(handleDeleteReport)).Methods("DELETE")
+	r.HandleFunc("/api/reports/{id}/charts", authMiddleware(handleAddChartToReport)).Methods("POST")
+	r.HandleFunc("/api/reports/{reportId}/charts/{chartId}", authMiddleware(handleRemoveChartFromReport)).Methods("DELETE")
+	r.HandleFunc("/api/reports/{id}/charts/reorder", authMiddleware(handleReorderReportCharts)).Methods("PUT")
 
 	// Invitation routes
 	r.HandleFunc("/api/organizations/{organizationId}/invite", authMiddleware(handleInviteUser)).Methods("POST")

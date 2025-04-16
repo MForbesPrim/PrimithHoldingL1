@@ -77,6 +77,8 @@ import {
 import {
   Checkbox
 } from "@/components/ui/checkbox"
+import ChartService, { ChartData } from "@/services/chartService";
+import { useOrganization } from "@/components/pages/rdm/context/organizationContext";
 
 // Sample data for demonstration
 const sampleData = [
@@ -118,6 +120,15 @@ interface ChartStyles {
     horizontal: 'left' | 'center' | 'right';
     layout: 'horizontal' | 'vertical';
   };
+}
+
+interface ChartingProps {
+  chartName?: string;
+  savedChartData?: ChartData;
+  originalSavedAt?: string;
+  viewOnly?: boolean;
+  organizationId?: string;
+  onSave?: () => void;
 }
 
 // Add interface for column definition with formula support
@@ -246,22 +257,15 @@ const evaluateFormula = (formula: string, rowData: any, allData: any[]): number 
     }
 };
 
-interface SavedChart {
-  name: string;
-  chartType: string;
-  chartData: any[];
-  chartStyles: any;
-  columns: any[];
-  groupByConfig: any;
-  savedAt: string;
-}
-
-export function Charting({ chartName, savedChartData, originalSavedAt, viewOnly = false }: { 
-  chartName?: string;
-  savedChartData?: SavedChart;
-  originalSavedAt?: string;
-  viewOnly?: boolean;
-}) {
+export function Charting({ 
+  chartName, 
+  savedChartData, 
+  originalSavedAt, 
+  viewOnly = false,
+  organizationId,
+  onSave
+}: ChartingProps) {
+  const { selectedOrgId } = useOrganization();
   const [_file, _setFile] = useState<File | null>(null)
   const [isLoading, _setIsLoading] = useState(false)
   const [chartType, setChartType] = useState<string>("bar")
@@ -287,6 +291,8 @@ export function Charting({ chartName, savedChartData, originalSavedAt, viewOnly 
       layout: 'horizontal'
     }
   })
+
+  const effectiveOrgId = organizationId || selectedOrgId;
 
   // Add state for columns
   const [columns, setColumns] = useState<ColumnDef[]>([
@@ -2011,68 +2017,81 @@ export function Charting({ chartName, savedChartData, originalSavedAt, viewOnly 
     setChartData(newData);
   };
 
-  const handleSaveChart = () => {
-    if (!chartData.length || !columns.length) {
+  const handleSaveChart = async () => {
+    if (!chartData.length || !columns.length || viewOnly) {
       toast({
         title: "Cannot Save Chart",
         description: "Please add some data and configure columns before saving.",
         variant: "destructive",
-      })
-      return
+      });
+      return;
     }
 
-    // Get existing saved charts
-    const existingSavedCharts = JSON.parse(localStorage.getItem('savedCharts') || '[]')
-    
-    const chartToSave = {
-      name: chartName || 'Untitled Chart',
-      chartType,
-      chartData,
-      chartStyles,
-      columns,
-      groupByConfig,
-      savedAt: originalSavedAt || new Date().toISOString()
-    }
-
-    let updatedCharts
-    if (originalSavedAt) {
-      // Update existing chart
-      updatedCharts = existingSavedCharts.map((chart: SavedChart) => 
-        chart.savedAt === originalSavedAt ? chartToSave : chart
-      )
+    if (!effectiveOrgId) {
       toast({
-        title: "Chart Updated",
-        description: "Your changes have been saved.",
-        duration: 2000,
-      })
-    } else {
-      // Save new chart
-      updatedCharts = [...existingSavedCharts, chartToSave]
-      toast({
-        title: "Chart Saved",
-        description: "Your chart has been saved successfully.",
-        duration: 2000,
-      })
+        title: "Cannot Save Chart",
+        description: "Organization ID is required to save a chart.",
+        variant: "destructive",
+      });
+      return;
     }
 
-    // Save to localStorage
-    localStorage.setItem('savedCharts', JSON.stringify(updatedCharts))
-    
-    // Update the current savedChartData if this was an edit
-    if (originalSavedAt) {
+    try {
+      const chartToSave: ChartData = {
+        name: chartName || 'Untitled Chart',
+        chartType,
+        chartData,
+        chartStyles,
+        columns,
+        groupByConfig,
+      };
+
+      let chartId: string;
+      
+      if (originalSavedAt) {
+        // Update existing chart
+        await ChartService.updateChart(originalSavedAt, chartToSave);
+        chartId = originalSavedAt;
+        toast({
+          title: "Chart Updated",
+          description: "Your changes have been saved.",
+          duration: 2000,
+        });
+      } else {
+        // Save new chart
+        chartId = await ChartService.createChart(chartToSave, effectiveOrgId);
+        toast({
+          title: "Chart Saved",
+          description: "Your chart has been saved successfully.",
+          duration: 2000,
+        });
+      }
+
       // Create and dispatch a custom event with the updated chart data
       const updateEvent = new CustomEvent('chartUpdated', {
         detail: {
-          savedAt: originalSavedAt,
-          updatedChart: chartToSave
+          savedAt: chartId,
+          updatedChart: {
+            ...chartToSave,
+            id: chartId,
+          }
         }
       });
       window.dispatchEvent(updateEvent);
-    } else {
-      // For new charts, just trigger the regular update
-      window.dispatchEvent(new Event('savedChartsUpdated'))
+
+      // Call onSave callback if provided
+      if (onSave) {
+        onSave();
+      }
+    } catch (error) {
+      console.error('Error saving chart:', error);
+      toast({
+        title: "Error",
+        description: "Failed to save chart. Please try again.",
+        variant: "destructive",
+      });
     }
-  }
+  };
 
   // Add new type for simplified legend position
   type SimpleLegendPosition = 'bottom' | 'top' | 'left' | 'right';

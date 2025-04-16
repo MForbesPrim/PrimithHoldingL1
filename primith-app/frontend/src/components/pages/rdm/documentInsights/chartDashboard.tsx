@@ -1,99 +1,124 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Button } from "@/components/ui/button"
-import { ArrowLeft, ChevronDown, Plus, FileText, Pencil, Trash2, Edit2, Eye } from "lucide-react"
-import { useNavigate } from "react-router-dom"
-import { Charting } from "./charting"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
-import { Input } from "@/components/ui/input"
-import { useState, useEffect } from "react"
-import { Card, CardContent } from "@/components/ui/card"
-import { useToast } from "@/hooks/use-toast"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { ArrowLeft, ChevronDown, Plus, FileText, Pencil, Trash2, Edit2, Eye } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Charting } from "./charting";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import { useToast } from "@/hooks/use-toast";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import ChartService, { ChartData, ReportData } from "@/services/chartService";
+import { useOrganization } from "@/components/pages/rdm/context/organizationContext";
 
 interface ChartItem {
   id: string;
   name: string;
   isOpen: boolean;
   isEditing: boolean;
-  savedChartData?: SavedChart;
+  savedChartData?: ChartData & { savedAt: string };
   originalSavedAt?: string;
 }
 
-interface SavedChart {
-  name: string;
-  chartType: string;
-  chartData: any[];
-  chartStyles: any;
-  columns: any[];
-  groupByConfig: any;
-  savedAt: string;
-}
-
 export function ChartDashboard() {
-  const navigate = useNavigate()
+  const navigate = useNavigate();
+  const { selectedOrgId } = useOrganization();
   const [charts, setCharts] = useState<ChartItem[]>([
     { id: '1', name: 'New Chart', isOpen: true, isEditing: false }
-  ])
-  const [savedCharts, setSavedCharts] = useState<SavedChart[]>([])
-  const [activeTab, setActiveTab] = useState("create-chart")
-  const { toast } = useToast()
+  ]);
+  const [savedCharts, setSavedCharts] = useState<(ChartData & { savedAt: string })[]>([]);
+  const [savedReports, setSavedReports] = useState<ReportData[]>([]);
+  const [activeTab, setActiveTab] = useState("create-chart");
+  const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Load saved charts initially and set up localStorage event listener
+  // Load saved charts when organization changes
   useEffect(() => {
-    const loadSavedCharts = () => {
-      const storedCharts = localStorage.getItem('savedCharts')
-      if (storedCharts) {
-        try {
-          setSavedCharts(JSON.parse(storedCharts))
-        } catch (error) {
-          console.error('Error loading saved charts:', error)
-          toast({
-            title: "Error",
-            description: "Failed to load saved charts.",
-            variant: "destructive",
-          })
-        }
+    if (selectedOrgId) {
+      if (activeTab === "saved-charts") {
+        loadSavedCharts();
+      } else if (activeTab === "saved-reports") {
+        loadSavedReports();
       }
     }
+  }, [selectedOrgId, activeTab]);
 
-    // Load initial data
-    loadSavedCharts()
-
-    // Set up storage event listener for cross-tab updates
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'savedCharts') {
-        loadSavedCharts()
-      }
+  const loadSavedReports = async () => {
+    if (!selectedOrgId) {
+      console.log('Cannot load reports: No organization ID available');
+      setSavedReports([]);
+      return;
     }
+  
+    setIsLoading(true);
+    try {
+      const reports = await ChartService.getReports(selectedOrgId);
+      // Ensure we handle null/undefined response
+      setSavedReports(reports || []);
+    } catch (error) {
+      console.error('Error loading saved reports:', error);
+      setSavedReports([]);
+      toast({
+        title: "Error",
+        description: "Failed to load saved reports.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    // Handle chart updates
-    const handleChartUpdate = (e: CustomEvent<{ savedAt: string; updatedChart: SavedChart }>) => {
+  const loadSavedCharts = async () => {
+    if (!selectedOrgId) {
+      console.log('Cannot load charts: No organization ID available');
+      setSavedCharts([]);
+      return;
+    }
+  
+    console.log(`Loading saved charts for organization: ${selectedOrgId}`);
+    setIsLoading(true);
+    try {
+      const charts = await ChartService.getCharts(selectedOrgId);
+      console.log('Fetched charts:', charts);
+  
+      // Ensure we handle null/undefined response
+      if (!charts) {
+        console.log('No charts returned from API');
+        setSavedCharts([]);
+        return;
+      }
+  
+      // Ensure all date fields are strings
+      const chartsWithStringDates = charts.map(chart => ({
+        ...chart,
+        createdAt: chart.createdAt?.toString() || new Date().toISOString(),
+        updatedAt: chart.updatedAt?.toString() || new Date().toISOString(),
+        savedAt: chart.savedAt || new Date().toISOString()
+      }));
+  
+      setSavedCharts(chartsWithStringDates);
+    } catch (error) {
+      console.error('Error loading saved charts:', error);
+      setSavedCharts([]);
+      toast({
+        title: "Error",
+        description: "Failed to load saved charts.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Event listener for chart updates
+  useEffect(() => {
+    const handleChartUpdate = (e: CustomEvent<{ savedAt: string; updatedChart: ChartData & { savedAt: string } }>) => {
       const { savedAt, updatedChart } = e.detail;
-      
+
       // Update savedCharts state
-      setSavedCharts(current => 
+      setSavedCharts(current =>
         current.map(chart => chart.savedAt === savedAt ? updatedChart : chart)
       );
 
@@ -113,20 +138,16 @@ export function ChartDashboard() {
     };
 
     // Set up event listeners
-    window.addEventListener('storage', handleStorageChange)
-    window.addEventListener('savedChartsUpdated', loadSavedCharts)
-    window.addEventListener('chartUpdated', handleChartUpdate as EventListener)
+    window.addEventListener('chartUpdated', handleChartUpdate as EventListener);
 
     return () => {
-      window.removeEventListener('storage', handleStorageChange)
-      window.removeEventListener('savedChartsUpdated', loadSavedCharts)
-      window.removeEventListener('chartUpdated', handleChartUpdate as EventListener)
-    }
-  }, [])
+      window.removeEventListener('chartUpdated', handleChartUpdate as EventListener);
+    };
+  }, []);
 
   const handleBack = () => {
-    navigate("/rdm/document-insights")
-  }
+    navigate("/rdm/document-insights");
+  };
 
   const handleAddChart = () => {
     const newChart = {
@@ -134,68 +155,78 @@ export function ChartDashboard() {
       name: `New Chart`,
       isOpen: true,
       isEditing: false
-    }
+    };
     // Close all existing charts and add the new one
-    setCharts([...charts.map(chart => ({ ...chart, isOpen: false })), newChart])
-  }
+    setCharts([...charts.map(chart => ({ ...chart, isOpen: false })), newChart]);
+    // Switch to create-chart tab
+    setActiveTab("create-chart");
+  };
 
   const handleRemoveChart = (chartId: string) => {
-    setCharts(charts.filter(chart => chart.id !== chartId))
+    setCharts(charts.filter(chart => chart.id !== chartId));
     toast({
       title: "Chart Removed",
       description: "The chart has been removed from the dashboard.",
       duration: 2000,
-    })
-  }
+    });
+  };
 
   const toggleChart = (chartId: string) => {
-    setCharts(charts.map(chart => 
+    setCharts(charts.map(chart =>
       chart.id === chartId ? { ...chart, isOpen: !chart.isOpen } : chart
-    ))
-  }
+    ));
+  };
 
   const handleEditName = (chartId: string) => {
     setCharts(charts.map(chart =>
       chart.id === chartId ? { ...chart, isEditing: true } : chart
-    ))
-  }
+    ));
+  };
 
   const handleNameChange = (chartId: string, newName: string) => {
     setCharts(charts.map(chart =>
       chart.id === chartId ? { ...chart, name: newName, isEditing: false } : chart
-    ))
-  }
+    ));
+  };
 
   const handleNameKeyDown = (e: React.KeyboardEvent, chartId: string, newName: string) => {
     if (e.key === 'Enter') {
-      handleNameChange(chartId, newName)
+      handleNameChange(chartId, newName);
     }
-  }
+  };
 
   const handleCreateReport = () => {
-    navigate("/rdm/document-insights/report")
-  }
+    navigate("/rdm/document-insights/report");
+  };
 
-  const handleDeleteChart = (index: number) => {
-    const updatedCharts = [...savedCharts]
-    updatedCharts.splice(index, 1)
-    localStorage.setItem('savedCharts', JSON.stringify(updatedCharts))
-    setSavedCharts(updatedCharts)
-    
-    // Dispatch event to notify other components
-    window.dispatchEvent(new Event('savedChartsUpdated'))
-    
-    toast({
-      title: "Chart Deleted",
-      description: "The chart has been removed from saved charts.",
-      duration: 2000,
-    })
-  }
+  const handleDeleteChart = async (chartId: string) => {
+    if (!chartId) return;
 
-  const handleEditSavedChart = (chart: SavedChart) => {
+    try {
+      await ChartService.deleteChart(chartId);
+      await loadSavedCharts(); // Reload charts after deletion
+
+      toast({
+        title: "Chart Deleted",
+        description: "The chart has been removed from saved charts.",
+        duration: 2000,
+      });
+    } catch (error) {
+      console.error('Error deleting chart:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete chart.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleEditSavedChart = (chart: ChartData & { savedAt: string }) => {
+    if (!chart.savedAt) return;
+
     // Check if this chart is already open
     const existingChartIndex = charts.findIndex(c => c.originalSavedAt === chart.savedAt);
-    
+
     if (existingChartIndex !== -1) {
       // Chart is already open, just focus it and close others
       setCharts(charts.map((c, index) => ({
@@ -211,24 +242,51 @@ export function ChartDashboard() {
         isEditing: false,
         savedChartData: chart,
         originalSavedAt: chart.savedAt
-      }
+      };
       // Close all existing charts and add the new one
-      setCharts([...charts.map(c => ({ ...c, isOpen: false })), newChart])
+      setCharts([...charts.map(c => ({ ...c, isOpen: false })), newChart]);
     }
-    
+
     // Switch to the create-chart tab
-    setActiveTab("create-chart")
-  }
+    setActiveTab("create-chart");
+  };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Invalid date';
+    }
+  };
+
+  const handleDeleteReport = async (reportId: string) => {
+    if (!reportId) return;
+
+    try {
+      await ChartService.deleteReport(reportId);
+      await loadSavedReports();
+
+      toast({
+        title: "Report Deleted",
+        description: "The report has been removed from saved reports.",
+        duration: 2000,
+      });
+    } catch (error) {
+      console.error('Error deleting report:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete report.",
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <div className="container mx-auto py-6 pr-6">
@@ -252,7 +310,13 @@ export function ChartDashboard() {
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs
+            value={activeTab}
+            onValueChange={(value) => {
+                setActiveTab(value);
+            }}
+            className="w-full"
+            >
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="create-chart">Create Chart</TabsTrigger>
             <TabsTrigger value="saved-charts">Saved Charts</TabsTrigger>
@@ -325,26 +389,32 @@ export function ChartDashboard() {
                     </CollapsibleTrigger>
                   </div>
                 </div>
-                
+
                 <CollapsibleContent className="mt-1">
-                  <Charting 
-                    chartName={chart.name} 
-                    savedChartData={chart.savedChartData} 
+                  <Charting
+                    chartName={chart.name}
+                    savedChartData={chart.savedChartData}
                     originalSavedAt={chart.originalSavedAt}
+                    organizationId={selectedOrgId}
+                    onSave={loadSavedCharts}
                   />
                 </CollapsibleContent>
               </Collapsible>
             ))}
           </TabsContent>
           <TabsContent value="saved-charts">
-            {savedCharts.length === 0 ? (
+            {isLoading ? (
+              <div className="flex items-center justify-center h-[200px]">
+                <div className="animate-spin h-10 w-10 border-t-2 border-primary rounded-full"></div>
+              </div>
+            ) : savedCharts.length === 0 ? (
               <div className="flex items-center justify-center h-[200px] text-muted-foreground">
                 No saved charts yet. Create and save a chart to see it here.
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {savedCharts.map((chart, index) => (
-                  <Card key={index} className="relative">
+                {savedCharts.map((chart) => (
+                  <Card key={chart.id} className="relative">
                     <CardContent className="pt-6">
                       <div className="flex flex-col gap-2">
                         <div className="flex items-center justify-between">
@@ -371,7 +441,7 @@ export function ChartDashboard() {
                                   </DialogDescription>
                                 </DialogHeader>
                                 <div className="flex-1 min-h-[450px]">
-                                  <Charting 
+                                  <Charting
                                     chartName={chart.name}
                                     savedChartData={chart}
                                     viewOnly={true}
@@ -387,18 +457,37 @@ export function ChartDashboard() {
                             >
                               <Edit2 className="h-4 w-4" />
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDeleteChart(index)}
-                              className="h-8 w-8 p-0"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete Chart</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Are you sure you want to permanently delete this chart?
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => chart.id && handleDeleteChart(chart.id)}
+                                  >
+                                    Delete
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
                           </div>
                         </div>
                         <p className="text-sm text-muted-foreground">
-                          Saved on {formatDate(chart.savedAt)}
+                          {chart.createdAt && `Saved on ${formatDate(chart.createdAt)}`}
                         </p>
                       </div>
                     </CardContent>
@@ -408,12 +497,88 @@ export function ChartDashboard() {
             )}
           </TabsContent>
           <TabsContent value="saved-reports">
-            <div className="flex items-center justify-center h-[200px] text-muted-foreground">
-              Saved reports feature coming soon...
-            </div>
+            {isLoading ? (
+              <div className="flex items-center justify-center h-[200px]">
+                <div className="animate-spin h-10 w-10 border-t-2 border-primary rounded-full"></div>
+              </div>
+            ) : savedReports.length === 0 ? (
+              <div className="flex items-center justify-center h-[200px] text-muted-foreground">
+                No saved reports yet. Click 'Create Report' to make a new report.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {savedReports.map((report) => (
+                  <Card key={report.id} className="relative">
+                    <CardContent className="pt-6">
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="font-medium">{report.name}</h3>
+                            <p className="text-sm text-muted-foreground">
+                              {report.chartCount || 0} Charts
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => navigate(`/rdm/document-insights/report/${report.id}`)}
+                              className="h-8 w-8 p-0"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => navigate(`/rdm/document-insights/report/${report.id}/edit`)}
+                              className="h-8 w-8 p-0"
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete Report</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Are you sure you want to permanently delete this report?
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => report.id && handleDeleteReport(report.id)}
+                                  >
+                                    Delete
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {report.createdAt && `Created on ${formatDate(report.createdAt.toString())}`}
+                        </p>
+                        {report.description && (
+                          <p className="text-sm mt-2">{report.description}</p>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>
     </div>
-  )
-} 
+  );
+}

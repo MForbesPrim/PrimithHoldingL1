@@ -104,6 +104,8 @@ function App() {
                     <Route path="/rdm/document-insights/chart-dashboard" element={<ChartDashboard />} />
                     <Route path="/rdm/document-insights/charting" element={<Charting />} />
                     <Route path="/rdm/document-insights/report" element={<ChartReport />} />
+                    <Route path="/rdm/document-insights/report/:reportId" element={<ChartReport />} />
+                    <Route path="/rdm/document-insights/report/:reportId/edit" element={<ChartReport />} />
                     <Route path="/rdm/collaborators" element={<CollaboratorsPage />} />
                     <Route path="/rdm/create-template" element={<CreateTemplate />} />
                     <Route path="/rdm/pages/templates/edit/:id" element={<EditTemplate />} />
