@@ -18271,7 +18271,7 @@ type ReportRequest struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Content     string          `json:"content"`
-	ReportData  json.RawMessage `json:"reportData,omitempty"`
+	ReportData  json.RawMessage `json:"report_data"`
 	DocumentID  *string         `json:"documentId,omitempty"`
 	FolderID    *string         `json:"folderId,omitempty"`
 	ProjectID   *string         `json:"projectId,omitempty"`
@@ -19000,6 +19000,10 @@ func handleCreateReport(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Organization ID from query: %s", orgIDStr)
 
+	if len(req.ReportData) == 0 {
+		req.ReportData = nil
+	}
+
 	// Convert organization ID to UUID
 	orgID, err := uuid.Parse(orgIDStr)
 	if err != nil {
@@ -19098,6 +19102,10 @@ func handleUpdateReport(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
+	}
+
+	if len(req.ReportData) == 0 {
+		req.ReportData = nil
 	}
 
 	// Get user ID from email

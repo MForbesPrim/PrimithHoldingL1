@@ -344,24 +344,21 @@ export interface ChartData {
         throw new Error('Report ID is required');
       }
       
-      const headers = await this.getAuthHeader();
-      
-      // Map the field names to match the database schema
-      const reportData = {
-        name: report.name,
+      const body = {
+        name:        report.name,
         description: report.description,
-        content: report.content,
-        report_data: report.reportData,
-        document_id: report.documentId,
-        folder_id: report.folderId,
-        project_id: report.projectId
+        content:     report.content,
+        // Send either a valid object or *null* – never undefined / ''.
+        report_data: report.reportData ?? null,
+        document_id: report.documentId ?? null,
+        folder_id:   report.folderId  ?? null,
+        project_id:  report.projectId ?? null,
       };
-
+      
       const response = await fetch(`${this.baseUrl}/api/reports/${reportId}`, {
-        method: 'PUT',
-        credentials: 'include',
-        headers,
-        body: JSON.stringify(reportData)
+        method : 'PUT',
+        headers: await this.getAuthHeader(),
+        body   : JSON.stringify(body),
       });
       
       if (!response.ok) {
