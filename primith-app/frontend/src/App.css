@@ -177,3 +177,53 @@
   color: #3b82f6; /* Blue text */
   box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.1); /* Blue ring */
 }
+
+/* 1) Make the <li> itself a flex container and center everything vertically */
+.ProseMirror ul[data-type="taskList"] > li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;               /* space between checkbox and text */
+}
+
+/* 2) Ensure the <label> (with the <input>) also flex‑centers its contents */
+.ProseMirror ul[data-type="taskList"] > li > label {
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+
+/* 3) Do the same for the wrapping <div> around your <p> */
+.ProseMirror ul[data-type="taskList"] > li > div {
+  display: flex;
+  align-items: center;
+  flex: 1;                   /* fill remaining width */
+  margin: 0;
+}
+
+/* 4) Kill the default paragraph margins inside the task‑list item */
+.ProseMirror ul[data-type="taskList"] > li > div p {
+  margin: 0;
+  line-height: 1.2;          /* tweak as needed for perfect alignment */
+}
+
+/* 5) Finally, nudge the native checkbox into the middle of its line‑box */
+.ProseMirror ul[data-type="taskList"] input[type="checkbox"] {
+  vertical-align: middle;
+  margin: 0;
+}
+
+
+.ProseMirror ul[data-type="taskList"] li > div p {
+  margin-top:    0 !important;
+  margin-bottom: 0 !important;
+}
+
+.search-highlight {
+  /* light blue at 30% opacity */
+  background-color: rgba(0, 191, 255, 0.3);
+}
+
+.search-highlight-current {
+  /* more vivid blue at 70% opacity */
+  background-color: rgba(0, 191, 255, 0.7);
+}
