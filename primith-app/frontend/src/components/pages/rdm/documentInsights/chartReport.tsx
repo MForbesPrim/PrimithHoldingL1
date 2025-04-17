@@ -184,6 +184,18 @@ function renderChartContent(reportData: ChartReport): ReactElement {
     />
   );
 
+  const legendTextShift = (label: string | number) => (
+    <span
+      style={{
+        display: 'inline-block',
+        position: 'relative',
+        top: '-5px', // <‑‑ push text 5 px higher
+      }}
+    >
+      {label}
+    </span>
+  );
+
   console.log('Rendering chart with type:', chartType); // Debug log
 
   const renderInnerContent = () => {
@@ -415,6 +427,7 @@ function renderChartContent(reportData: ChartReport): ReactElement {
                     fontSize: `${chartStyles.fontSize}px`,
                     padding: '10px'
                   }}
+                  formatter={legendTextShift} 
                 />
               )}
               {dataKeys.map((key, index) => (
