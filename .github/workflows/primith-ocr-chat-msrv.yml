@@ -1,0 +1,36 @@
+name: Build and Deploy Primith OCR Chat Container
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'primith-app/microservices/mistralOcr/**' # Trigger only for this service
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Login to Azure Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: primithcrprod.azurecr.io
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+        
+    - name: Build and push Mistral OCR image
+      uses: docker/build-push-action@v4
+      with:
+        context: ./primith-app/microservices/mistralOcr # Context for this service
+        push: true
+        tags: primithcrprod.azurecr.io/primith-ocr-chat:latest # Image name for this service
+        
+    - name: Deploy to Azure Web App
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: 'primith-ocr-chat' # Confirmed App Service name
+        publish-profile: ${{ secrets.AZURE_PRIMITH_OCR_CHAT_PUBLISH_PROFILE }} # Specific secret for this service
+        images: 'primithcrprod.azurecr.io/primith-ocr-chat:latest' # Image to deploy 
