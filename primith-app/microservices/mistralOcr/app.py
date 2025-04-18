@@ -604,7 +604,7 @@ async def health_check():
     # Could add a check for mistral_client initialization status
     status = "healthy"
     if not mistral_client:
-        status = "degraded: Mistral client not initialized"
+        status = "degraded: Mistral API client not initialized"
     logger.debug(f"Health check requested. Status: {status}")
     return {"status": status}
 
