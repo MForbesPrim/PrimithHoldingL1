@@ -1,5 +1,4 @@
 from urllib import request
-import requests
 import fastapi
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import PlainTextResponse # Return markdown as plain text
