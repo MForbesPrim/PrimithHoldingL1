@@ -18056,7 +18056,7 @@ func getMistralOcrServiceURL() (string, error) {
 	if environment == "production" {
 		url = os.Getenv("MISTRAL_OCR_SERVICE_URL")
 		if url == "" {
-			errMsg := "CRITICAL: Running in production but MISTRAL_OCR_SERVICE_URL env var is not set"
+			errMsg := "CRITICAL: Running in production but MISTRAL_OCR_SERVICE_URL env var not set"
 			log.Println(errMsg)
 			return "", errors.New(errMsg)
 		}
